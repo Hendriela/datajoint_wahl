@@ -58,7 +58,7 @@ class Licence(dj.Lookup):
 class Mouse(dj.Manual):
     definition = """ # Basic information about the Mouse
       -> Investigator                          # Link to investigator to which this mouse belongs
-      mouse_id      : int                      # Name of mouse (unique per investigator, without prefix)
+      mouse_id      : varchar(10)              # Name of mouse (unique per investigator)
       ---
       dob           : date                     # Day of birth (year-month-day)
       sex           : enum('M', 'F', 'U')      # Sex of mouse - Male, Female, or Unknown/Unclassified
@@ -112,8 +112,3 @@ class Surgery(dj.Manual):
     duration            : int            # Approximate duration of intervention, in minutes
     notes               : varchar(2048)  # Additional notes
     """
-
-    # example content (added with insert statement)
-    # contents = [
-    #     ['Brit', '2019-06-04', 'Window was not clear anymore'],
-    # ]
