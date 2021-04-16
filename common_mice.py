@@ -38,9 +38,6 @@ class Strain(dj.Lookup):
     ]
 
 
-dj.config["stores"] = {'localstore': {"protocol": "file", "location": "/"}}
-
-
 @schema
 class Licence(dj.Lookup):
     definition = """    # Licence and project ID under which the mouse is kept
@@ -50,6 +47,7 @@ class Licence(dj.Lookup):
     description     : varchar(512)      # Short description of the project
     document        : attach@localstore # Path to the locally stored PDF document of the licence
     """
+    # add contents manually to add licence file
     # contents = [
     #    ['241/2018-A', 'aswahl', 'Studying sensorimotor recovery after stroke', '???'],
     #    ['241/2018-B', 'aswahl', 'Studying cognitive impairment after stroke', '???']
@@ -92,6 +90,27 @@ class Sacrificed(dj.Manual):
     ---
     date_of_sacrifice   : date           # Date of sacrifice (year-month-day)
     reason              : varchar(1024)  # Comments
+    """
+
+    # example content (added with insert statement)
+    # contents = [
+    #     ['Brit', '2019-06-04', 'Window was not clear anymore'],
+    # ]
+
+@schema
+class Surgery(dj.Manual):
+    definition = """ # Table to keep track of surgeries on mice
+    -> Mouse
+    surgery_num         : int            # Surgery ID
+    ---
+    surgery_date        : datetime       # Date of intervention (year-month-day)
+    surgery_type        : varchar(2048)  # Description of surgery (e.g. "headmount implantation")
+    coordinates         : varchar(2048)  # Stereotaxic coordinates of intervention, if applicable
+    anesthesia          : varchar(2048)  # Type and dose of anesthesia used
+    weight_grams        : float          # Pre-op weight in grams
+    stroke_params       : varchar(2048)  # Stroke params such as illumination time, if applicable
+    duration            : int            # Approximate duration of intervention, in minutes
+    notes               : varchar(2048)  # Additional notes
     """
 
     # example content (added with insert statement)
