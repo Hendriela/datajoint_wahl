@@ -2,7 +2,7 @@
 
 import datajoint as dj
 
-schema = dj.schema('mice', locals(), create_tables = True)
+schema = dj.schema('common_mice', locals(), create_tables = True)
 
 @schema
 class Mouse(dj.Manual):
@@ -14,6 +14,7 @@ class Mouse(dj.Manual):
       sex           : enum('M', 'F', 'U')      # Sex of mouse - Male, Female, or Unknown/Unclassified
       batch         : int                      # Batch ID that this mouse belongs to (0 if no batch)
       -> Strain                                # Link to the genetic type of the mouse
+      genotype      : varchar(20)              # Genotype
       irats_id      : varchar(20)              # ID that is used in iRats (e.g. BJ5698 RR)
       cage_num      : int                      # Cage number
       ear_mark      : varchar(10)              # Actual ear mark
