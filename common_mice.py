@@ -1,26 +1,8 @@
 """Schema for mouse related information"""
 
 import datajoint as dj
+schema = dj.schema('common_mice', locals(), create_tables=True)
 
-schema = dj.schema('common_mice', locals(), create_tables = True)
-
-@schema
-class Mouse(dj.Manual):
-      definition = """ # Basic information about the Mouse
-      -> Investigator                          # Link to investigator to which this mouse belongs
-      mouse_id      : int                      # Name of mouse (unique per investigator, without prefix)
-      ---
-      dob           : date                     # Day of birth (year-month-day)
-      sex           : enum('M', 'F', 'U')      # Sex of mouse - Male, Female, or Unknown/Unclassified
-      batch         : int                      # Batch ID that this mouse belongs to (0 if no batch)
-      -> Strain                                # Link to the genetic type of the mouse
-      genotype      : varchar(20)              # Genotype
-      irats_id      : varchar(20)              # ID that is used in iRats (e.g. BJ5698 RR)
-      cage_num      : int                      # Cage number
-      ear_mark      : varchar(10)              # Actual ear mark
-      -> Licence                               # Link to project ID
-      info          : varchar(1024)            # Additional information about this mouse
-      """
 
 @schema
 class Investigator(dj.Lookup):
@@ -35,20 +17,6 @@ class Investigator(dj.Lookup):
         ['mpanze', 'Matteo Panzeri', 'panzeri@hifo.uzh.ch'],
         ['jnambi', 'Jithin Nambiar', 'nambiar@hifo.uzh.ch'],
         ['aswahl', 'Anna-Sophia Wahl', 'wahl@hifo.uzh.ch']
-    ]
-
-@schema
-class Licence(dj.Lookup):
-    definition = """    # Licence and project ID under which the mouse is kept
-    licence_id      : varchar(128)      # Licence ID with project suffix to keep it unique
-    ---
-    -> Investigator                     # Link to licence holder 
-    description     : varchar(512)      # Short description of the project
-    document        : attach@localstore # Path to the locally stored PDF document of the licence
-    """
-    contents = [
-        ['241/2018-A', 'aswahl', 'Studying sensorimotor recovery after stroke', '???'],
-        ['241/2018-B', 'aswahl', 'Studying cognitive impairment after stroke', '???']
     ]
 
 
@@ -69,6 +37,44 @@ class Strain(dj.Lookup):
         ['Snap25-GCaMPf', 'Snap-Cre;tTA-C;GCaP6 ', 'GCaMP6f', 'all'],
     ]
 
+
+dj.config["stores"] = {'localstore': {"protocol": "file", "location": "/"}}
+
+
+@schema
+class Licence(dj.Lookup):
+    definition = """    # Licence and project ID under which the mouse is kept
+    licence_id      : varchar(128)      # Licence ID with project suffix to keep it unique
+    ---
+    -> Investigator                     # Link to licence holder 
+    description     : varchar(512)      # Short description of the project
+    document        : attach@localstore # Path to the locally stored PDF document of the licence
+    """
+    # contents = [
+    #    ['241/2018-A', 'aswahl', 'Studying sensorimotor recovery after stroke', '???'],
+    #    ['241/2018-B', 'aswahl', 'Studying cognitive impairment after stroke', '???']
+    # ]
+
+
+@schema
+class Mouse(dj.Manual):
+    definition = """ # Basic information about the Mouse
+      -> Investigator                          # Link to investigator to which this mouse belongs
+      mouse_id      : int                      # Name of mouse (unique per investigator, without prefix)
+      ---
+      dob           : date                     # Day of birth (year-month-day)
+      sex           : enum('M', 'F', 'U')      # Sex of mouse - Male, Female, or Unknown/Unclassified
+      batch         : int                      # Batch ID that this mouse belongs to (0 if no batch)
+      -> Strain                                # Link to the genetic type of the mouse
+      genotype      : varchar(128)              # Genotype
+      irats_id      : varchar(20)              # ID that is used in iRats (e.g. BJ5698 RR)
+      cage_num      : int                      # Cage number
+      ear_mark      : varchar(10)              # Actual ear mark
+      -> Licence                               # Link to project ID
+      info          : varchar(1024)            # Additional information about this mouse
+      """
+
+
 @schema
 class Weight(dj.Manual):
     definition = """ # Table that stores the weights of individual mice
@@ -77,6 +83,7 @@ class Weight(dj.Manual):
     ---
     weight              : float          # Weight in grams
     """
+
 
 @schema
 class Sacrificed(dj.Manual):
@@ -91,4 +98,3 @@ class Sacrificed(dj.Manual):
     # contents = [
     #     ['Brit', '2019-06-04', 'Window was not clear anymore'],
     # ]
-
