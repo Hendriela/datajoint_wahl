@@ -2,7 +2,7 @@
 
 import datajoint as dj
 
-schema = dj.schema('mice', locals(), create_tables = True)
+schema = dj.schema('common_mice', locals(), create_tables = True)
 
 @schema
 class Mouse(dj.Manual):
@@ -90,4 +90,3 @@ class Sacrificed(dj.Manual):
     # contents = [
     #     ['Brit', '2019-06-04', 'Window was not clear anymore'],
     # ]
-
