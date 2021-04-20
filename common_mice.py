@@ -126,18 +126,10 @@ class Surgery(dj.Manual):
     weight              : float          # Pre-op weight in grams
     stroke_params       : varchar(2048)  # Stroke params such as illumination time, if applicable
     duration            : int            # Approximate duration of intervention, in minutes
+    -> Substance                         # Link to substance lookup table
+    volume              : int            # Injected volume in nanoliters
+    dilution            : varchar(128)   # Dilution or concentration of the substance
+    site                : varchar(128)   # Site of injection (Stereotaxic brain region, CCA, i.p. etc.)
+    coordinates         : varchar(512)   # Stereotaxic coordinates, if applicable
     notes               : varchar(2048)  # Additional notes
     """
-
-    class Injection(dj.Part):
-        definition = """ # Holds injection data for each surgery
-        -> Surgery
-        injection_num       : int            # Injection number for this surgery
-        ---
-        -> Substance                         # Link to substance lookup table
-        volume              : int            # Injected volume in nanoliters
-        dilution            : varchar(128)   # Dilution or concentration of the substance
-        site                : varchar(128)   # Site of injection (Stereotaxic brain region, CCA, i.p. etc.)
-        coordinates         : varchar(128)   # Stereotaxic coordinates of intervention, if applicable
-        notes               : varchar(2048)  # Additional notes
-        """
