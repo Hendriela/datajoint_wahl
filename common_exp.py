@@ -1,11 +1,10 @@
 """Schema for experimental information"""
 
 import datajoint as dj
-from . import common_mice, shared
-import login
+import common_mice as mice
 import os
 
-schema = dj.schema('exp', locals(), create_tables=True)
+schema = dj.schema('common_exp', locals(), create_tables=True)
 
 
 @schema

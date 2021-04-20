@@ -34,7 +34,7 @@ class Strain(dj.Lookup):
         ['Snap25-RCaMP', 'Snap-Cre;tTA-C;RCaMP', 'RCaMP', 'all'],
         ['L2/3-RCaMP', 'L2/3Cre;tTA-C;RCaMP', 'RCaMP', 'L2/3'],
         ['L2/3-GCaMP6f', 'L2/3Cre;tTA-C;GCa6f ', 'GCaMP6f', 'L2/3'],
-        ['Snap25-GCaMPf', 'Snap-Cre;tTA-C;GCaP6 ', 'GCaMP6f', 'all'],
+        ['Snap25-GCaMP6f', 'Snap-Cre;tTA-C;GCaP6 ', 'GCaMP6f', 'all'],
     ]
 
 
@@ -44,14 +44,14 @@ class Licence(dj.Lookup):
     licence_id      : varchar(128)      # Licence ID with project suffix to keep it unique
     ---
     -> Investigator                     # Link to licence holder 
-    description     : varchar(512)      # Short description of the project
-    document        : attach@localstore # Path to the locally stored PDF document of the licence
+    description     : varchar(512)      # Short description of the project    
     """
+    # TODO: document: attach @ localstore  # Path to the locally stored PDF document of the licence
     # add contents manually to add licence file
-    # contents = [
-    #    ['241/2018-A', 'aswahl', 'Studying sensorimotor recovery after stroke', '???'],
-    #    ['241/2018-B', 'aswahl', 'Studying cognitive impairment after stroke', '???']
-    # ]
+    contents = [
+       ['241/2018-A', 'aswahl', 'Studying sensorimotor recovery after stroke'],
+       ['241/2018-B', 'aswahl', 'Studying cognitive impairment after stroke']
+    ]
 
 
 @schema
@@ -64,7 +64,6 @@ class Mouse(dj.Manual):
       sex           : enum('M', 'F', 'U')      # Sex of mouse - Male, Female, or Unknown/Unclassified
       batch         : int                      # Batch ID that this mouse belongs to (0 if no batch)
       -> Strain                                # Link to the genetic type of the mouse
-      genotype      : varchar(128)              # Genotype
       irats_id      : varchar(20)              # ID that is used in iRats (e.g. BJ5698 RR)
       cage_num      : int                      # Cage number
       ear_mark      : varchar(10)              # Actual ear mark
@@ -97,18 +96,48 @@ class Sacrificed(dj.Manual):
     #     ['Brit', '2019-06-04', 'Window was not clear anymore'],
     # ]
 
+
+@schema
+class Substance(dj.Lookup):
+    definition = """  # Different substances that can be injected during a surgery
+    name            : varchar(128)      # Unique name of the substance
+    ---
+    full_name       : varchar(256)      # Long name of the substance
+    type            : varchar(128)      # Type of substance
+    supplier        : varchar(128)      # Supplier of the substance
+    datasheet       : varchar(256)      # Website of substance with additional information
+    """
+
+    contents = [
+       ['AAV9-hSyn-GCaMP6f', 'pAAV.Syn.GCaMP6f.WPRE.SV40', 'virus', 'addgene', 'https://www.addgene.org/100837/'],
+       ['endothelin', 'endothelin 1 (ET-1)', 'vasoconstrictor', 'Sigma', 'https://www.sigmaaldrich.com/catalog/product/sigma/e7764']
+    ]
+
+
 @schema
 class Surgery(dj.Manual):
     definition = """ # Table to keep track of surgeries on mice
     -> Mouse
-    surgery_num         : int            # Surgery ID
+    surgery_num         : int            # Surgery number for this animal
     ---
     surgery_date        : datetime       # Date of intervention (year-month-day)
     surgery_type        : varchar(2048)  # Description of surgery (e.g. "headmount implantation")
-    coordinates         : varchar(2048)  # Stereotaxic coordinates of intervention, if applicable
     anesthesia          : varchar(2048)  # Type and dose of anesthesia used
-    weight_grams        : float          # Pre-op weight in grams
+    weight              : float          # Pre-op weight in grams
     stroke_params       : varchar(2048)  # Stroke params such as illumination time, if applicable
     duration            : int            # Approximate duration of intervention, in minutes
     notes               : varchar(2048)  # Additional notes
     """
+
+    class Injection(dj.Part):
+        definition = """ # Holds injection data for each surgery
+        -> Surgery
+        injection_num       : int            # Injection number for this surgery
+        ---
+        -> Substance                         # Link to substance lookup table
+        volume              : int            # Injected volume in nanoliters
+        dilution            : varchar(128)   # Dilution or concentration of the substance
+        site                : varchar(128)   # Site of injection (Stereotaxic brain region, CCA, i.p. etc.)
+        coordinates         : varchar(128)   # Stereotaxic coordinates of intervention, if applicable
+        notes               : varchar(2048)  # Additional notes
+        """
