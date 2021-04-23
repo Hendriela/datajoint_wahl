@@ -102,7 +102,7 @@ class Sacrificed(dj.Manual):
 @schema
 class Substance(dj.Lookup):
     definition = """  # Different substances that can be injected during a surgery
-    name            : varchar(128)      # Unique name of the substance
+    substance_name  : varchar(128)      # Unique name of the substance
     ---
     full_name       : varchar(256)      # Long name of the substance
     type            : varchar(128)      # Type of substance
@@ -120,7 +120,7 @@ class Substance(dj.Lookup):
 class Surgery(dj.Manual):
     definition = """ # Table to keep track of surgeries on mice
     -> Mouse
-    surgery_num         : int            # Surgery number for this animal
+    surgery_num         : int            # Surgery number for this animal, start counting from 1
     ---
     surgery_date        : datetime       # Date of intervention (year-month-day)
     surgery_type        : varchar(2048)  # Description of surgery (e.g. "headmount implantation")
@@ -128,18 +128,19 @@ class Surgery(dj.Manual):
     weight              : float          # Pre-op weight in grams
     stroke_params       : varchar(2048)  # Stroke params such as illumination time, if applicable
     duration            : int            # Approximate duration of intervention, in minutes
-    notes               : varchar(2048)  # Additional notes
+    surgery_notes       : varchar(2048)  # Additional notes
     """
 
-    class Injection(dj.Part):
-        definition = """ # Holds injection data for each surgery
-        -> Surgery
-        injection_num       : int            # Injection number for this surgery
-        ---
-        -> Substance                         # Link to substance lookup table
-        volume              : int            # Injected volume in nanoliters
-        dilution            : varchar(128)   # Dilution or concentration of the substance
-        site                : varchar(128)   # Site of injection (Stereotaxic brain region, CCA, i.p. etc.)
-        coordinates         : varchar(128)   # Stereotaxic coordinates of intervention, if applicable
-        notes               : varchar(2048)  # Additional notes
-        """
+@schema
+class Injection(dj.Manual):
+    definition = """ # Holds injection data for each surgery
+    -> Surgery
+    injection_num       : int            # Injection number for this surgery, start counting from 1
+    ---
+    -> Substance                         # Link to substance lookup table
+    volume              : float          # Injected volume in microliters
+    dilution            : varchar(128)   # Dilution or concentration of the substance
+    site                : varchar(128)   # Site of injection (Stereotaxic brain region, CCA, i.p. etc.)
+    coordinates         : varchar(128)   # Stereotaxic coordinates of intervention, if applicable
+    injection_notes     : varchar(2048)  # Additional notes
+    """

@@ -24,9 +24,16 @@ Weight().insert1({"username": "hheise", "mouse_id": 1, "date_of_weight": "2021-0
 Weight().insert1({"username": "hheise", "mouse_id": 1, "date_of_weight": "2021-04-19", "weight": 20.4})
 Weight().insert1({"username": "hheise", "mouse_id": 1, "date_of_weight": "2021-04-20", "weight": 20.9})
 
-# Add surgeries (for now without Injection part table) TODO: figure out how to populate part tables
-# It might be useful to automatically add a weight entered in a different table (e.g. Surgery) to the Weight() table
+# Add surgeries
+# #TODO: It might be useful to automatically add a weight entered in a different table (e.g. Surgery) to the Weight() table
 Surgery().insert1({"username": "hheise", "mouse_id": 1, "surgery_num": 2, "surgery_date": "2021-04-20",
                    "surgery_type": "microsphere injection", "anesthesia": "triple shot", "weight": 20.9,
-                   "stroke_params": 'n.a.', "duration": 30, "notes": "This is another dummy surgery"})
+                   "stroke_params": 'n.a.', "duration": 30, "surgery_notes": "This is another dummy surgery"})
 
+Injection.insert1({"username": "hheise", "mouse_id": 1, "surgery_num": 2, "injection_num": 1, "substance_name": "endothelin",
+                   "volume": 30, "dilution": "10mg in 0.1ml saline", "site": "HPC",
+                   "coordinates": "0mm A/P, -1mm M/L, 1.5 mm D/V","injection_notes":"first mock injection"})
+
+Injection.insert1({"username": "hheise", "mouse_id": 1, "surgery_num": 2, "injection_num": 2, "substance_name": "AAV9-hSyn-GCaMP6f",
+                   "volume": 0.2, "dilution": "very diluted", "site": "neocortex",
+                   "coordinates": "-1mm A/P, -1mm M/L, 0.5 mm D/V","injection_notes":"second mock injection"})
