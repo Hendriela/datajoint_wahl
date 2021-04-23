@@ -33,7 +33,8 @@ class Strain(dj.Lookup):
         ['WT', 'C57BL/6J', 'None', 'None'],
         ['Snap25-RCaMP', 'Snap-Cre;tTA-C;RCaMP', 'RCaMP', 'all'],
         ['L2/3-RCaMP', 'L2/3Cre;tTA-C;RCaMP', 'RCaMP', 'L2/3'],
-        ['L2/3-GCaMP6f', 'L2/3Cre;tTA-C;GCa6f ', 'GCaMP6f', 'L2/3'],
+        ['L2/3-TIGRE1.0-GCaMP6f', 'L2/3Cre;tTA-C;GCa6f', 'GCaMP6f', 'L2/3'],
+        ['L2/3-TIGRE2.0-GCaMP6f', 'Rasgrf2 x Ai148D', 'GCaMP6f', 'L2/3'],
         ['Snap25-GCaMP6f', 'Snap-Cre;tTA-C;GCaP6 ', 'GCaMP6f', 'all'],
     ]
 

@@ -15,6 +15,10 @@ Mouse().insert1({"username": "hheise", "mouse_id": 1, "dob": "2021-01-24", "sex"
                  "strain": "Snap25-GCaMP6f", "genotype": "+/+", "irats_id": "BJ1235", "cage_num": 1100589, "ear_mark": "RRLL",
                  "licence_id": "241/2018-A", "info": "This is a second dummy test mouse."})
 
+Mouse().insert1({"username": "mpanze", "mouse_id": 0, "dob": "2021-01-01", "sex": "M", "batch": 1,
+                 "strain": "L2/3-TIGRE2.0-GCaMP6f", "genotype": "+/+", "irats_id": "BJ1111", "cage_num": 11002312, "ear_mark": "L",
+                 "licence_id": "241/2018-A", "info": "Third dummy test mouse"})
+
 # Add weights
 Weight().insert1({"username": "hheise", "mouse_id": 1, "date_of_weight": "2021-04-18", "weight": 20.1})
 Weight().insert1({"username": "hheise", "mouse_id": 1, "date_of_weight": "2021-04-19", "weight": 20.4})
