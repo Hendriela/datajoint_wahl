@@ -44,10 +44,9 @@ class Licence(dj.Lookup):
     licence_id      : varchar(128)      # Licence ID with project suffix to keep it unique
     ---
     -> Investigator                     # Link to licence holder 
-    description     : varchar(512)      # Short description of the project    
+    description     : varchar(512)      # Short description of the project   
     """
-    # TODO: document: attach @ localstore  # Path to the locally stored PDF document of the licence
-    # add contents manually to add licence file
+    # add current licence, retrieve the licence file from the server
     contents = [
        ['241/2018-A', 'aswahl', 'Studying sensorimotor recovery after stroke'],
        ['241/2018-B', 'aswahl', 'Studying cognitive impairment after stroke']
@@ -64,6 +63,7 @@ class Mouse(dj.Manual):
       sex           : enum('M', 'F', 'U')      # Sex of mouse - Male, Female, or Unknown/Unclassified
       batch         : int                      # Batch ID that this mouse belongs to (0 if no batch)
       -> Strain                                # Link to the genetic type of the mouse
+      genotype      : varchar(50)              # Genotype (e.g. +/+, or "n.d." if not defined)
       irats_id      : varchar(20)              # ID that is used in iRats (e.g. BJ5698 RR)
       cage_num      : int                      # Cage number
       ear_mark      : varchar(10)              # Actual ear mark

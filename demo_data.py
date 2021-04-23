@@ -8,11 +8,11 @@ exp_schema.spawn_missing_classes()
 
 # Add mice
 Mouse().insert1({"username": "hheise", "mouse_id": 0, "dob": "1900-07-28", "sex": "U", "batch": 0,
-                 "strain": "WT", "irats_id": "BJ1234", "cage_num": 1100589, "ear_mark": "RLL",
+                 "strain": "WT", "genotype": "n.d.", "irats_id": "BJ1234", "cage_num": 1100589, "ear_mark": "RLL",
                  "licence_id": "241/2018-B", "info": "This is a dummy test mouse."})
 
 Mouse().insert1({"username": "hheise", "mouse_id": 1, "dob": "2021-01-24", "sex": "M", "batch": 1,
-                 "strain": "Snap25-GCaMP6f", "irats_id": "BJ1235", "cage_num": 1100589, "ear_mark": "RRLL",
+                 "strain": "Snap25-GCaMP6f", "genotype": "+/+", "irats_id": "BJ1235", "cage_num": 1100589, "ear_mark": "RRLL",
                  "licence_id": "241/2018-A", "info": "This is a second dummy test mouse."})
 
 # Add weights
