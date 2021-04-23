@@ -72,22 +72,6 @@ class Task(dj.Lookup):
 
     ]
 
-
-@schema
-class Experimenter(dj.Lookup):
-    definition = """ # Details about experimenter
-    experimenter    : varchar(128)      # Short name of experimenter
-    ---
-    full_name       : varchar(256)      # Full name
-    email           : varchar(256)      # Email address
-    update_contact  : varchar(256)      # Contact information for automatic updates
-    """
-
-    contents = [
-        ['Adrian', 'Adrian Hoffmann', 'hoffmann@hifo.uzh.ch', 'None'],
-    ]
-
-
 @schema
 class Session(dj.Manual):
     definition = """ # Information about the session and experimental setup
@@ -100,7 +84,7 @@ class Session(dj.Manual):
     -> Anesthesia
     -> Setup
     -> Task
-    -> Experimenter
+    -> mice.Investigator
     notes   : varchar(2048)  # description of important things that happened
     """
 
