@@ -60,17 +60,17 @@ class Task(dj.Lookup):
 @schema
 class Session(dj.Manual):
     definition = """ # Information about the session and experimental setup
-    -> common_mice.Mouse
-    day             : date           # Date of the experimental session (YYYY-MM-DD)
-    session_num     : int            # Counter of experimental sessions on the same day (base 1)
+    -> mice.Mouse
+    day     : date           # Date of the experimental session (YYYY-MM-DD)
+    trial   : int            # Counter of experimental sessions on the same day (base 1)
     ---
-    id              : varchar(128)   # Unique identifier, e.g. 0A_2019-06-26_01  (0A: mouse Adam (first time A), date, first trial)
-    counter         : int            # Overall counter of all sessions across mice (base 0)
+    id      : varchar(128)   # Unique identifier, e.g. 0A_2019-06-26_01  (0A: mouse Adam (first time A), date, first trial)
+    counter : int            # Overall counter of all sessions across mice (base 0)
     -> Anesthesia
     -> Setup
     -> Task
-    -> common_mice.Investigator
-    notes           : varchar(2048)  # description of important things that happened
+    -> Experimenter
+    notes   : varchar(2048)  # description of important things that happened
     """
 
     def create_id(self, mouse_name, date, trial):
