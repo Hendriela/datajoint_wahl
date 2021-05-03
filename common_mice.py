@@ -110,7 +110,9 @@ class Substance(dj.Lookup):
 
     contents = [
        ['AAV9-hSyn-GCaMP6f', 'pAAV.Syn.GCaMP6f.WPRE.SV40', 'virus', 'addgene', 'https://www.addgene.org/100837/'],
-       ['endothelin', 'endothelin 1 (ET-1)', 'vasoconstrictor', 'Sigma', 'https://www.sigmaaldrich.com/catalog/product/sigma/e7764']
+       ['endothelin', 'endothelin 1 (ET-1)', 'vasoconstrictor', 'Sigma', 'https://www.sigmaaldrich.com/catalog/product/sigma/e7764'],
+       ['microspheres', 'Fluorescent PMMA Microparticles Red5 20 m', 'microspheres', 'PolyAn',
+         'https://www.poly-an.de/micro-nanoparticles/fluorescent-pmma-microparticles/fluorescent-pmma-microparticles'],
     ]
 
 
@@ -122,13 +124,13 @@ class Surgery(dj.Manual):
     ---
     surgery_date        : datetime       # Date of intervention (year-month-day)
     surgery_type        : varchar(2048)  # Description of surgery (e.g. "headmount implantation")
-    anesthesia          : varchar(2048)  # Type and dose of anesthesia used
+    anesthesia          : varchar(2048)  # Type and dose of anesthesia used (e.g. "2% Isoflurane" or "Triple shot")
     weight              : float          # Pre-op weight in grams
     stroke_params       : varchar(2048)  # Stroke params such as illumination time, if applicable
     duration            : int            # Approximate duration of intervention, in minutes
     -> Substance                         # Link to substance lookup table
     volume              : int            # Injected volume in nanoliters
-    dilution            : varchar(128)   # Dilution or concentration of the substance
+    dilution            : varchar(128)   # Dilution or concentration of the substance (with dilutant if applicable)
     site                : varchar(128)   # Site of injection (Stereotaxic brain region, CCA, i.p. etc.)
     coordinates         : varchar(512)   # Stereotaxic coordinates, if applicable
     notes               : varchar(2048)  # Additional notes

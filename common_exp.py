@@ -31,18 +31,8 @@ class Setup(dj.Lookup):
     """
 
     contents = [
-        ['Wheel_v1', 'Basic wheel, no additional whisker stimulation or tones'],
-        ['Wheel_3mod_v1', 'Wheel with whisker stimulation (galvo with tape), LED and sound'],
-        ['Wheel_3mod_v2',
-         'Wheel with 3 modalities for stimulation: Whisker, LED and Sound. The whisker stimulator is carbon stick with T shape and can be moved to positions between -5 and 5.'],
-        ['Head-fixed', 'Mouse is headfixed under the microscope'],
-        ['Ephys_wheel', 'Mouse on wheel, while recording e-phys signals at the same time with Intan box.'],
-        ['Deluxe_wheel_v1', 'Wheel with soft cover, with whisker pole, sound and LED.'],
-        ['Deluxe_wheel_v2', 'Wheel with soft cover, with whisker pole and sound. Light stimulus by illumination LED.'],
-        ['Deluxe_wheel_ephys',
-         'Wheel with soft cover, with whisker pole and sound. Light stimulus by illumination LED. Simultaneous ephys recording.'],
-        ['Deluxe_wheel_widefield',
-         'Wheel with soft cover, with whisker pole, sound and LED. Setup in widefield microscope'],
+        ['VR', 'Mouse is headfixed in the VR setup located outside the 2p microscope (no resonant scanner sound)'],
+        ['VR_2p', 'Mouse is headfixed in the VR setup located under the 2p microscope (with resonant scanner sound)'],
     ]
 
 
@@ -56,52 +46,31 @@ class Task(dj.Lookup):
     """
 
     contents = [
-        ['None', 0, 'No task, mouse is freely running on the wheel.'],
-        ['Manual_stim', 0,
-         'Mouse is running on wheel, 3 modality stimulation triggered independently by clicking buttons.'],
-        ['Pairing_v1', 0, 'Independent stimulation with 3 modalities, blocks with pauses.'],
-        ['Pairing_v1', 1, 'Sound preceeding the whisker touch, blocks with pauses.'],
-        ['Pairing_v1', 2, 'Sound that preceeds whisker touch sometimes omitted, blocks with pauses.'],
-        ['Positions_and_events_v1', 0, 'Automatic protocoll with different positions and sensory events'],
-        ['5Pos_dark', 0,
-         'Automatic protocol with 5 positions (0, -2, ..., -8) in the darkness all the time (five_pos_stim_15min_v01.txt)'],
-        ['5Pos_light', 0,
-         'Automatic protocol with 5 positions (0, -2, ..., -8) with some trials with blue light on (five_pos_stim_wLight_15min_v02.txt)'],
-        ['5Pos_control', 0, 'Same as 5Pos_light, but the whiskers are shortened, no contact to pole possible.'],
-        ['5Pos_other', 0, 'Some variation of the task, manual check necessary what was going on (see exp.Session)'],
-
-    ]
-
-
-@schema
-class Experimenter(dj.Lookup):
-    definition = """ # Details about experimenter
-    experimenter    : varchar(128)      # Short name of experimenter
-    ---
-    full_name       : varchar(256)      # Full name
-    email           : varchar(256)      # Email address
-    update_contact  : varchar(256)      # Contact information for automatic updates
-    """
-
-    contents = [
-        ['Adrian', 'Adrian Hoffmann', 'hoffmann@hifo.uzh.ch', 'None'],
+        # Hendriks VR tasks
+        ['Passive', 0, 'Water reward is given passively upon entering a reward zone.'],
+        ['Active', 1, 'Water reward is given after active licking in a reward zone.'],
+        ['No tone', 2, 'Like active, but tone cue is removed after X trials.'],
+        ['No pattern', 2, 'Like "active", but tone cue is removed after X trials.'],
+        ['No pattern and tone', 2, 'Like "No pattern", but tone cue is removed after Y trials.'],
+        ['No reward at RZ3', 2, 'Like active, but water reward is disabled at RZ3.'],
+        ['Changed distances', 2, 'Like active, but the distances between reward zones are changed.'],
     ]
 
 
 @schema
 class Session(dj.Manual):
     definition = """ # Information about the session and experimental setup
-    -> mice.Mouse
-    day     : date           # Date of the experimental session (YYYY-MM-DD)
-    trial   : int            # Counter of experimental sessions on the same day (base 1)
+    -> common_mice.Mouse
+    day             : date           # Date of the experimental session (YYYY-MM-DD)
+    session_num     : int            # Counter of experimental sessions on the same day (base 1)
     ---
-    id      : varchar(128)   # Unique identifier, e.g. 0A_2019-06-26_01  (0A: mouse Adam (first time A), date, first trial)
-    counter : int            # Overall counter of all sessions across mice (base 0)
+    id              : varchar(128)   # Unique identifier, e.g. 0A_2019-06-26_01  (0A: mouse Adam (first time A), date, first trial)
+    counter         : int            # Overall counter of all sessions across mice (base 0)
     -> Anesthesia
     -> Setup
     -> Task
-    -> Experimenter
-    notes   : varchar(2048)  # description of important things that happened
+    -> common_mice.Investigator
+    notes           : varchar(2048)  # description of important things that happened
     """
 
     def create_id(self, mouse_name, date, trial):
