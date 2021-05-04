@@ -7,7 +7,7 @@ schema = dj.schema('common_mice', locals(), create_tables=True)
 @schema
 class Investigator(dj.Lookup):
     definition = """    # Name and contact information of lab members
-    username        : varchar(128)    # Unique username, should be the UZH shortname
+    username        : char(6)      # Unique username, should be the UZH shortname, has to be 6 characters long
     ---
     full_name       : varchar(128)    # First and last name
     email           : varchar(256)    # Contact email address
