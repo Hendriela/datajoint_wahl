@@ -3,6 +3,7 @@
 import datajoint as dj
 import common_mice as mice
 import os
+import login
 
 schema = dj.schema('common_exp', locals(), create_tables=True)
 
@@ -54,6 +55,8 @@ class Task(dj.Lookup):
         ['No pattern and tone', 2, 'Like "No pattern", but tone cue is removed after Y trials.'],
         ['No reward at RZ3', 2, 'Like active, but water reward is disabled at RZ3.'],
         ['Changed distances', 2, 'Like active, but the distances between reward zones are changed.'],
+        # Todo: enter Jithins wheel tasks
+        # Todo: enter Matteos wheel tasks
     ]
 
 
@@ -64,28 +67,36 @@ class Session(dj.Manual):
     day     : date           # Date of the experimental session (YYYY-MM-DD)
     trial   : int            # Counter of experimental sessions on the same day (base 1)
     ---
-    id      : varchar(128)   # Unique identifier, e.g. 0A_2019-06-26_01  (0A: mouse Adam (first time A), date, first trial)
+    id      : varchar(128)   # Unique identifier
     counter : int            # Overall counter of all sessions across mice (base 0)
     -> Anesthesia
     -> Setup
     -> Task
-    -> Experimenter
     notes   : varchar(2048)  # description of important things that happened
     """
 
-    def create_id(self, mouse_name, date, trial):
-        """Create unique session id from given information (e.g. 0A_2019-06-26_01  (0A: mouse Adam (first time A), date, first trial))
+    def create_id(self, investigator_name, mouse_id, date, trial):
+        """Create unique session id with the format inv_MXXX_YYYY-MM-DD_ZZ:
+        inv: investigator shortname (called 'experimenter' in Adrians GUI)
+        MXXX: investigator-specific mouse number (M + 0-padded three-digit number, e.g. M018)
+        YYYY-MM-DD: date of session
+        ZZ: 0-padded two-digit counter of the sessions on that day
         Note that trials are with base 1
         Adrian 2019-08-12
+        Adapted by Hendrik 2021-05-04
+        ------------------------------------------------------------------------------------
+        :param investigator_name: str, shortname of the investigator for this session (from common_mice.Investigator)
+        :param mouse_id: int, investigator-specific mouse ID (from common_mice.Mice)
+        :param date: datetime, date of the session in format YYYY-MM-DD
+        :param trial: int, iterator for number of sessions on that day
+        :return: unique string ID for this session
         """
 
+        # Todo: I do not check whether the values for investigator and mouse ID are valid (if this mouse exists in the Mouse() table. This should be enforced when entering the session through the GUI
+
         # first part: mouse identifier
-        letter = mouse_name[0]  # first letter
-        mice_with_letter = mice.Mouse() & 'name like "{}%%"'.format(letter)
-        if len(mice_with_letter) == 0:
-            raise Exception('No mouse found that starts with this letter.')
-        nr = len(mice_with_letter) - 1
-        first_part = str(nr) + letter
+        mouse_id_str = 'M{:03d}'.format(mouse_id)
+        first_part = investigator_name + '_' + mouse_id_str
 
         # second: date to string
         date_str = str(date)
@@ -106,13 +117,12 @@ class Session(dj.Manual):
         Adrian 2019-08-19
         """
 
-        id = self.create_id(new_entry_dict['name'], new_entry_dict['day'], new_entry_dict['trial'])
+        id = self.create_id(new_entry_dict['experimenter'], new_entry_dict['name'], new_entry_dict['day'],
+                            new_entry_dict['trial'])
         counter = max(Session.fetch('counter')) + 1
 
         # add automatically computed values to the dictionary
-        entry = dict(**new_entry_dict,
-                     id=id,
-                     counter=counter)
+        entry = dict(**new_entry_dict, id=id, counter=counter)
 
         self.insert1(entry)
         return 'Inserted new entry: {}'.format(entry)
@@ -120,35 +130,37 @@ class Session(dj.Manual):
     def get_folder(self):
         """ Return the folder on neurophys for this session on the current PC
         Adrian 2020-12-07 """
+        # Todo: rework this for different folder structures (not all session folders in one directory)
         base_directory = login.get_neurophys_directory()
         id = self.fetch1('id')
         return os.path.join(base_directory, id)
 
-    def get_group(self, group_name='?'):
-        """Return keys of Sessions belonging to a certain group.
-        Parameters
-        ---------
-        group_name: str or list of str
-            Allowed group names are defined in shared.Group
-        Adrian 2020-03-23
-        """
-        if type(self) in [str, list]:
-            group_name = self  # argument self was not given
-
-        if group_name == '?':
-            print('Available groups:', shared.Group.fetch('group'))
-            return
-
-        if type(group_name) == str:
-            group_name = [group_name]  # convert to list for compatibility with lists
-
-        keys = list()
-        for name in group_name:
-            if name not in shared.Group.fetch('group'):
-                raise Exception('The group name "{}" is not an entry of shared.Group.'.format(name))
-
-            keys.extend((Session() & (shared.GroupAssignment() & {'group': name})).fetch(dj.key))
-        return keys
+    # Commented out because we are not grouping sessions this way
+    # def get_group(self, group_name='?'):
+    #     """Return keys of Sessions belonging to a certain group.
+    #     Parameters
+    #     ---------
+    #     group_name: str or list of str
+    #         Allowed group names are defined in shared.Group
+    #     Adrian 2020-03-23
+    #     """
+    #     if type(self) in [str, list]:
+    #         group_name = self  # argument self was not given
+    #
+    #     if group_name == '?':
+    #         print('Available groups:', shared.Group.fetch('group'))
+    #         return
+    #
+    #     if type(group_name) == str:
+    #         group_name = [group_name]  # convert to list for compatibility with lists
+    #
+    #     keys = list()
+    #     for name in group_name:
+    #         if name not in shared.Group.fetch('group'):
+    #             raise Exception('The group name "{}" is not an entry of shared.Group.'.format(name))
+    #
+    #         keys.extend((Session() & (shared.GroupAssignment() & {'group': name})).fetch(dj.key))
+    #     return keys
 
     def get_key(self, counter):
         """Return key that corresponds to counter of sessions """
