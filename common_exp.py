@@ -56,7 +56,9 @@ class Task(dj.Lookup):
         ['No reward at RZ3', 2, 'Like active, but water reward is disabled at RZ3.'],
         ['Changed distances', 2, 'Like active, but the distances between reward zones are changed.'],
         # Todo: enter Jithins wheel tasks
+        # Jithins tasks
         # Todo: enter Matteos wheel tasks
+        # Matteos tasks
     ]
 
 
@@ -92,7 +94,8 @@ class Session(dj.Manual):
         :return: unique string ID for this session
         """
 
-        # Todo: I do not check whether the values for investigator and mouse ID are valid (if this mouse exists in the Mouse() table. This should be enforced when entering the session through the GUI
+        # Todo: I do not check whether the values for investigator and mouse ID are valid (if this mouse exists in the
+        #  Mouse() table. This should be enforced when entering the session through the GUI!
 
         # first part: mouse identifier
         mouse_id_str = 'M{:03d}'.format(mouse_id)
