@@ -1,5 +1,9 @@
 import datajoint as dj
 
+# connect to the database through machine-specific info
+import login
+login.connect()
+
 mouse_schema = dj.schema('common_mice')
 exp_schema = dj.schema('common_exp')
 
