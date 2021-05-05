@@ -1,9 +1,8 @@
 """Schema for experimental information"""
 
 import datajoint as dj
-import common_mice as mice
-import os
 import login
+from . import common_mice
 
 schema = dj.schema('common_exp', locals(), create_tables=True)
 
@@ -65,7 +64,7 @@ class Task(dj.Lookup):
 @schema
 class Session(dj.Manual):
     definition = """ # Information about the session and experimental setup
-    -> mice.Mouse
+    -> common_mice.Mouse
     day     : date           # Date of the experimental session (YYYY-MM-DD)
     trial   : int            # Counter of experimental sessions on the same day (base 1)
     ---

@@ -1,7 +1,7 @@
 """ Schema to store behavioral data """
 
 import datajoint as dj
-from . import common_exp #, img
+from . import common_exp as exp #, img
 
 # from .utils.common import log    # standardized logging
 # from .utils import analysis
@@ -41,24 +41,24 @@ class Video(dj.Manual):
     frame_rate : int             # Selected frame rate of the recording
     """
 
-    def get_video_object(self, with_time=True):
-        """ Returns an object of utils.video.BodyVideo to access frames from videos
-        To get a specific frame, use video_object.get_frame(frame_nr)
-        Adrian 2020-12-14 """
-
-        video_paths = (RawVideoFile & self).get_paths()
-
-        # optional include video time
-        if with_time:
-            video_time = (VideoTime & self).fetch1('video_time')
-        else:
-            video_time = None
-
-        # create the BodyVideo object to hide multiple part files from user
-        from .utils import video
-        video_object = video.BodyVideo(video_paths=video_paths, video_time=video_time)
-
-        return video_object
+    # def get_video_object(self, with_time=True):
+    #     """ Returns an object of utils.video.BodyVideo to access frames from videos
+    #     To get a specific frame, use video_object.get_frame(frame_nr)
+    #     Adrian 2020-12-14 """
+    #
+    #     video_paths = (RawVideoFile & self).get_paths()
+    #
+    #     # optional include video time
+    #     if with_time:
+    #         video_time = (VideoTime & self).fetch1('video_time')
+    #     else:
+    #         video_time = None
+    #
+    #     # create the BodyVideo object to hide multiple part files from user
+    #     from .utils import video
+    #     video_object = video.BodyVideo(video_paths=video_paths, video_time=video_time)
+    #
+    #     return video_object
 
 @schema
 class RawVideoFile(dj.Manual):
@@ -77,7 +77,7 @@ class RawVideoFile(dj.Manual):
                             'not with {} parts. Use get_paths instead.'.format(len(self)) )
 
         base_directory = login.get_neurophys_directory()
-        folder = (exp.Session() & self).fetch1('id')
+        folder = ( exp.Session() & self).fetch1('id')
         file = self.fetch1('file_name')
 
         return os.path.join( base_directory, folder, file )
@@ -96,33 +96,33 @@ class RawVideoFile(dj.Manual):
 
         return path_list
 
-    def get_raw_data(self):
-        """Return the video data as numpy array (frames, height, width)
-        Returns
-        -------
-        video_frames : 3d numpy array
-            All frames in shape (frames, height, width)
-        # TODO: select only a subset of frames
-        # TODO: write better ways to access the video with new table
-        Adrian 2019-08-19
-        """
-
-        # load video
-        import pims    # if this throws error: pip install pims
-        path = self.get_path()
-        video = pims.Video( path )
-
-        # prepare numpy array to hold the video data
-        nr_frames = video.reader.get_length()
-        example_frame = np.array(video.get_frame( 0 ))[:,:,0]   # only gray scale
-        height, width = example_frame.shape
-
-        video_frames = np.zeros( (nr_frames, height, width), dtype=np.uint8 )
-
-        for i in range( nr_frames ):
-            video_frames[i,:,:] = np.array( video.get_frame( i ))[:,:,0]   # only gray scale
-
-        return video_frames
+    # def get_raw_data(self):
+    #     """Return the video data as numpy array (frames, height, width)
+    #     Returns
+    #     -------
+    #     video_frames : 3d numpy array
+    #         All frames in shape (frames, height, width)
+    #     # TODO: select only a subset of frames
+    #     # TODO: write better ways to access the video with new table
+    #     Adrian 2019-08-19
+    #     """
+    #
+    #     # load video
+    #     import pims    # if this throws error: pip install pims
+    #     path = self.get_path()
+    #     video = pims.Video( path )
+    #
+    #     # prepare numpy array to hold the video data
+    #     nr_frames = video.reader.get_length()
+    #     example_frame = np.array(video.get_frame( 0 ))[:,:,0]   # only gray scale
+    #     height, width = example_frame.shape
+    #
+    #     video_frames = np.zeros( (nr_frames, height, width), dtype=np.uint8 )
+    #
+    #     for i in range( nr_frames ):
+    #         video_frames[i,:,:] = np.array( video.get_frame( i ))[:,:,0]   # only gray scale
+    #
+    #     return video_frames
 
 
 @schema
@@ -147,7 +147,8 @@ class VideoInfo(dj.Computed):
         """ Populate the VideoInfo and ExampleFrame tables
         Adrian 2019-08-19
         """
-        log('Populating VideoInfo for key: {}'.format(key))
+        # Todo: set up logging for us
+        # log('Populating VideoInfo for key: {}'.format(key))
 
         video_obj = (RawVideoFile() & key).get_video_object()
 
@@ -168,7 +169,7 @@ class VideoInfo(dj.Computed):
         self.insert1( entry_info )
         VideoInfo.ExampleFrame.insert1( entry_example )
 
-        log('Finished populating VideoInfo for key: {}'.format(key))
+        # log('Finished populating VideoInfo for key: {}'.format(key))
 
 @schema
 class LEDLocation(dj.Manual):
@@ -214,7 +215,7 @@ class VideoTime(dj.Computed):
         """Automatically populate the VideoTime (old: from LED, new: from exposure times file)
         Adrian 2019-08-22
         """
-        log('Populating VideoTime for key: {}'.format(key))
+        # log('Populating VideoTime for key: {}'.format(key))
 
         if len( LEDLocation & key ) > 0:
             type = "LED"
@@ -289,7 +290,7 @@ class VideoTime(dj.Computed):
                           video_time = video_time)
         self.insert1( new_entry )
 
-        log('Inserted VideoTime entry for key: {}'.format(key))
+        # log('Inserted VideoTime entry for key: {}'.format(key))
 
 
 
@@ -387,7 +388,7 @@ class FilteredWheel(dj.Computed):
         """Automatically populate this table with data from RawWheelFile
         Adrian 2020-03-19
         """
-        log('Populating FilteredWheel for key: {}'.format(key))
+        # log('Populating FilteredWheel for key: {}'.format(key))
         raw_t, raw_pos = (RawWheelFile & key).get_raw_data()
 
         # First, sample wheel data in regular intervals (in raw data there are some jumps in t)
@@ -533,7 +534,7 @@ class ScanTime(dj.Computed):
         # TODO: use only second or third peak depending on the plane hopping?
         Adrian 2019-08-22
         """
-        log('Populating ScanTime for key: {}'.format(key))
+        # log('Populating ScanTime for key: {}'.format(key))
         plotting = False
 
         time, signal = ( RawSynchronizationFile() & key).get_raw_data(include_time=True)
@@ -549,9 +550,9 @@ class ScanTime(dj.Computed):
 
         elif (sync_type == 'Galvo_Y') or (sync_type == 'Galvo_Y_Clipped'):
             thres = np.percentile( signal, 90)  # for plotting later
-            # Find index of the peak of galvo signal
-            from .utils.common import find_galvo_peaks
-            peak_index = find_galvo_peaks(signal)
+            # Find index of the peak of galvo signal Todo: these two lines are commented out to make gui work
+            # from .utils.common import find_galvo_peaks
+            # peak_index = find_galvo_peaks(signal)
         elif sync_type == 'Orca_Frame_Onset':
             thres = 2
 
@@ -577,7 +578,8 @@ class ScanTime(dj.Computed):
         avg_frame_rate = 1 / dt * 1000  # average frame rate in Hz
 
         # check if the last frame was maybe not saved => drop last value of scan_time
-        nr_frames_tif = (img.ScanInfo & key).fetch1('nr_frames')
+        # nr_frames_tif = (img.ScanInfo & key).fetch1('nr_frames')
+        nr_frames_tif = len(scan_time) # Dummy line to make GUI work
         if len(scan_time) == nr_frames_tif:
             print('Detected peaks match with ScanInfo.')
         elif (len(scan_time) > nr_frames_tif) and (len(scan_time) < nr_frames_tif+5):
@@ -620,7 +622,7 @@ class ScanTime(dj.Computed):
             plt.tight_layout()
             plt.show()
 
-        log('Inserted ScanTime entry for key: {}'.format(key))
+        # log('Inserted ScanTime entry for key: {}'.format(key))
 
 
 @schema
@@ -649,10 +651,10 @@ class SensoryEvents(dj.Manual):
         # Refer to table which stores the dict (function here for easier access)
         return (SensoryEventsDict & self).get_events()
 
-    def get_descriptive(self, with_light=False, exclude_sweep=True):
-        """ Returns dictionary with descriptive keys like 'caudal' or 'small forward' """
-        event_dict = (SensoryEventsDict & self).get_events()
-        return analysis.create_descriptive_event_dict(event_dict, with_light=with_light, exclude_sweep=exclude_sweep)
+    # def get_descriptive(self, with_light=False, exclude_sweep=True):
+    #     """ Returns dictionary with descriptive keys like 'caudal' or 'small forward' """
+    #     event_dict = (SensoryEventsDict & self).get_events()
+    #     return analysis.create_descriptive_event_dict(event_dict, with_light=with_light, exclude_sweep=exclude_sweep)
 
 @schema
 class RawSensoryEventsFile(dj.Manual):
@@ -746,7 +748,7 @@ class SensoryEventsDict(dj.Computed):
         """Automatically populate this table with data from RawSensoryEventsFile
         Adrian 2020-03-17
         """
-        log('Populating SensoryEventsDict for key: {}'.format(key))
+        # log('Populating SensoryEventsDict for key: {}'.format(key))
         dic = (RawSensoryEventsFile() & key).get_raw_data()
 
         for key_ in dic:
@@ -848,7 +850,7 @@ class FilteredWhiskerStimulator(dj.Computed):
         """Automatically populate this table with data from RawWhiskerStimulatorFile
         Adrian 2020-03-18
         """
-        log('Populating FilteredWhiskerStimulator for key: {}'.format(key))
+        # log('Populating FilteredWhiskerStimulator for key: {}'.format(key))
         raw_pos = (RawWhiskerStimulatorFile & key).get_raw_data()
 
         window_size = 41
