@@ -70,6 +70,7 @@ class Session(dj.Manual):
     trial   : int            # Counter of experimental sessions on the same day (base 1)
     ---
     id      : varchar(128)   # Unique identifier
+    path    : varchar(256)   # Relative path of this session on the Neurophysiology-Storage1 server
     counter : int            # Overall counter of all sessions across mice (base 0)
     -> Anesthesia
     -> Setup
@@ -110,6 +111,24 @@ class Session(dj.Manual):
         # combine and return the unique session id
         return first_part + '_' + date_str + '_' + trial_str
 
+
+    def get_relative_path(self, abs_path):
+        """Removes the Neurophysiology-Server path from an absolute path and returns the relative path
+        :param abs_path: str, absolute path of a directory on the Neurophysiology-Storage1 server
+        :return: relative path with the machine-specific Neurophysiology-Path removed
+        """
+
+        dir = login.get_neurophys_directory()   # get machine-specific path from local login file
+
+        if dir in abs_path:
+            return abs_path.replace(dir, '')    # the first character is a leading \\, be careful when using it
+        else:
+            raise Warning('\nAbsolute session path {} \ndoes not seem to be on the main Neurophys server directory. '
+                          'Make sure that the session path and the \nlocal server directory in '
+                          'login.get_neurophys_directory() are set correctly.\n'
+                          'Absolute path used for now.'.format(abs_path))
+
+
     def helper_insert1(self, new_entry_dict):
         """Simplified insert function that takes care of id and counter values
         Parameters
@@ -124,6 +143,9 @@ class Session(dj.Manual):
                             new_entry_dict['trial'])
         counter = max(Session.fetch('counter')) + 1
 
+        # Transform absolute path from the GUI to the relative path on the Neurophys-Storage1 server
+        new_entry_dict['path'] = self.get_relative_path(new_entry_dict['path'])
+
         # add automatically computed values to the dictionary
         entry = dict(**new_entry_dict, id=id, counter=counter)
 
@@ -133,12 +155,14 @@ class Session(dj.Manual):
     def get_folder(self):
         """ Return the folder on neurophys for this session on the current PC
         Adrian 2020-12-07 """
-        # Todo: rework this for different folder structures (not all session folders in one directory)
-        base_directory = login.get_neurophys_directory()
-        id = self.fetch1('id')
-        return os.path.join(base_directory, id)
 
-    # Commented out because we are not grouping sessions this way
+        # In the current version we save the relative path (excluding base directory) which the user saves in the GUI,
+        # including the leading directory separator ('\\') so the absolute path can be recovered by adding both strings
+        base_directory = login.get_neurophys_directory()
+        path = self.fetch1('path')
+        return base_directory + path
+
+    # Commented out because we are (currently) not grouping sessions this way
     # def get_group(self, group_name='?'):
     #     """Return keys of Sessions belonging to a certain group.
     #     Parameters
