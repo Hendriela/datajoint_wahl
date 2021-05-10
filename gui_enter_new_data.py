@@ -62,6 +62,9 @@ with open(r'gui_params.yaml') as file:
     # The FullLoader parameter handles the conversion from YAML scalar values to Python's dictionary format
     default_params = yaml.load(file, Loader=yaml.FullLoader)
 
+# Set current day as default day
+current_day = datetime.today().strftime('%Y-%m-%d')  # YYYY-MM-DD
+
 # Get path to the Neurophysiology server from login.py
 path_neurophysiology = login.get_neurophys_directory()
 
@@ -82,11 +85,16 @@ for key, value in default_params['paths'].items():
         default_params['paths'][key] = path_neurophysiology
 
 # Get all mouse_IDs from the current investigator that are still alive and sort them by descending ID
-raw_mouse_ids = (common_mice.Mouse() & "username = '{}'".format(default_params['username'])) - common_mice.Sacrificed()
+username_filter = "username = '{}'".format(default_params['username'])
+raw_mouse_ids = (common_mice.Mouse() & username_filter) - common_mice.Sacrificed()
 mouse_ids = raw_mouse_ids.fetch('mouse_id', order_by='mouse_id DESC')
 if default_params['behavior']['default_mouse'] == 'last_mouse':
     default_params['behavior']['default_mouse'] = mouse_ids[0]
 
+# Check how many sessions this mouse has on the current day and adjust the trial counter accordingly
+mouse_id_filter = "mouse_id = '{}'".format(default_params['behavior']['default_mouse'])
+date_filter = "day = '{}'".format(current_day)
+next_trial = str(max((common_exp.Session() & username_filter & mouse_id_filter & date_filter).fetch('trial'))+1)
 
 # =============================================================================
 # Load options for drop down menus
@@ -113,7 +121,6 @@ event_types = common_behav.SensoryEventType().fetch('sensory_event_type')
 # probes = el.ProbeType().fetch('probe_type')
 # el_sync_signals = ['Galvo_Y', 'Galvo_Y_Clipped']
 
-current_day = datetime.today().strftime('%Y-%m-%d')  # YYYY-MM-DD
 
 # =============================================================================
 # Default parameter for dropdown menus and text boxes
@@ -146,12 +153,12 @@ class window(wx.Frame):
         # Day of experiment
         wx.StaticText(panel,label="Day (YYYY-MM-DD):", pos=(S_LEFT+COL,S_TOP))
         self.day = wx.TextCtrl(panel, pos=(S_LEFT+COL,S_TOP+20), size=(170,-1))
-        self.day.SetValue( current_day)
+        self.day.SetValue(current_day)
 
         # Trial
         wx.StaticText(panel,label="Trial (base 1):", pos=(S_LEFT+400,S_TOP))
         self.trial = wx.TextCtrl(panel, pos=(S_LEFT+2*COL,S_TOP+20), size=(170,-1))
-        self.trial.SetValue( '1' )
+        self.trial.SetValue(next_trial)
 
         # Setup
         wx.StaticText(panel,label="Setup:", pos=(S_LEFT,S_TOP+ROW))
