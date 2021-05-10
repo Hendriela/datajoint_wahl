@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# This YAML file stores user-specific default values used in the enter_new_data GUI
+# Most importantly, it stores which user is currently accessing the GUI and will adapt the available options in the
+# dropdown menus (regarding mouse_id, task, setup, etc...) accordingly.
+
+# Rename this file to gui_params.yaml after changing the values to your liking. Add the gui_params.yaml to .gitignore to
+# avoid it from being overwritten by other users. There has to be at least one gui_params.yaml file in the same
+# directory as gui_enter_new_data.py.
+
+# Hendrik 2021-05-10
+
+username: 'default_username'  # CHANGE THIS! It will determine which options you see in the dropdown menus
+
+behavior:
+  default_mouse: 'default_mouse'
+  default_setup: 'default_setup'
+  default_task: 'default_task'
+  default_stage: '0'
+  default_anesthesia: 'Awake'
+  default_experimenter: 'username'  # if this is "username", the value of the 'username' key will be the default
+  default_wheel: 'default_wheel'
+  default_sync: 'default_sync'
+  default_camera_pos: 'default_camera_pos'
+  default_video_rate: '30'
+  default_stimulator: 'default_stimulator'
+  default_event_type: 'default_event_type'
+
+  wheel_file: 'wheel_rec_{:02d}.bin'
+  sync_file: 'imaging_signal_{:02d}.bin'
+  video_file: '{:02d}_vid.avi'
+  whisker_file: 'whisker_stim_{:02d}.bin'
+  event_file: 'sensory_events_{:02d}.txt'
+
+imaging:
+  default_microscope: 'Scientifica'
+  default_laser: 'MaiTai'
+  default_layer: 'default_layer'
+  default_planes: '1'
+
+  SKIP_IMG_TRANSFER: True
+  H45_file: 'test_A{}_Ch{}_ ????.tif'    # later used as format string to fill in {} and wildcard chars ? for glob.glob
+  scientifica_file: 'file_000??.tif'     # Hendriks format
+  parameter_file: 'parameters.xml'
+
+  # show only necessary parts of the panels (here: E-phys instead of behavior)
+  show_ephys: False
+  default_el_sync: 'Galvo_Y_Clipped'
+  default_el_sync_file: 'board-ADC-02.dat'
+
+  probe_files: 'amp-A-0??.dat'
+  info_file: 'info.rhd'
+
+paths:
+  path_backup_npy: '..\\data\\'
+  default_probe: '16_Wide'
+  default_shutter_file: '###'
+
+
