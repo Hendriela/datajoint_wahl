@@ -98,7 +98,7 @@ class Session(dj.Manual):
         #  Mouse() table. This should be enforced when entering the session through the GUI!
 
         # first part: mouse identifier
-        mouse_id_str = 'M{:03d}'.format(mouse_id)
+        mouse_id_str = 'M{:03d}'.format(int(mouse_id))
         first_part = investigator_name + '_' + mouse_id_str
 
         # second: date to string
@@ -138,12 +138,17 @@ class Session(dj.Manual):
         Adrian 2019-08-19
         """
 
-        id = self.create_id(new_entry_dict['experimenter'], new_entry_dict['name'], new_entry_dict['day'],
+        id = self.create_id(new_entry_dict['username'], new_entry_dict['mouse_id'], new_entry_dict['day'],
                             new_entry_dict['trial'])
-        counter = max(Session.fetch('counter')) + 1
+        if len(Session.fetch('counter')) == 0:
+            counter = 0
+        else:
+            counter = max(Session.fetch('counter')) + 1
 
         # Transform absolute path from the GUI to the relative path on the Neurophys-Storage1 server
-        new_entry_dict['path'] = self.get_relative_path(new_entry_dict['path'])
+        # Todo: implement Path button in GUI
+        # new_entry_dict['path'] = self.get_relative_path(new_entry_dict['path'])
+        new_entry_dict['path'] = "\\test_path\\" + id
 
         # add automatically computed values to the dictionary
         entry = dict(**new_entry_dict, id=id, counter=counter)

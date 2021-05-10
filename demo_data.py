@@ -41,3 +41,8 @@ Injection.insert1({"username": "hheise", "mouse_id": 1, "surgery_num": 2, "injec
 Injection.insert1({"username": "hheise", "mouse_id": 1, "surgery_num": 2, "injection_num": 2, "substance_name": "AAV9-hSyn-GCaMP6f",
                    "volume": 0.2, "dilution": "very diluted", "site": "neocortex",
                    "coordinates": "-1mm A/P, -1mm M/L, 0.5 mm D/V","injection_notes":"second mock injection"})
+
+# Add session
+Session.insert1({"username": "hheise", "mouse_id": 1, "day": '1900-01-01', "trial": 1, "id": 'hheise_M001_1900-01-01_00',
+                 "path": '\\test_path\\hheise_M001_1900-01-01_00', "counter": 1, "anesthesia": "Awake", "setup": "VR",
+                 "task": "Passive", "stage": "0", "notes": "A test session"})
