@@ -475,19 +475,20 @@ class window(wx.Frame):
         """ The user clicked on the button to submit a session """
 
         # create session dictionary that can be entered into datajoint pipeline
-        session_dict = dict(mouse_id = self.mouse_name.GetValue(),
+        session_dict = dict(username=investigator,
+                            mouse_id = self.mouse_name.GetValue(),
                             day = self.day.GetValue(),
                             trial = int( self.trial.GetValue() ),
                             anesthesia = self.anesthesia.GetValue(),
                             setup = self.setup.GetValue(),
                             task = self.task.GetValue(),
                             stage = int( self.stage.GetValue() ),
-                            username = self.experimenter.GetValue(),
+                            experimenter = self.experimenter.GetValue(),
                             notes = self.notes.GetValue()
                             )
 
         # save dictionary that is entered
-        identifier = common_exp.Session().create_id(investigator_name=session_dict['username'],
+        identifier = common_exp.Session().create_id(investigator_name=investigator,
                                                     mouse_id=session_dict['mouse_id'],
                                                     date=session_dict['day'],
                                                     trial=session_dict['trial'])
