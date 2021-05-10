@@ -43,11 +43,13 @@ imaging:
   H45_file: 'test_A{}_Ch{}_ ????.tif'    # later used as format string to fill in {} and wildcard chars ? for glob.glob
   scientifica_file: 'file_000??.tif'     # Hendriks format
   parameter_file: 'parameters.xml'
+  default_shutter_file: '###'
 
   # show only necessary parts of the panels (here: E-phys instead of behavior)
   show_ephys: False
   default_el_sync: 'Galvo_Y_Clipped'
   default_el_sync_file: 'board-ADC-02.dat'
+  default_probe: '16_Wide'
 
   probe_files: 'amp-A-0??.dat'
   info_file: 'info.rhd'
@@ -59,7 +61,7 @@ paths:
   default_el_folder: 'neurophys'
   path_backup_npy: 'neurophys'
 
-  default_probe: '16_Wide'
-  default_shutter_file: '###'
+
+
 
 

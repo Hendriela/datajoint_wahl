@@ -18,8 +18,11 @@ from datetime import datetime
 import os
 import glob
 import numpy as np
+import yaml
 
-path_neurophysiology = login.get_neurophys_directory()
+# connect to datajoint database
+login.connect()
+from schema import common_mice, common_exp, common_behav  # , common_img, common_el
 
 # =============================================================================
 # HARDCODED PARAMETER FOR GUI
@@ -51,66 +54,25 @@ I_TOP = B_TOP
 L_TOP = B_TOP + 500
 
 # =============================================================================
-# DETAILS FOR A PARAMETER FILE LATER
+# DEFAULT PARAMETERS
 # =============================================================================
 
-# TODO: put this in yaml parameter file, see here https://stackoverflow.com/a/5060485
+# Load YAML file (has to be present in the same folder
+with open(r'gui_params.yaml') as file:
+    # The FullLoader parameter handles the conversion from YAML scalar values to Python's dictionary format
+    default_params = yaml.load(file, Loader=yaml.FullLoader)
 
-# behavior
-default_mouse = 'default_mouse'
-default_setup = 'default_setup'
-default_task = 'default_task'
-default_stage = '0'
-default_anesthesia = 'Awake'
-default_experimenter = 'Adrian'
-default_wheel = 'default_wheel'
-default_sync = 'default_sync'
-default_camera_pos = 'default_camera_pos'
-default_video_rate = '30'
-default_stimulator = 'default_stimulator'
-default_event_type = 'default_event_type'
+# Get path to the Neurophysiology server from login.py
+path_neurophysiology = login.get_neurophys_directory()
 
-default_folder = path_neurophysiology
-wheel_file = 'wheel_rec_{:02d}.bin'
-sync_file = 'imaging_signal_{:02d}.bin'
-video_file = '{:02d}_vid.avi'
-whisker_file = 'whisker_stim_{:02d}.bin'
-event_file = 'sensory_events_{:02d}.txt'
-
-# imaging
-default_microscope = 'Scientifica'
-default_laser = 'MaiTai'
-default_layer = 'default_layer'
-default_planes = '1'
-
-SKIP_IMG_TRANSFER = True
-default_img_folder = path_neurophysiology
-H45_file = 'test_A{}_Ch{}_ ????.tif'    # later used as format string to fill in {} and wildcard characters ? for glob.glob
-scientifica_file = 'file_000??.tif'     # Hendriks format
-parameter_file = 'parameters.xml'
-
-# show only necessary parts of the panels (here: E-phys instead of behavior)
-show_ephys = False
-default_el_sync = 'Galvo_Y_Clipped'
-default_el_sync_file = 'board-ADC-02.dat'
-
-default_el_folder = path_neurophysiology
-probe_files = 'amp-A-0??.dat'
-info_file = 'info.rhd'
-
-# general paths
-path_backup_npy = '../data/'
-default_probe = '16_Wide'
-default_shutter_file = '###'
-
+# Check the default values for adaptive parameters
+if default_params['paths']['default_behav_folder']
 
 # =============================================================================
 # Load options for drop down menus
 # =============================================================================
 
-# connect to datajoint database
-login.connect()
-from schema import common_mice, common_exp, common_behav  # , common_img, common_el
+
 
 alive_mice = common_mice.Mouse() - common_mice.Sacrificed()
 mouse_names = alive_mice.fetch('mouse_id', order_by='mouse_id')     # Todo: restrict mouse selection by investigator
@@ -190,6 +152,7 @@ class window(wx.Frame):
         wx.StaticText(panel,label="Stage:", pos=(S_LEFT+COL+130,S_TOP+ROW))
         self.stage = wx.TextCtrl(panel, pos=(S_LEFT+COL+140,S_TOP+ROW+20), size=(30,-1))
         self.stage.SetValue( default_stage )
+
         # Anesthesia
         wx.StaticText(panel,label="Anesthesia:", pos=(S_LEFT+2*COL,S_TOP+ROW))
         self.anesthesia = wx.ComboBox(panel, choices = anesthesias, style=wx.CB_READONLY,
@@ -232,9 +195,9 @@ class window(wx.Frame):
 
             # Folder with behavioral data
             wx.StaticText(panel,label="Data folder:", pos=(B_LEFT,B_TOP))
-            self.folder = wx.TextCtrl(panel, value=default_folder,
-                                           pos=(B_LEFT,B_TOP+20),
-                                           size=(2*COL-20,25 ) )
+            self.folder = wx.TextCtrl(panel, value=default_behav_folder,
+                                      pos=(B_LEFT,B_TOP+20),
+                                      size=(2*COL-20,25 ))
 
             # Button to select new folder
             self.select_folder = wx.Button(panel,label="Select folder",
@@ -781,7 +744,7 @@ class window(wx.Frame):
 
         # open file dialog
         folder_dialog = wx.DirDialog (parent=None, message="Choose directory of behavioral data",
-                                      defaultPath=default_folder, style = wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
+                                      defaultPath=default_behav_folder, style =wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
         exit_flag = folder_dialog.ShowModal()
         # update the folder in the text box when the user exited with ok
         if exit_flag == wx.ID_OK:
