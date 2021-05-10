@@ -53,7 +53,12 @@ imaging:
   info_file: 'info.rhd'
 
 paths:
-  path_backup_npy: 'neurophys'    # if this is 'neurophys', the path to the Neurophys Server in login.py will be used
+  # if these are 'neurophys', the path to the Neurophys Server in login.py will be used
+  default_behav_folder: 'neurophys'
+  default_img_folder: 'neurophys'
+  default_el_folder: 'neurophys'
+  path_backup_npy: 'neurophys'
+
   default_probe: '16_Wide'
   default_shutter_file: '###'
 
