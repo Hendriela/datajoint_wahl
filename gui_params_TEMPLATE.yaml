@@ -19,7 +19,7 @@ behavior:
   default_task: 'default_task'
   default_stage: '0'
   default_anesthesia: 'Awake'
-  default_experimenter: 'username'  # if this is "username", the value of the 'username' key will be the default
+  default_experimenter: 'username'  # if this is 'username', the value of the "username" key above will be the default
   default_wheel: 'default_wheel'
   default_sync: 'default_sync'
   default_camera_pos: 'default_camera_pos'
@@ -53,7 +53,7 @@ imaging:
   info_file: 'info.rhd'
 
 paths:
-  path_backup_npy: '..\\data\\'
+  path_backup_npy: 'neurophys'    # if this is 'neurophys', the path to the Neurophys Server in login.py will be used
   default_probe: '16_Wide'
   default_shutter_file: '###'
 
