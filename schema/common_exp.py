@@ -2,7 +2,7 @@
 
 import datajoint as dj
 import login
-from . import common_mice
+from schema import common_mice
 
 schema = dj.schema('common_exp', locals(), create_tables=True)
 
@@ -65,12 +65,13 @@ class Task(dj.Lookup):
 class Session(dj.Manual):
     definition = """ # Information about the session and experimental setup
     -> common_mice.Mouse
-    day     : date           # Date of the experimental session (YYYY-MM-DD)
-    trial   : int            # Counter of experimental sessions on the same day (base 1)
+    day             : date           # Date of the experimental session (YYYY-MM-DD)
+    trial           : int            # Counter of experimental sessions on the same day (base 1)
     ---
-    id      : varchar(128)   # Unique identifier
-    path    : varchar(256)   # Relative path of this session on the Neurophysiology-Storage1 server
-    counter : int            # Overall counter of all sessions across mice (base 0)
+    id              : varchar(128)   # Unique identifier
+    path            : varchar(256)   # Relative path of this session on the Neurophysiology-Storage1 server
+    counter         : int            # Overall counter of all sessions across mice (base 0)
+    experimenter    : varchar(128)   # Who actually performed the experiment, must be a username from Investigator()
     -> Anesthesia
     -> Setup
     -> Task
@@ -93,9 +94,6 @@ class Session(dj.Manual):
         :param trial: int, iterator for number of sessions on that day
         :return: unique string ID for this session
         """
-
-        # Todo: I do not check whether the values for investigator and mouse ID are valid (if this mouse exists in the
-        #  Mouse() table. This should be enforced when entering the session through the GUI!
 
         # first part: mouse identifier
         mouse_id_str = 'M{:03d}'.format(int(mouse_id))

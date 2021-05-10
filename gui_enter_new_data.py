@@ -65,17 +65,35 @@ with open(r'gui_params.yaml') as file:
 # Get path to the Neurophysiology server from login.py
 path_neurophysiology = login.get_neurophys_directory()
 
+# Sanity checks: check if the username has been changed from the template and if the username exists in the database
+investigators = list(common_mice.Investigator().fetch("username"))  # Fetch list of investigator usernames from DJ
+if default_params['username'] == 'default_username':
+    raise ValueError("Current username is 'default_username'. \nInsert your username in the gui_params_TEMPLATE.yaml.")
+elif default_params['username'] not in investigators:
+    raise ValueError("Current username '{}' does not exist in common_mice.Investigator(). \n\tInsert the new username "
+                     "there before adding mice and sessions to it.".format(default_params['username']))
+
 # Check the default values for adaptive parameters
-if default_params['paths']['default_behav_folder']
+if default_params['behavior']['default_experimenter'] == 'username':
+    default_params['behavior']['default_experimenter'] = default_params['username']
+
+for key, value in default_params['paths'].items():
+    if value == 'neurophys':
+        default_params['paths'][key] = path_neurophysiology
+
+# Get all mouse_IDs from the current investigator that are still alive and sort them by descending ID
+raw_mouse_ids = (common_mice.Mouse() & "username = '{}'".format(default_params['username'])) - common_mice.Sacrificed()
+mouse_ids = raw_mouse_ids.fetch('mouse_id', order_by='mouse_id DESC')
+if default_params['behavior']['default_mouse'] == 'last_mouse':
+    default_params['behavior']['default_mouse'] = mouse_ids[0]
+
 
 # =============================================================================
 # Load options for drop down menus
 # =============================================================================
 
-
-
-alive_mice = common_mice.Mouse() - common_mice.Sacrificed()
-mouse_names = alive_mice.fetch('mouse_id', order_by='mouse_id')     # Todo: restrict mouse selection by investigator
+investigator = default_params['username']
+inv_fullname = (common_mice.Investigator() & "username = '{}'".format(investigator)).fetch1('full_name')
 
 setups = common_exp.Setup().fetch('setup')
 tasks = common_exp.Task().fetch('task')
@@ -106,7 +124,8 @@ class window(wx.Frame):
 
     def __init__(self, parent, id):
 
-        wx.Frame.__init__(self, parent, id, 'Enter data into pipeline', size=(WINDOW_WIDTH, WINDOW_HEIGHT))
+        wx.Frame.__init__(self, parent, id, '{} ({}): Enter data into pipeline'.format(inv_fullname, investigator),
+                          size=(WINDOW_WIDTH, WINDOW_HEIGHT))
         panel = wx.Panel(self)
 
         self.job_list = list()    # save jobs in format [ [table, entry_dict, source_path, target_path], [...], ...]
@@ -117,11 +136,11 @@ class window(wx.Frame):
                      pos=(S_LEFT-20, S_TOP-30), size=(WINDOW_WIDTH_L-2*S_LEFT, S_HEIGHT))
 
         # Mouse name
-        wx.StaticText(panel,label="Mouse name:", pos=(S_LEFT, S_TOP))
-        self.mouse_name = wx.ComboBox(panel, choices=mouse_names, style=wx.CB_READONLY,
+        wx.StaticText(panel,label="Mouse ID:", pos=(S_LEFT, S_TOP))
+        self.mouse_name = wx.ComboBox(panel, choices=mouse_ids, style=wx.CB_READONLY,
                                       pos=(S_LEFT, S_TOP+20), size=(170, -1))
         self.mouse_name.Bind(wx.EVT_COMBOBOX, self.event_mouse_selected)
-        item = self.mouse_name.FindString(default_mouse)
+        item = self.mouse_name.FindString(default_params['behavior']['default_mouse'])
         self.mouse_name.SetSelection(item)
 
         # Day of experiment
@@ -138,33 +157,33 @@ class window(wx.Frame):
         wx.StaticText(panel,label="Setup:", pos=(S_LEFT,S_TOP+ROW))
         self.setup = wx.ComboBox(panel, choices = setups, style=wx.CB_READONLY,
                                       pos=(S_LEFT,S_TOP+ROW+20), size=(170,-1) )
-        item = self.setup.FindString(default_setup)
+        item = self.setup.FindString(default_params['behavior']['default_setup'])
         self.setup.SetSelection(item)
 
         # Task
         wx.StaticText(panel,label="Task:", pos=(S_LEFT+COL,S_TOP+ROW))
         self.task = wx.ComboBox(panel, choices = tasks, style=wx.CB_READONLY,
                                       pos=(S_LEFT+COL,S_TOP+ROW+20), size=(130,-1) )
-        item = self.task.FindString(default_task)
+        item = self.task.FindString(default_params['behavior']['default_task'])
         self.task.SetSelection(item)
 
         # Stage
         wx.StaticText(panel,label="Stage:", pos=(S_LEFT+COL+130,S_TOP+ROW))
         self.stage = wx.TextCtrl(panel, pos=(S_LEFT+COL+140,S_TOP+ROW+20), size=(30,-1))
-        self.stage.SetValue( default_stage )
+        self.stage.SetValue(default_params['behavior']['default_stage'])
 
         # Anesthesia
         wx.StaticText(panel,label="Anesthesia:", pos=(S_LEFT+2*COL,S_TOP+ROW))
         self.anesthesia = wx.ComboBox(panel, choices = anesthesias, style=wx.CB_READONLY,
                                       pos=(S_LEFT+2*COL,S_TOP+ROW+20), size=(170,-1) )
-        item = self.anesthesia.FindString(default_anesthesia)
+        item = self.anesthesia.FindString(default_params['behavior']['default_anesthesia'])
         self.anesthesia.SetSelection(item)
 
         # Experimenter
         wx.StaticText(panel,label="Experimenter:", pos=(S_LEFT+3*COL,S_TOP+ROW))
         self.experimenter = wx.ComboBox(panel, choices = experimenters, style=wx.CB_READONLY,
                                       pos=(S_LEFT+3*COL,S_TOP+ROW+20), size=(170,-1) )
-        item = self.experimenter.FindString(default_experimenter)
+        item = self.experimenter.FindString(default_params['behavior']['default_experimenter'])
         self.experimenter.SetSelection(item)
 
         # Notes
@@ -189,13 +208,13 @@ class window(wx.Frame):
 # =============================================================================
 # Enter behavioral data from wheel, video, ...
 # =============================================================================
-        if show_ephys == False:
+        if default_params['imaging']['show_ephys'] == False:
             wx.StaticBox(panel, label='BEHAVIOR RECORDINGS',
                         pos=(B_LEFT-20, B_TOP-30), size=(WINDOW_WIDTH_L-2*S_LEFT, 500))
 
             # Folder with behavioral data
             wx.StaticText(panel,label="Data folder:", pos=(B_LEFT,B_TOP))
-            self.folder = wx.TextCtrl(panel, value=default_behav_folder,
+            self.folder = wx.TextCtrl(panel, value=default_params['paths']['default_behav_folder'],
                                       pos=(B_LEFT,B_TOP+20),
                                       size=(2*COL-20,25 ))
 
@@ -215,7 +234,7 @@ class window(wx.Frame):
             wx.StaticText(panel,label="Wheel type:", pos=(B_LEFT+COL,B_TOP+ROW))
             self.wheel = wx.ComboBox(panel, choices = wheels, style=wx.CB_READONLY,
                                           pos=(B_LEFT+COL,B_TOP+ROW+20), size=(170,-1) )
-            item = self.wheel.FindString(default_wheel)
+            item = self.wheel.FindString(default_params['behavior']['default_wheel'])
             self.wheel.SetSelection(item)
 
 
@@ -227,7 +246,7 @@ class window(wx.Frame):
             wx.StaticText(panel,label="Signal type:", pos=(B_LEFT+COL,B_TOP+2*ROW))
             self.imaging_sync = wx.ComboBox(panel, choices = signals, style=wx.CB_READONLY,
                                           pos=(B_LEFT+COL,B_TOP+2*ROW+20), size=(170,-1) )
-            item = self.imaging_sync.FindString(default_sync)
+            item = self.imaging_sync.FindString(default_params['behavior']['default_sync'])
             self.imaging_sync.SetSelection(item)
 
 
@@ -239,18 +258,18 @@ class window(wx.Frame):
             wx.StaticText(panel,label="Camera position:", pos=(B_LEFT+COL,B_TOP+3*ROW))
             self.camera_pos = wx.ComboBox(panel, choices = camera_pos, style=wx.CB_READONLY,
                                           pos=(B_LEFT+COL,B_TOP+3*ROW+20), size=(170,-1) )
-            item = self.camera_pos.FindString(default_camera_pos)
+            item = self.camera_pos.FindString(default_params['behavior']['default_camera_pos'])
             self.camera_pos.SetSelection(item)
 
             # file type
             wx.StaticText(panel,label="File format:", pos=(B_LEFT+2*COL,B_TOP+3*ROW))
             self.video_file = wx.TextCtrl(panel, pos=(B_LEFT+2*COL,B_TOP+3*ROW+20), size=(190,-1))
-            self.video_file.SetValue( video_file )
+            self.video_file.SetValue( default_params['behavior']['video_file'])
 
             # frame rate
             wx.StaticText(panel,label="Frame rate [Hz]:", pos=(B_LEFT+3*COL,B_TOP+3*ROW))
             self.frame_rate = wx.TextCtrl(panel, pos=(B_LEFT+3*COL,B_TOP+3*ROW+20), size=(150,-1))
-            self.frame_rate.SetValue( default_video_rate )
+            self.frame_rate.SetValue(default_params['behavior']['default_video_rate'])
 
         # Whisker stim & event times
             self.whisker_checkbox = wx.CheckBox(panel, label='Whisker stim',
@@ -260,7 +279,7 @@ class window(wx.Frame):
             wx.StaticText(panel,label="Whisker stimulator:", pos=(B_LEFT+COL,B_TOP+4*ROW))
             self.stimulator = wx.ComboBox(panel, choices = stimulators, style=wx.CB_READONLY,
                                           pos=(B_LEFT+COL,B_TOP+4*ROW+20), size=(170,-1) )
-            item = self.stimulator.FindString(default_stimulator)
+            item = self.stimulator.FindString(default_params['behavior']['default_stimulator'])
             self.stimulator.SetSelection(item)
 
 
@@ -270,7 +289,7 @@ class window(wx.Frame):
             wx.StaticText(panel,label="Event file type:", pos=(B_LEFT+COL,B_TOP+5*ROW))
             self.event_type = wx.ComboBox(panel, choices = event_types, style=wx.CB_READONLY,
                                           pos=(B_LEFT+COL,B_TOP+5*ROW+20), size=(170,-1) )
-            item = self.event_type.FindString(default_event_type)
+            item = self.event_type.FindString(default_params['behavior']['default_event_type'])
             self.event_type.SetSelection(item)
 
             # Submit behavior button
@@ -472,11 +491,12 @@ class window(wx.Frame):
                                                     mouse_id=session_dict['mouse_id'],
                                                     date=session_dict['day'],
                                                     trial=session_dict['trial'])
-        file = os.path.join(path_backup_npy, identifier+'.npy')
-        # np.save(file, session_dict)
+        file = os.path.join(default_params['paths']['path_backup_npy'], identifier+'.npy')
+        np.save(file, session_dict)
 
         # check if the session is already in the database (most common error)
-        key = dict(name=self.mouse_name.GetValue(),
+        key = dict(username=investigator,
+                   mouse_id=self.mouse_name.GetValue(),
                    day=self.day.GetValue(),
                    trial=int( self.trial.GetValue() ) )
         if len( common_exp.Session() & key) > 0:
@@ -522,7 +542,7 @@ class window(wx.Frame):
 
 
     def event_submit_behavior(self, event):
-        """ User clicked on buttion to submit the behavioral data """
+        """ User clicked on button to submit the behavioral data """
 
         # go through all behavioral files and upload if checkbox is set
         session_key = dict( name = self.mouse_name.GetValue(),
@@ -537,7 +557,7 @@ class window(wx.Frame):
             self.save_insert( common_behav.Wheel(), wheel_dict)
 
             # add job to transfer file later
-            file = wheel_file.format(trial)
+            file = default_params['behavior']['wheel_file'].format(trial)
             raw_wheel_dict = dict( **session_key,
                                   file_name = file)
 
@@ -546,45 +566,45 @@ class window(wx.Frame):
         if self.sync_checkbox.GetValue():
             sync_dict = dict(**session_key,
                              sync_type=self.imaging_sync.GetValue())
-            self.save_insert( common_behav.Synchronization(), sync_dict)
+            self.save_insert(common_behav.Synchronization(), sync_dict)
 
-            file = sync_file.format(trial)
+            file = default_params['behavior']['synch_file'].format(trial)
             raw_sync_dict = dict(**session_key,
                                  file_name=file)
-            self.job_list.append( [common_behav.RawSynchronizationFile(), raw_sync_dict, self.folder.GetValue(), file])
+            self.job_list.append([common_behav.RawSynchronizationFile(), raw_sync_dict, self.folder.GetValue(), file])
     # video
         if self.video_checkbox.GetValue():
             video_dict = dict(**session_key,
-                              camera_nr = 0,   # TODO: modify for multiple cameras
+                              camera_nr=0,   # TODO: modify for multiple cameras
                               camera_position=self.camera_pos.GetValue(),
-                              frame_rate = int( self.frame_rate.GetValue() ) )
-            self.save_insert( common_behav.Video(), video_dict)
+                              frame_rate=int(self.frame_rate.GetValue()))
+            self.save_insert(common_behav.Video(), video_dict)
 
             file = self.video_file.GetValue().format(trial)
-            raw_video_dict = dict( **session_key,
-                                 camera_nr = 0,
-                                 part = 0,
-                                 file_name = file)
-            self.job_list.append( [common_behav.RawVideoFile(), raw_video_dict, self.folder.GetValue(), file])
+            raw_video_dict = dict(**session_key,
+                                  camera_nr=0,
+                                  part=0,
+                                  file_name=file)
+            self.job_list.append([common_behav.RawVideoFile(), raw_video_dict, self.folder.GetValue(), file])
     # whisker stimulator
         if self.whisker_checkbox.GetValue():
             whisker_dict = dict(**session_key,
-                             stimulator_type=self.stimulator.GetValue())
-            self.save_insert( common_behav.WhiskerStimulator(), whisker_dict)
+                                stimulator_type=self.stimulator.GetValue())
+            self.save_insert(common_behav.WhiskerStimulator(), whisker_dict)
 
-            file = whisker_file.format(trial)
+            file = default_params['behavior']['whisker_file'].format(trial)
             raw_whisker_dict = dict(**session_key,
-                                 file_name=file)
-            self.job_list.append( [common_behav.RawWhiskerStimulatorFile(), raw_whisker_dict, self.folder.GetValue(), file])
+                                    file_name=file)
+            self.job_list.append([common_behav.RawWhiskerStimulatorFile(), raw_whisker_dict, self.folder.GetValue(), file])
     # events
         if self.event_checkbox.GetValue():
             event_dict = dict(**session_key,
                               sensory_event_type = self.event_type.GetValue() )
-            self.save_insert( common_behav.SensoryEvents(), event_dict)
+            self.save_insert(common_behav.SensoryEvents(), event_dict)
 
-            file = event_file.format(trial)
+            file = default_params['behavior']['event_file'].format(trial)
             raw_event_dict = dict(**session_key,
-                                 file_name=file)
+                                  file_name=file)
             self.job_list.append( [common_behav.RawSensoryEventsFile(), raw_event_dict, self.folder.GetValue(), file])
 
     """ COMMENTED OUT BECAUSE WE DONT HAVE THE IMG() OR EL() SCHEMA YET
@@ -744,7 +764,8 @@ class window(wx.Frame):
 
         # open file dialog
         folder_dialog = wx.DirDialog (parent=None, message="Choose directory of behavioral data",
-                                      defaultPath=default_behav_folder, style =wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
+                                      defaultPath=default_params['paths']['default_behav_folder'],
+                                      style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
         exit_flag = folder_dialog.ShowModal()
         # update the folder in the text box when the user exited with ok
         if exit_flag == wx.ID_OK:
@@ -756,7 +777,8 @@ class window(wx.Frame):
 
         # open file dialog
         folder_dialog = wx.DirDialog (parent=None, message="Choose directory of imaging data",
-                                      defaultPath=default_img_folder, style = wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
+                                      defaultPath=default_params['paths']['default_img_folder'],
+                                      style = wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
         exit_flag = folder_dialog.ShowModal()
         # update the folder in the text box when the user exited with ok
         if exit_flag == wx.ID_OK:
@@ -767,7 +789,8 @@ class window(wx.Frame):
 
         # open file dialog
         folder_dialog = wx.DirDialog (parent=None, message="Choose directory of electrical recording data",
-                                      defaultPath=default_el_folder, style = wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
+                                      defaultPath=default_params['paths']['default_el_folder'],
+                                      style = wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
         exit_flag = folder_dialog.ShowModal()
         # update the folder in the text box when the user exited with ok
         if exit_flag == wx.ID_OK:
