@@ -45,4 +45,4 @@ Injection.insert1({"username": "hheise", "mouse_id": 1, "surgery_num": 2, "injec
 # Add session
 Session.insert1({"username": "hheise", "mouse_id": 1, "day": '1900-01-01', "trial": 1, "id": 'hheise_M001_1900-01-01_00',
                  "path": '\\test_path\\hheise_M001_1900-01-01_00', "counter": 1, "anesthesia": "Awake", "setup": "VR",
-                 "task": "Passive", "stage": "0", "notes": "A test session"})
+                 "task": "Passive", "stage": "0", "experimenter": "mpanze", "notes": "A test session"})

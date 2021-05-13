@@ -13,7 +13,7 @@ sys.path.append("..") # Adds higher directory to python modules path.
 
 import wx
 import login
-import datajoint
+import datajoint as dj
 from datetime import datetime
 import os
 import glob
@@ -94,7 +94,11 @@ if default_params['behavior']['default_mouse'] == 'last_mouse':
 # Check how many sessions this mouse has on the current day and adjust the trial counter accordingly
 mouse_id_filter = "mouse_id = '{}'".format(default_params['behavior']['default_mouse'])
 date_filter = "day = '{}'".format(current_day)
-next_trial = str(max((common_exp.Session() & username_filter & mouse_id_filter & date_filter).fetch('trial'))+1)
+all_trials = (common_exp.Session() & username_filter & mouse_id_filter & date_filter).fetch('trial')
+if len(all_trials) == 0:
+    next_trial = '1'
+else:
+    next_trial = str(max(all_trials)+1)
 
 # =============================================================================
 # Load options for drop down menus
@@ -506,7 +510,7 @@ class window(wx.Frame):
         key = dict(username=investigator,
                    mouse_id=self.mouse_name.GetValue(),
                    day=self.day.GetValue(),
-                   trial=int( self.trial.GetValue() ) )
+                   trial=int(self.trial.GetValue()))
         if len( common_exp.Session() & key) > 0:
             message = 'The session you wanted to enter into the database already exists.\n' + \
                       'Therefore, nothing was entered into the databse.'
@@ -524,13 +528,14 @@ class window(wx.Frame):
     def event_load_session(self, event):
         """ User wants to load additional information about session into GUI """
 
-        session_dict = dict( name = self.mouse_name.GetValue(),
-                            day = self.day.GetValue(),
-                            trial = int( self.trial.GetValue() ) )
-        entries = (common_exp.Session() & session_dict ).fetch(as_dict=True)
+        session_dict = dict(username=investigator,
+                            mouse_id=self.mouse_name.GetValue(),
+                            day=self.day.GetValue(),
+                            trial=int(self.trial.GetValue()))
+        entries = (common_exp.Session() & session_dict).fetch(as_dict=True)
         # check there is only one table corresponding to this
-        if len(entries) != 1:
-            self.status_text.write('Can not load session info for {} because there are {} sessions corresponing to this'.format(session_dict, len(entries))+'\n')
+        if len(entries) > 1:
+            self.status_text.write('Can not load session info for {} because there are {} sessions corresponding to this'.format(session_dict, len(entries))+'\n')
             return
 
         entry = entries[0]
