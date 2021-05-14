@@ -118,7 +118,7 @@ class Session(dj.Manual):
         dir = login.get_neurophys_data_directory()   # get machine-specific path from local login file
 
         if dir in abs_path:
-            return abs_path.replace(dir, '')    # the first character is a leading \\, be careful when using it
+            return abs_path.replace(dir, '')    # the first character is a leading \\, be careful when using it Todo: is it better with leading \\ or without?
         else:
             raise Warning('\nAbsolute session path {} \ndoes not seem to be on the main Neurophys server directory. '
                           'Make sure that the session path and the \nlocal server directory in '
@@ -144,9 +144,7 @@ class Session(dj.Manual):
             counter = max(Session.fetch('counter')) + 1
 
         # Transform absolute path from the GUI to the relative path on the Neurophys-Storage1 server
-        # Todo: implement Path button in GUI
-        # new_entry_dict['path'] = self.get_relative_path(new_entry_dict['path'])
-        new_entry_dict['path'] = "\\test_path\\" + id
+        new_entry_dict['path'] = self.get_relative_path(new_entry_dict['path'])
 
         # add automatically computed values to the dictionary
         entry = dict(**new_entry_dict, id=id, counter=counter)

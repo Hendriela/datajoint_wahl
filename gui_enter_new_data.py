@@ -41,7 +41,7 @@ S_LEFT = 30+20    # position of the first element in session box
 S_TOP = 20+30
 ROW = 70
 COL = 200
-S_HEIGHT = 260   # height of session box
+S_HEIGHT = 330   # height of session box
 
 # behavior
 B_LEFT = S_LEFT
@@ -167,44 +167,56 @@ class window(wx.Frame):
         self.trial = wx.TextCtrl(panel, pos=(S_LEFT+2*COL,S_TOP+20), size=(170,-1))
         self.trial.SetValue(next_trial)
 
+        # Folder with behavioral data
+        wx.StaticText(panel, label="Session folder:", pos=(S_LEFT, S_TOP+ROW))
+        self.session_folder = wx.TextCtrl(panel, value=login.get_neurophys_data_directory(),
+                                          pos=(S_LEFT, S_TOP + ROW + 20),
+                                          size=(2 * COL - 20, 25))
+
+        # Button to select new folder
+        self.select_session_folder = wx.Button(panel, label="Select folder",
+                                       pos=(S_LEFT + 2 * COL, S_TOP + ROW + 20),
+                                       size=(100, 25))
+        self.Bind(wx.EVT_BUTTON, self.event_select_session_folder, self.select_session_folder)
+
         # Setup
-        wx.StaticText(panel,label="Setup:", pos=(S_LEFT,S_TOP+ROW))
+        wx.StaticText(panel,label="Setup:", pos=(S_LEFT,S_TOP+2*ROW))
         self.setup = wx.ComboBox(panel, choices = setups, style=wx.CB_READONLY,
-                                      pos=(S_LEFT,S_TOP+ROW+20), size=(170,-1) )
+                                      pos=(S_LEFT,S_TOP+2*ROW+20), size=(170,-1) )
         item = self.setup.FindString(default_params['behavior']['default_setup'])
         self.setup.SetSelection(item)
 
         # Task
-        wx.StaticText(panel,label="Task:", pos=(S_LEFT+COL,S_TOP+ROW))
+        wx.StaticText(panel,label="Task:", pos=(S_LEFT+COL,S_TOP+2*ROW))
         self.task = wx.ComboBox(panel, choices = tasks, style=wx.CB_READONLY,
-                                      pos=(S_LEFT+COL,S_TOP+ROW+20), size=(130,-1) )
+                                      pos=(S_LEFT+COL,S_TOP+2*ROW+20), size=(130,-1) )
         item = self.task.FindString(default_params['behavior']['default_task'])
         self.task.SetSelection(item)
 
         # Stage
-        wx.StaticText(panel,label="Stage:", pos=(S_LEFT+COL+130,S_TOP+ROW))
-        self.stage = wx.TextCtrl(panel, pos=(S_LEFT+COL+140,S_TOP+ROW+20), size=(30,-1))
+        wx.StaticText(panel,label="Stage:", pos=(S_LEFT+COL+130,S_TOP+2*ROW))
+        self.stage = wx.TextCtrl(panel, pos=(S_LEFT+COL+140,S_TOP+2*ROW+20), size=(30,-1))
         self.stage.SetValue(default_params['behavior']['default_stage'])
 
         # Anesthesia
-        wx.StaticText(panel,label="Anesthesia:", pos=(S_LEFT+2*COL,S_TOP+ROW))
+        wx.StaticText(panel,label="Anesthesia:", pos=(S_LEFT+2*COL,S_TOP+2*ROW))
         self.anesthesia = wx.ComboBox(panel, choices = anesthesias, style=wx.CB_READONLY,
-                                      pos=(S_LEFT+2*COL,S_TOP+ROW+20), size=(170,-1) )
+                                      pos=(S_LEFT+2*COL,S_TOP+2*ROW+20), size=(170,-1) )
         item = self.anesthesia.FindString(default_params['behavior']['default_anesthesia'])
         self.anesthesia.SetSelection(item)
 
         # Experimenter
-        wx.StaticText(panel,label="Experimenter:", pos=(S_LEFT+3*COL,S_TOP+ROW))
+        wx.StaticText(panel,label="Experimenter:", pos=(S_LEFT+3*COL,S_TOP+2*ROW))
         self.experimenter = wx.ComboBox(panel, choices = experimenters, style=wx.CB_READONLY,
-                                      pos=(S_LEFT+3*COL,S_TOP+ROW+20), size=(170,-1) )
+                                      pos=(S_LEFT+3*COL,S_TOP+2*ROW+20), size=(170,-1) )
         item = self.experimenter.FindString(default_params['behavior']['default_experimenter'])
         self.experimenter.SetSelection(item)
 
         # Notes
-        wx.StaticText(panel,label="Notes:", pos=(S_LEFT,S_TOP+2*ROW))
+        wx.StaticText(panel,label="Notes:", pos=(S_LEFT,S_TOP+3*ROW))
         self.notes = wx.TextCtrl(panel, value="",
                                        style=wx.TE_MULTILINE,
-                                       pos=(S_LEFT,S_TOP+2*ROW+20),
+                                       pos=(S_LEFT,S_TOP+3*ROW+20),
                                        size=(WINDOW_WIDTH_L-3*S_LEFT-200,50 ) )
 
         # Load session button
@@ -215,7 +227,7 @@ class window(wx.Frame):
 
         # Submit session button
         self.submit_session_button = wx.Button(panel,label="Submit session",
-                                       pos=(S_LEFT+3*COL, S_TOP+2*ROW+20),
+                                       pos=(S_LEFT+3*COL, S_TOP+3*ROW+20),
                                        size=(150, 50) )
         self.Bind( wx.EVT_BUTTON, self.event_submit_session, self.submit_session_button)
 
@@ -228,15 +240,15 @@ class window(wx.Frame):
 
             # Folder with behavioral data
             wx.StaticText(panel,label="Data folder:", pos=(B_LEFT,B_TOP))
-            self.folder = wx.TextCtrl(panel, value=default_params['paths']['default_behav_folder'],
-                                      pos=(B_LEFT,B_TOP+20),
-                                      size=(2*COL-20,25 ))
+            self.behav_folder = wx.TextCtrl(panel, value=default_params['paths']['default_behav_folder'],
+                                            pos=(B_LEFT,B_TOP+20),
+                                            size=(2*COL-20,25 ))
 
             # Button to select new folder
-            self.select_folder = wx.Button(panel,label="Select folder",
+            self.select_behav_folder = wx.Button(panel,label="Select folder",
                                            pos=(B_LEFT+2*COL, B_TOP+20),
-                                           size=(100, 25) )
-            self.Bind( wx.EVT_BUTTON, self.event_select_folder, self.select_folder)
+                                           size=(100, 25))
+            self.Bind( wx.EVT_BUTTON, self.event_select_behav_folder, self.select_behav_folder)
 
 
 
@@ -379,10 +391,11 @@ class window(wx.Frame):
                                            pos=(B_LEFT+3*COL, B_TOP+5*ROW),
                                            size=(150, 50) )
             self.Bind( wx.EVT_BUTTON, self.event_submit_el, self.submit_el_button)
-
+        """
 # =============================================================================
 # Enter imaging data
 # =============================================================================
+        """
         wx.StaticBox(panel, label='IMAGING',
                     pos=(I_LEFT-20, I_TOP-30), size=(WINDOW_WIDTH-I_LEFT-20, 500))
 
@@ -490,31 +503,17 @@ class window(wx.Frame):
 
         # create session dictionary that can be entered into datajoint pipeline
         session_dict = dict(username=investigator,
-                            mouse_id = self.mouse_name.GetValue(),
-                            day = self.day.GetValue(),
-                            trial = int( self.trial.GetValue() ),
-                            anesthesia = self.anesthesia.GetValue(),
-                            setup = self.setup.GetValue(),
-                            task = self.task.GetValue(),
-                            stage = int( self.stage.GetValue() ),
-                            experimenter = self.experimenter.GetValue(),
-                            notes = self.notes.GetValue()
+                            mouse_id=self.mouse_name.GetValue(),
+                            day=self.day.GetValue(),
+                            trial=int(self.trial.GetValue()),
+                            path=self.session_folder.GetValue(),
+                            anesthesia=self.anesthesia.GetValue(),
+                            setup=self.setup.GetValue(),
+                            task=self.task.GetValue(),
+                            stage=int(self.stage.GetValue()),
+                            experimenter=self.experimenter.GetValue(),
+                            notes=self.notes.GetValue()
                             )
-
-        # save dictionary that is entered in a backup YAML file for faster re-population
-        identifier = common_exp.Session().create_id(investigator_name=investigator,
-                                                    mouse_id=session_dict['mouse_id'],
-                                                    date=session_dict['day'],
-                                                    trial=session_dict['trial'])
-        file = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier+'.yaml')
-        if os.path.isfile(file):
-            message = 'The backup file of the session you wanted to enter into the database with the unique identifier ' \
-                      '{} already exists.\nTherefore, nothing was entered into the database.'.format(identifier)
-            wx.MessageBox(message, caption="Backup file already exists", style=wx.OK | wx.ICON_INFORMATION)
-            return
-        else:
-            with open(file, 'w') as outfile:
-                yaml.dump(session_dict, outfile, default_flow_style=False)
 
         # check if the session is already in the database (most common error)
         key = dict(username=investigator,
@@ -531,6 +530,23 @@ class window(wx.Frame):
         try:
             common_exp.Session().helper_insert1( session_dict )
             self.status_text.write('Sucessfully entered new session: ' + str(key) + '\n')
+
+            # save dictionary that is entered in a backup YAML file for faster re-population
+            identifier = common_exp.Session().create_id(investigator_name=investigator,
+                                                        mouse_id=session_dict['mouse_id'],
+                                                        date=session_dict['day'],
+                                                        trial=session_dict['trial'])
+            file = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier + '.yaml')
+            # TODO show prompt if a backup file with this identifier already exists and ask the user to overwrite
+            # if os.path.isfile(file):
+            #     message = 'The backup file of the session you wanted to enter into the database with the unique identifier ' \
+            #               '{} already exists.\nTherefore, nothing was entered into the database.'.format(identifier)
+            #     wx.MessageBox(message, caption="Backup file already exists", style=wx.OK | wx.ICON_INFORMATION)
+            #     return
+            # else:
+            with open(file, 'w') as outfile:
+                yaml.dump(session_dict, outfile, default_flow_style=False)
+
         except Exception as ex:
             print('Exception manually caught:', ex)
             self.status_text.write('Error: ' + str(ex) + '\n')
@@ -584,7 +600,7 @@ class window(wx.Frame):
             raw_wheel_dict = dict( **session_key,
                                   file_name = file)
 
-            self.job_list.append( [common_behav.RawWheelFile(), raw_wheel_dict, self.folder.GetValue(), file])
+            self.job_list.append([common_behav.RawWheelFile(), raw_wheel_dict, self.behav_folder.GetValue(), file])
     # synchronization
         if self.sync_checkbox.GetValue():
             sync_dict = dict(**session_key,
@@ -594,7 +610,7 @@ class window(wx.Frame):
             file = default_params['behavior']['synch_file'].format(trial)
             raw_sync_dict = dict(**session_key,
                                  file_name=file)
-            self.job_list.append([common_behav.RawSynchronizationFile(), raw_sync_dict, self.folder.GetValue(), file])
+            self.job_list.append([common_behav.RawSynchronizationFile(), raw_sync_dict, self.behav_folder.GetValue(), file])
     # video
         if self.video_checkbox.GetValue():
             video_dict = dict(**session_key,
@@ -608,7 +624,7 @@ class window(wx.Frame):
                                   camera_nr=0,
                                   part=0,
                                   file_name=file)
-            self.job_list.append([common_behav.RawVideoFile(), raw_video_dict, self.folder.GetValue(), file])
+            self.job_list.append([common_behav.RawVideoFile(), raw_video_dict, self.behav_folder.GetValue(), file])
     # whisker stimulator
         if self.whisker_checkbox.GetValue():
             whisker_dict = dict(**session_key,
@@ -618,7 +634,7 @@ class window(wx.Frame):
             file = default_params['behavior']['whisker_file'].format(trial)
             raw_whisker_dict = dict(**session_key,
                                     file_name=file)
-            self.job_list.append([common_behav.RawWhiskerStimulatorFile(), raw_whisker_dict, self.folder.GetValue(), file])
+            self.job_list.append([common_behav.RawWhiskerStimulatorFile(), raw_whisker_dict, self.behav_folder.GetValue(), file])
     # events
         if self.event_checkbox.GetValue():
             event_dict = dict(**session_key,
@@ -628,7 +644,7 @@ class window(wx.Frame):
             file = default_params['behavior']['event_file'].format(trial)
             raw_event_dict = dict(**session_key,
                                   file_name=file)
-            self.job_list.append( [common_behav.RawSensoryEventsFile(), raw_event_dict, self.folder.GetValue(), file])
+            self.job_list.append([common_behav.RawSensoryEventsFile(), raw_event_dict, self.behav_folder.GetValue(), file])
 
     """ COMMENTED OUT BECAUSE WE DONT HAVE THE IMG() OR EL() SCHEMA YET
     def event_submit_img(self, event):
@@ -782,8 +798,20 @@ class window(wx.Frame):
     """
 
 
-    def event_select_folder(self, event):
-        """ User clicked on select folder button """
+    def event_select_session_folder(self, event):
+        """ User clicked on select session folder button """
+
+        # open file dialog
+        folder_dialog = wx.DirDialog (parent=None, message="Choose directory of session",
+                                      defaultPath=self.session_folder.GetValue(),
+                                      style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
+        exit_flag = folder_dialog.ShowModal()
+        # update the folder in the text box when the user exited with ok
+        if exit_flag == wx.ID_OK:
+            self.session_folder.SetValue(folder_dialog.GetPath())
+
+    def event_select_behav_folder(self, event):
+        """ User clicked on select behavior folder button """
 
         # open file dialog
         folder_dialog = wx.DirDialog (parent=None, message="Choose directory of behavioral data",
@@ -792,7 +820,7 @@ class window(wx.Frame):
         exit_flag = folder_dialog.ShowModal()
         # update the folder in the text box when the user exited with ok
         if exit_flag == wx.ID_OK:
-            self.folder.SetValue( folder_dialog.GetPath() )
+            self.behav_folder.SetValue(folder_dialog.GetPath())
 
 
     def event_select_img_folder(self, event):
