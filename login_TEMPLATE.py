@@ -64,7 +64,7 @@ def get_neurophys_data_directory():
     raise Exception('The path to the mapped neurophys directory path has not been set in the file '
                     '"login.py". Please modify this file.')
 
-    return # for example for Hendrik's PC:  'W:\\Neurophysiology-Storage1\\Wahl\\Hendrik\\Data'
+    return # for example for Hendrik's PC:  'W:\\Neurophysiology-Storage1\\Wahl\\Hendrik\\PhD\\Data'
 
 def get_computer_name():
     """ Return the name of the local computer to check if the file is locally cached """
