@@ -115,14 +115,14 @@ class Session(dj.Manual):
         :return: relative path with the machine-specific Neurophysiology-Path removed
         """
 
-        dir = login.get_neurophys_directory()   # get machine-specific path from local login file
+        dir = login.get_neurophys_data_directory()   # get machine-specific path from local login file
 
         if dir in abs_path:
             return abs_path.replace(dir, '')    # the first character is a leading \\, be careful when using it
         else:
             raise Warning('\nAbsolute session path {} \ndoes not seem to be on the main Neurophys server directory. '
                           'Make sure that the session path and the \nlocal server directory in '
-                          'login.get_neurophys_directory() are set correctly.\n'
+                          'login.get_neurophys_data_directory() are set correctly.\n'
                           'Absolute path used for now.'.format(abs_path))
 
 

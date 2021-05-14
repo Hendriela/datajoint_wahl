@@ -53,6 +53,9 @@ I_TOP = B_TOP
 
 L_TOP = B_TOP + 500
 
+# relative path to manual_submission backup folder inside the Neurophysiology Wahl directory (common for all users)
+REL_BACKUP_PATH = "Datajoint\\manual_submissions"
+
 # =============================================================================
 # DEFAULT PARAMETERS
 # =============================================================================
@@ -65,8 +68,8 @@ with open(r'gui_params.yaml') as file:
 # Set current day as default day
 current_day = datetime.today().strftime('%Y-%m-%d')  # YYYY-MM-DD
 
-# Get path to the Neurophysiology server from login.py
-path_neurophysiology = login.get_neurophys_directory()
+# Get path to the data folder on the Neurophysiology server from login.py
+path_neurophys_data = login.get_neurophys_data_directory()
 
 # Sanity checks: check if the username has been changed from the template and if the username exists in the database
 investigators = list(common_mice.Investigator().fetch("username"))  # Fetch list of investigator usernames from DJ
@@ -82,7 +85,7 @@ if default_params['behavior']['default_experimenter'] == 'username':
 
 for key, value in default_params['paths'].items():
     if value == 'neurophys':
-        default_params['paths'][key] = path_neurophysiology
+        default_params['paths'][key] = path_neurophys_data
 
 # Get all mouse_IDs from the current investigator that are still alive and sort them by descending ID
 username_filter = "username = '{}'".format(default_params['username'])
@@ -498,13 +501,20 @@ class window(wx.Frame):
                             notes = self.notes.GetValue()
                             )
 
-        # save dictionary that is entered
+        # save dictionary that is entered in a backup YAML file for faster re-population
         identifier = common_exp.Session().create_id(investigator_name=investigator,
                                                     mouse_id=session_dict['mouse_id'],
                                                     date=session_dict['day'],
                                                     trial=session_dict['trial'])
-        file = os.path.join(default_params['paths']['path_backup_npy'], identifier+'.npy')
-        np.save(file, session_dict)
+        file = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier+'.yaml')
+        if os.path.isfile(file):
+            message = 'The backup file of the session you wanted to enter into the database with the unique identifier ' \
+                      '{} already exists.\nTherefore, nothing was entered into the database.'.format(identifier)
+            wx.MessageBox(message, caption="Backup file already exists", style=wx.OK | wx.ICON_INFORMATION)
+            return
+        else:
+            with open(file, 'w') as outfile:
+                yaml.dump(session_dict, outfile, default_flow_style=False)
 
         # check if the session is already in the database (most common error)
         key = dict(username=investigator,
@@ -513,8 +523,8 @@ class window(wx.Frame):
                    trial=int(self.trial.GetValue()))
         if len( common_exp.Session() & key) > 0:
             message = 'The session you wanted to enter into the database already exists.\n' + \
-                      'Therefore, nothing was entered into the databse.'
-            wx.MessageBox(message, caption="Session already in database" ,style=wx.OK | wx.ICON_INFORMATION)
+                      'Therefore, nothing was entered into the database.'
+            wx.MessageBox(message, caption="Session already in database", style=wx.OK | wx.ICON_INFORMATION)
             return
 
         # add entry to database
@@ -523,7 +533,7 @@ class window(wx.Frame):
             self.status_text.write('Sucessfully entered new session: ' + str(key) + '\n')
         except Exception as ex:
             print('Exception manually caught:', ex)
-            self.status_text.write('Error: '+ str(ex) +'\n')
+            self.status_text.write('Error: ' + str(ex) + '\n')
 
     def event_load_session(self, event):
         """ User wants to load additional information about session into GUI """
@@ -838,7 +848,7 @@ class window(wx.Frame):
             source_path = os.path.join( source_folder, file_name)
 
             folder_id = common_exp.Session().create_id(new_entry['name'], new_entry['day'], new_entry['trial'])
-            target_folder = os.path.join( path_neurophysiology, folder_id )
+            target_folder = os.path.join(path_neurophys_data, folder_id)
 
             target_path = os.path.join( target_folder, file_name)
 
