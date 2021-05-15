@@ -3,6 +3,8 @@
 import datajoint as dj
 import login
 from schema import common_mice
+from pathlib import Path
+import os
 
 schema = dj.schema('common_exp', locals(), create_tables=True)
 
@@ -115,10 +117,14 @@ class Session(dj.Manual):
         :return: relative path with the machine-specific Neurophysiology-Path removed
         """
 
-        dir = login.get_neurophys_data_directory()   # get machine-specific path from local login file
+        dir = Path(login.get_neurophys_data_directory())   # get machine-specific path from local login file
 
-        if dir in abs_path:
-            return abs_path.replace(dir, '')    # the first character is a leading \\, be careful when using it Todo: is it better with leading \\ or without?
+        if dir in abs_path.parents:
+            # If the session path is inside the Neurophys data directory, transform it to a relative path
+            return Path(os.path.relpath(abs_path, dir))
+        elif dir == abs_path:
+            raise NameError('\nAbsolute session path {} cannot be the same as the Neurophys data directory.\n '
+                            'Create a subdfolder inside the Neurophys data directory for the session.'.format(abs_path))
         else:
             raise Warning('\nAbsolute session path {} \ndoes not seem to be on the main Neurophys server directory. '
                           'Make sure that the session path and the \nlocal server directory in '

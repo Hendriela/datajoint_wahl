@@ -19,6 +19,7 @@ import os
 import glob
 import numpy as np
 import yaml
+from pathlib import Path
 
 # connect to datajoint database
 login.connect()
@@ -501,12 +502,13 @@ class window(wx.Frame):
     def event_submit_session(self, event):
         """ The user clicked on the button to submit a session """
 
+
         # create session dictionary that can be entered into datajoint pipeline
         session_dict = dict(username=investigator,
                             mouse_id=self.mouse_name.GetValue(),
                             day=self.day.GetValue(),
                             trial=int(self.trial.GetValue()),
-                            path=self.session_folder.GetValue(),
+                            path=Path(self.session_folder.GetValue()),
                             anesthesia=self.anesthesia.GetValue(),
                             setup=self.setup.GetValue(),
                             task=self.task.GetValue(),
@@ -528,7 +530,7 @@ class window(wx.Frame):
 
         # add entry to database
         try:
-            common_exp.Session().helper_insert1( session_dict )
+            common_exp.Session().helper_insert1(session_dict)
             self.status_text.write('Sucessfully entered new session: ' + str(key) + '\n')
 
             # save dictionary that is entered in a backup YAML file for faster re-population
@@ -544,6 +546,8 @@ class window(wx.Frame):
             #     wx.MessageBox(message, caption="Backup file already exists", style=wx.OK | wx.ICON_INFORMATION)
             #     return
             # else:
+            # Transform session path from Path to string (with universal / separator) to make it YAML-compatible
+            session_dict['path'] = str(session_dict['path']).replace("\\", "/")
             with open(file, 'w') as outfile:
                 yaml.dump(session_dict, outfile, default_flow_style=False)
 
