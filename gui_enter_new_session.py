@@ -6,6 +6,8 @@ Created on Fri Oct 18 10:13:55 2019
 Installation of wxpython in Ubuntu 18.04 (pip install did not work):
 conda install -c anaconda wxpython
 pip install datajoint
+
+Adapted by Hendrik 2021-05-15
 """
 
 import sys
@@ -55,7 +57,7 @@ I_TOP = B_TOP
 L_TOP = B_TOP + 500
 
 # relative path to manual_submission backup folder inside the Neurophysiology Wahl directory (common for all users)
-REL_BACKUP_PATH = "Datajoint\\manual_submissions"
+REL_BACKUP_PATH = "Datajoint/manual_session_submissions"
 
 # =============================================================================
 # DEFAULT PARAMETERS
@@ -112,7 +114,7 @@ investigator = default_params['username']
 inv_fullname = (common_mice.Investigator() & "username = '{}'".format(investigator)).fetch1('full_name')
 
 setups = common_exp.Setup().fetch('setup')
-tasks = common_exp.Task().fetch('task')
+tasks = (common_exp.Task() & "username = '{}'".format(investigator)).fetch('task')      # Restrict tasks by investigator
 anesthesias = common_exp.Anesthesia().fetch('anesthesia')
 experimenters = common_mice.Investigator().fetch('username')
 
@@ -190,14 +192,9 @@ class window(wx.Frame):
         # Task
         wx.StaticText(panel,label="Task:", pos=(S_LEFT+COL,S_TOP+2*ROW))
         self.task = wx.ComboBox(panel, choices = tasks, style=wx.CB_READONLY,
-                                      pos=(S_LEFT+COL,S_TOP+2*ROW+20), size=(130,-1) )
+                                      pos=(S_LEFT+COL,S_TOP+2*ROW+20), size=(170,-1) )
         item = self.task.FindString(default_params['behavior']['default_task'])
         self.task.SetSelection(item)
-
-        # Stage
-        wx.StaticText(panel,label="Stage:", pos=(S_LEFT+COL+130,S_TOP+2*ROW))
-        self.stage = wx.TextCtrl(panel, pos=(S_LEFT+COL+140,S_TOP+2*ROW+20), size=(30,-1))
-        self.stage.SetValue(default_params['behavior']['default_stage'])
 
         # Anesthesia
         wx.StaticText(panel,label="Anesthesia:", pos=(S_LEFT+2*COL,S_TOP+2*ROW))
@@ -546,6 +543,7 @@ class window(wx.Frame):
             #     wx.MessageBox(message, caption="Backup file already exists", style=wx.OK | wx.ICON_INFORMATION)
             #     return
             # else:
+
             # Transform session path from Path to string (with universal / separator) to make it YAML-compatible
             session_dict['path'] = str(session_dict['path']).replace("\\", "/")
             with open(file, 'w') as outfile:

@@ -23,6 +23,10 @@ Mouse().insert1({"username": "mpanze", "mouse_id": 0, "dob": "2021-01-01", "sex"
                  "strain": "L2/3-TIGRE2.0-GCaMP6f", "genotype": "+/+", "irats_id": "BJ1111", "cage_num": 11002312, "ear_mark": "L",
                  "licence_id": "241/2018-A", "info": "Third dummy test mouse"})
 
+Mouse().insert1({"username": "hheise", "mouse_id": 158, "dob": "2021-01-01", "sex": "M", "batch": 0,
+                 "strain": "L2/3-TIGRE2.0-GCaMP6f", "genotype": "", "irats_id": "", "cage_num": 11002312, "ear_mark": "",
+                 "licence_id": "241/2018-A", "info": "Mouse with some data missing"})
+
 # Add weights
 Weight().insert1({"username": "hheise", "mouse_id": 1, "date_of_weight": "2021-04-18", "weight": 20.1})
 Weight().insert1({"username": "hheise", "mouse_id": 1, "date_of_weight": "2021-04-19", "weight": 20.4})
@@ -43,6 +47,6 @@ Injection.insert1({"username": "hheise", "mouse_id": 1, "surgery_num": 2, "injec
                    "coordinates": "-1mm A/P, -1mm M/L, 0.5 mm D/V","injection_notes":"second mock injection"})
 
 # Add session
-Session.insert1({"username": "hheise", "mouse_id": 1, "day": '1900-01-01', "trial": 1, "id": 'hheise_M001_1900-01-01_00',
+common_exp.Session.insert1({"username": "hheise", "mouse_id": 2, "day": '1900-01-01', "trial": 1, "id": 'hheise_M001_1900-01-01_00',
                  "path": '\\test_path\\hheise_M001_1900-01-01_00', "counter": 1, "anesthesia": "Awake", "setup": "VR",
-                 "task": "Passive", "stage": "0", "experimenter": "mpanze", "notes": "A test session"})
+                 "task": "Passive", "experimenter": "mpanze", "notes": "A test session"})

@@ -42,24 +42,26 @@ class Setup(dj.Lookup):
 class Task(dj.Lookup):
     definition = """ # Experimental task for the mouse
     task        : varchar(128)     # Unique name of the task
-    stage       : tinyint          # Counter for e.g. difficulty in case of learning task
     ---
+    -> common_mice.Investigator    # Keep track of whose task it is for GUI
+    stage       : tinyint          # Counter for e.g. difficulty in case of learning task
     task_details : varchar(1048)   # Task description
     """
 
     contents = [
         # Hendriks VR tasks
-        ['Passive', 0, 'Water reward is given passively upon entering a reward zone.'],
-        ['Active', 1, 'Water reward is given after active licking in a reward zone.'],
-        ['No tone', 2, 'Like active, but tone cue is removed after X trials.'],
-        ['No pattern', 2, 'Like "active", but tone cue is removed after X trials.'],
-        ['No pattern and tone', 2, 'Like "No pattern", but tone cue is removed after Y trials.'],
-        ['No reward at RZ3', 2, 'Like active, but water reward is disabled at RZ3.'],
-        ['Changed distances', 2, 'Like active, but the distances between reward zones are changed.'],
+        ['Passive', 'hheise', 0, 'Water reward is given passively upon entering a reward zone.'],
+        ['Active', 'hheise', 1, 'Water reward is given after active licking in a reward zone.'],
+        ['No tone', 'hheise', 2, 'Like active, but tone cue is removed after X trials.'],
+        ['No pattern', 'hheise', 2, 'Like "active", but tone cue is removed after X trials.'],
+        ['No pattern and tone', 'hheise', 2, 'Like "No pattern", but tone cue is removed after Y trials.'],
+        ['No reward at RZ3', 'hheise', 2, 'Like active, but water reward is disabled at RZ3.'],
+        ['Changed distances', 'hheise', 2, 'Like active, but the distances between reward zones are changed.'],
         # Todo: enter Jithins wheel tasks
         # Jithins tasks
         # Todo: enter Matteos wheel tasks
         # Matteos tasks
+        ['Grasping', 'mpanze', 0, 'Some test task that is not from Hendrik.'],
     ]
 
 
