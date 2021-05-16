@@ -11,7 +11,8 @@
 
 # Hendrik 2021-05-10
 
-username: 'default_username'  # CHANGE THIS! It will determine which options you see in the dropdown menus
+username: 'default_username'      # CHANGE THIS! It will determine which options you see in the dropdown menus
+default_licence: '241/2018-X'     # Standard licence under which the investigator works. From common_mice.Licence()
 
 behavior:
   default_mouse: 'last_mouse'   # if this is 'last_mouse', the default mouse will be the mouse with the highest ID
