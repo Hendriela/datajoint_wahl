@@ -14,7 +14,7 @@ class Anesthesia(dj.Lookup):
     definition = """ # Anesthesia Info
     anesthesia               : varchar(128)   # Anesthesia short name
     ---
-    anesthesia_details       : varchar(1024) # Longer description
+    anesthesia_details       : varchar(1024)  # Longer description
     """
 
     contents = [
@@ -42,7 +42,7 @@ class Setup(dj.Lookup):
 class Task(dj.Lookup):
     definition = """ # Experimental task for the mouse
     task        : varchar(128)     # Unique name of the task
-    stage       : int              # Counter for e.g. difficulty in case of learning task
+    stage       : tinyint          # Counter for e.g. difficulty in case of learning task
     ---
     task_details : varchar(1048)   # Task description
     """
@@ -68,16 +68,16 @@ class Session(dj.Manual):
     definition = """ # Information about the session and experimental setup
     -> common_mice.Mouse
     day             : date           # Date of the experimental session (YYYY-MM-DD)
-    trial           : int            # Counter of experimental sessions on the same day (base 1)
+    trial           : tinyint        # Counter of experimental sessions on the same day (base 1)
     ---
     id              : varchar(128)   # Unique identifier
     path            : varchar(256)   # Relative path of this session on the Neurophysiology-Storage1 server
-    counter         : int            # Overall counter of all sessions across mice (base 0)
+    counter         : smallint       # Overall counter of all sessions across mice (base 0)
     experimenter    : varchar(128)   # Who actually performed the experiment, must be a username from Investigator()
     -> Anesthesia
     -> Setup
     -> Task
-    notes   : varchar(2048)  # description of important things that happened
+    notes           : varchar(2048)  # description of important things that happened
     """
 
     def create_id(self, investigator_name, mouse_id, date, trial):

@@ -23,7 +23,7 @@ class Investigator(dj.Lookup):
 @schema
 class Strain(dj.Lookup):
     definition = """    # Genetic type of the mouse
-    strain          : char(128)       # Mouse variant short name
+    strain          : varchar(128)    # Mouse variant short name
     ---
     formal_name     : varchar(2048)   # More detailled description of genetic background
     ca_indicator    : varchar(255)    # Expressed calcium indicator (e.g. GCaMP6f)
@@ -63,7 +63,7 @@ class Mouse(dj.Manual):
       ---
       dob           : date                     # Day of birth (year-month-day)
       sex           : enum('M', 'F', 'U')      # Sex of mouse - Male, Female, or Unknown/Unclassified
-      batch         : int                      # Batch ID that this mouse belongs to (0 if no batch)
+      batch         : tinyint                  # Batch ID that this mouse belongs to (0 if no batch)
       -> Strain                                # Link to the genetic type of the mouse
       genotype      : enum('WT', 'n.d.', '+/+', '+/-', '-/-')  # n.d. if transgenic but not determined
       irats_id      : varchar(20)              # ID that is used in iRats (e.g. BJ5698)
@@ -80,7 +80,7 @@ class Weight(dj.Manual):
     -> Mouse
     date_of_weight      : date           # Date of weighing (year-month-day)
     ---
-    weight              : float          # Weight in grams
+    weight              : decimal(2,1)   # Weight in grams
     """
 
 
@@ -123,14 +123,14 @@ class Substance(dj.Lookup):
 class Surgery(dj.Manual):
     definition = """ # Table to keep track of surgeries on mice
     -> Mouse
-    surgery_num         : int            # Surgery number for this animal, start counting from 1
+    surgery_num         : tinyint        # Surgery number for this animal, start counting from 1
     ---
-    surgery_date        : datetime       # Date and time of intervention (year-month-day_hour-minute)
+    surgery_date        : datetime       # Date and time of intervention (YYYY-MM-DD HH:MM:SS)
     surgery_type        : varchar(2048)  # Description of surgery (e.g. "headmount implantation")
     anesthesia          : varchar(2048)  # Type and dose of anesthesia used (e.g. "2% Isoflurane" or "Triple shot")
-    pre_op_weight       : float          # Pre-op weight in grams
+    pre_op_weight       : decimal(2,1)   # Pre-op weight in grams
     stroke_params       : varchar(2048)  # Stroke params such as illumination time, if applicable
-    duration            : int            # Approximate duration of intervention, in minutes
+    duration            : smallint       # Approximate duration of intervention, in minutes
     surgery_notes       : varchar(2048)  # Additional notes
     """
 
@@ -138,7 +138,7 @@ class Surgery(dj.Manual):
 class Injection(dj.Manual):
     definition = """ # Holds injection data for each surgery
     -> Surgery
-    injection_num       : int            # Injection number for this surgery, start counting from 1
+    injection_num       : tinyint        # Injection number for this surgery, start counting from 1
     ---
     -> Substance                         # Link to substance lookup table
     volume              : float          # Injected volume in microliters
