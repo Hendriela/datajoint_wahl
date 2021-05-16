@@ -65,13 +65,14 @@ class Mouse(dj.Manual):
       sex           : enum('M', 'F', 'U')      # Sex of mouse - Male, Female, or Unknown/Unclassified
       batch         : int                      # Batch ID that this mouse belongs to (0 if no batch)
       -> Strain                                # Link to the genetic type of the mouse
-      irats_id      : varchar(20)              # ID that is used in iRats (e.g. BJ5698 RR)
+      genotype      : enum('WT', 'n.d.', '+/+', '+/-', '-/-')  # n.d. if transgenic but not determined
+      irats_id      : varchar(20)              # ID that is used in iRats (e.g. BJ5698)
       cage_num      : int                      # Cage number
-      ear_mark      : varchar(10)              # Actual ear mark
+      ear_mark      : varchar(10)              # Actual ear mark, might not correspond to iRats earmark
       -> Licence                               # Link to project ID
       info          : varchar(1024)            # Additional information about this mouse
       """
-
+    #Todo: make cage number updateable, maybe in mouse GUI?
 
 @schema
 class Weight(dj.Manual):
@@ -89,6 +90,7 @@ class Sacrificed(dj.Manual):
     -> Mouse
     ---
     date_of_sacrifice   : date           # Date of sacrifice (year-month-day)
+    perfused:           : tinyint        # 0 for no, 1 for yes (brain fixed and kept)
     reason              : varchar(1024)  # Comments
     """
 
@@ -123,10 +125,10 @@ class Surgery(dj.Manual):
     -> Mouse
     surgery_num         : int            # Surgery number for this animal, start counting from 1
     ---
-    surgery_date        : datetime       # Date of intervention (year-month-day)
+    surgery_date        : datetime       # Date and time of intervention (year-month-day_hour-minute)
     surgery_type        : varchar(2048)  # Description of surgery (e.g. "headmount implantation")
     anesthesia          : varchar(2048)  # Type and dose of anesthesia used (e.g. "2% Isoflurane" or "Triple shot")
-    weight              : float          # Pre-op weight in grams
+    pre_op_weight       : float          # Pre-op weight in grams
     stroke_params       : varchar(2048)  # Stroke params such as illumination time, if applicable
     duration            : int            # Approximate duration of intervention, in minutes
     surgery_notes       : varchar(2048)  # Additional notes
