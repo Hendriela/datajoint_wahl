@@ -1,6 +1,7 @@
 """Schema for mouse related information"""
 
 import datajoint as dj
+import warnings
 schema = dj.schema('common_mice', locals(), create_tables=True)
 
 
@@ -116,6 +117,7 @@ class Substance(dj.Lookup):
        ['endothelin', 'endothelin 1 (ET-1)', 'vasoconstrictor', 'Sigma', 'https://www.sigmaaldrich.com/catalog/product/sigma/e7764'],
        ['microspheres', 'Fluorescent PMMA Microparticles Red5 20 m', 'microspheres', 'PolyAn',
          'https://www.poly-an.de/micro-nanoparticles/fluorescent-pmma-microparticles/fluorescent-pmma-microparticles'],
+       ['TMP', "Trimethoprim", "antibiotic", "Sigma", "https://www.sigmaaldrich.com/catalog/product/sigma/t7883"],
     ]
 
 
@@ -133,6 +135,37 @@ class Surgery(dj.Manual):
     duration            : smallint       # Approximate duration of intervention, in minutes
     surgery_notes       : varchar(2048)  # Additional notes
     """
+
+    def insert(self, rows, **kwargs):
+        """Extend the insert method so that pre_op weights are automatically entered in Weight() table
+        At the moment, only works if the rows are entered as dictionary data types
+        This also covers usage of the insert1() function
+        Matteo 2021-05-18
+        ----------------------------------------------
+        :param rows:  An iterable where an element is a numpy record, a dict-like object, a pandas.DataFrame, a sequence,
+            or a query expression with the same heading as table self
+        """
+        # insert row one by one
+        for row in rows:
+            # check if row is a dictionary
+            if not isinstance(row, dict):
+                print("Row is not a dictionary. It will be inserted without tracking the weight.")
+                super().insert((row,), **kwargs)
+                continue
+
+            # query Weight table to check a weight has not been already entered
+            experimenter = row["username"]
+            mouse_id = row["mouse_id"]
+            date = row["surgery_date"]
+            weight = row["pre_op_weight"]
+
+            if len(Weight() & "username='{}'".format(experimenter) & "mouse_id = '{}'".format(mouse_id) & "date_of_weight = '{}'".format(date)) > 0:
+                print("A weight has already been recorded for this mouse and date, pre_op_weight will not be added to Weights table.")
+            else:
+                Weight().insert1({"username":experimenter, "mouse_id":mouse_id, "date_of_weight":date, "weight":weight})
+
+            super().insert((row,), **kwargs)
+
 
 @schema
 class Injection(dj.Manual):
