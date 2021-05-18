@@ -90,7 +90,7 @@ class Sacrificed(dj.Manual):
     -> Mouse
     ---
     date_of_sacrifice   : date           # Date of sacrifice (year-month-day)
-    perfused:           : tinyint        # 0 for no, 1 for yes (brain fixed and kept)
+    perfused            : tinyint        # 0 for no, 1 for yes (brain fixed and kept)
     reason              : varchar(1024)  # Comments
     """
 
