@@ -80,7 +80,7 @@ class Weight(dj.Manual):
     -> Mouse
     date_of_weight      : date           # Date of weighing (year-month-day)
     ---
-    weight              : decimal(2,1)   # Weight in grams
+    weight              : decimal(3,1)   # Weight in grams
     """
 
 
@@ -128,7 +128,7 @@ class Surgery(dj.Manual):
     surgery_date        : datetime       # Date and time of intervention (YYYY-MM-DD HH:MM:SS)
     surgery_type        : varchar(2048)  # Description of surgery (e.g. headmount implantation)
     anesthesia          : varchar(2048)  # Type and dose of anesthesia used (e.g. 2 percent Isoflurane or Triple shot)
-    pre_op_weight       : decimal(2,1)   # Pre-op weight in grams
+    pre_op_weight       : decimal(3,1)   # Pre-op weight in grams
     stroke_params       : varchar(2048)  # Stroke params such as illumination time, if applicable
     duration            : smallint       # Approximate duration of intervention, in minutes
     surgery_notes       : varchar(2048)  # Additional notes
