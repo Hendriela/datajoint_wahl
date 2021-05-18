@@ -1,7 +1,6 @@
 """Schema for mouse related information"""
 
 import datajoint as dj
-import warnings
 schema = dj.schema('common_mice', locals(), create_tables=True)
 
 
