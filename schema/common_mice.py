@@ -144,25 +144,30 @@ class Surgery(dj.Manual):
         :param rows:  An iterable where an element is a numpy record, a dict-like object, a pandas.DataFrame, a sequence,
             or a query expression with the same heading as table self
         """
-        # insert row one by one
+        # insert rows one by one
         for row in rows:
             # check if row is a dictionary
             if not isinstance(row, dict):
+                # skip if row is not a dictionary data type
+                # TODO: add handling of other datatypes
                 print("Row is not a dictionary. It will be inserted without tracking the weight.")
                 super().insert((row,), **kwargs)
                 continue
 
-            # query Weight table to check a weight has not been already entered
+            # get relevant info from row
             experimenter = row["username"]
             mouse_id = row["mouse_id"]
             date = row["surgery_date"]
             weight = row["pre_op_weight"]
 
+            # check if row is already present in Weight table
             if len(Weight() & "username='{}'".format(experimenter) & "mouse_id = '{}'".format(mouse_id) & "date_of_weight = '{}'".format(date)) > 0:
                 print("A weight has already been recorded for this mouse and date, pre_op_weight will not be added to Weights table.")
             else:
+                #insert row into Weight table
                 Weight().insert1({"username":experimenter, "mouse_id":mouse_id, "date_of_weight":date, "weight":weight})
 
+            # add row to Surgery table
             super().insert((row,), **kwargs)
 
 
