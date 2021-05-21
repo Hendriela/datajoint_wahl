@@ -35,6 +35,8 @@ class Setup(dj.Lookup):
     contents = [
         ['VR', 'Mouse is headfixed in the VR setup located outside the 2p microscope (no resonant scanner sound)'],
         ['VR_2p', 'Mouse is headfixed in the VR setup located under the 2p microscope (with resonant scanner sound)'],
+        ['Mapping', 'Mouse is headfixed in the sensory mapping setup'],
+        ['Grasping_widefield', 'Mouse is headfixed in the grasping setup, in the widefield imaging soundproof box']
     ]
 
 
@@ -61,7 +63,7 @@ class Task(dj.Lookup):
         # Jithins tasks
         # Todo: enter Matteos wheel tasks
         # Matteos tasks
-        ['Grasping', 'mpanze', 0, 'Some test task that is not from Hendrik.'],
+        ['Sensory mapping', 'mpanze', 0, 'Various stimuli are presented to the anestethized mouse'],
     ]
 
 
