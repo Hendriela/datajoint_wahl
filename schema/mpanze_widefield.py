@@ -27,3 +27,18 @@ class RawImagingFile(dj.Manual):
     ---
     filename_img                : varchar(256)  # name of the imaging file, relative to the session folder
     """
+
+    def get_paths(self):
+        """Construct full paths to raw imaging files"""
+        path_neurophys = login.get_neurophys_data_directory()  # get data directory path on local machine
+        # find sessions corresponding to current files
+        sessions = (self * common_exp.Session())
+
+        # iterate over sessions
+        paths = []
+        for session in sessions:
+            # obtain full path
+            path_session = session["path"]
+            path_file = session["filename_img"]
+            paths.append(pathlib.Path(path_neurophys, path_session, path_file))
+        return paths
