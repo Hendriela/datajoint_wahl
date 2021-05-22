@@ -18,6 +18,7 @@ mice:
   default_surgery_type: 'default_surgery_type'
   default_anesthesia: 'default_anesthesia'
   default_substance: 'default_substance'
+  default_site: 'default_injection_site'
 
 behavior:
   default_mouse: 'last_mouse'   # if this is 'last_mouse', the default mouse will be the mouse with the highest ID
