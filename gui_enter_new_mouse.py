@@ -110,7 +110,6 @@ if default_params['behavior']['default_mouse'] == 'last_mouse':
     default_params['behavior']['default_mouse'] = mouse_ids[0]
 
 
-
 # =============================================================================
 # Load options for drop down menus
 # =============================================================================
@@ -156,7 +155,8 @@ class window(wx.Frame):
         wx.StaticText(panel, label="Sex:", pos=(M_LEFT + COL, M_TOP))
         self.sex = wx.ComboBox(panel, choices=sexes, style=wx.CB_READONLY,
                                pos=(M_LEFT + COL, M_TOP+ 20), size=(170, -1))
-        self.sex.SetSelection(sexes[2])
+        item = self.sex.FindString(sexes[2])
+        self.sex.SetSelection(item)
 
         # Batch (default is 0, no batch)
         wx.StaticText(panel, label="Batch:", pos=(M_LEFT + 2*COL, M_TOP))
@@ -167,13 +167,15 @@ class window(wx.Frame):
         wx.StaticText(panel, label="Strain:", pos=(M_LEFT, M_TOP + ROW))
         self.strain = wx.ComboBox(panel, choices=strains, style=wx.CB_READONLY,
                                   pos=(M_LEFT, M_TOP + ROW + 20), size=(170, -1))
-        self.strain.SetSelection('WT')
+        item = self.strain.FindString('WT')
+        self.strain.SetSelection(item)
 
         # Genotype (default 'WT')
         self.genotype = wx.Button(panel, label="Genotype:", pos=(M_LEFT + COL, M_TOP + ROW), size=(100, 25))
         self.genotype = wx.ComboBox(panel, choices=strains, style=wx.CB_READONLY, pos=(M_LEFT + COL, M_TOP + ROW + 20),
                                     size=(170, -1))
-        self.genotype.SetSelection('WT')
+        item = self.genotype.FindString('WT')
+        self.genotype.SetSelection(item)
 
         # iRats ID (default empty)
         wx.StaticText(panel, label="iRats ID:", pos=(M_LEFT + 2*COL, M_TOP + ROW))
@@ -194,7 +196,8 @@ class window(wx.Frame):
         self.licence = wx.Button(panel, label="Licence:", pos=(M_LEFT + 2*COL, M_TOP + 2*ROW), size=(100, 25))
         self.licence = wx.ComboBox(panel, choices=licences, style=wx.CB_READONLY,
                                     pos=(M_LEFT + 2*COL, M_TOP + 2*ROW + 20), size=(170, -1))
-        self.licence.SetSelection(default_params['mice']['default_licence'])
+        item = self.licence.FindString(default_params['mice']['default_licence'])
+        self.licence.SetSelection(item)
 
         # Notes
         wx.StaticText(panel, label="Notes:", pos=(M_LEFT, M_TOP + 3 * ROW))
@@ -220,10 +223,10 @@ class window(wx.Frame):
         wx.StaticBox(panel, label='NEW SURGERY',
                      pos=(S_LEFT - 20, S_TOP - 30), size=(WINDOW_WIDTH_L - 2 * S_LEFT, S_HEIGHT))
 
-        # Surgery number (default is max surgery num for the current mouse + 1)
+        # Surgery number (default is empty, will be filled when a mouse is loaded)
         wx.StaticText(panel, label="Surgery number:", pos=(S_LEFT, S_TOP))
         self.surg_num = wx.TextCtrl(panel, pos=(S_LEFT, S_TOP + 20), size=(170, -1))
-        self.surg_num.SetValue(next_surgery_num)
+        self.surg_num.SetValue('')
 
         # Date and time of surgery (default is current day, 12 pm)
         wx.StaticText(panel, label="Date and time of surgery (YYYY-MM-DD HH:MM):", pos=(S_LEFT + COL, S_TOP))
@@ -235,7 +238,7 @@ class window(wx.Frame):
         self.type = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL, S_TOP + 20), size=(170, -1))
         self.type.SetValue(default_params['mice']['default_surgery_type'])
 
-        # Anesthesia (default is 'WT')
+        # Anesthesia (default from YAML)
         wx.StaticText(panel, label="Anesthesia:", pos=(S_LEFT, S_TOP + ROW))
         self.anesthesia = wx.TextCtrl(panel, pos=(S_LEFT, S_TOP + ROW + 20), size=(170, -1))
         self.anesthesia.SetValue(default_params['mice']['default_anesthesia'])
@@ -268,16 +271,17 @@ class window(wx.Frame):
         wx.StaticBox(panel, label='NEW INJECTION',
                      pos=(I_LEFT - 20, I_TOP - 30), size=(WINDOW_WIDTH_L - 2 * I_LEFT, I_HEIGHT))
 
-        # Injection number (default is 0)
+        # Injection number (default is empty, will be filled after mouse is loaded)
         wx.StaticText(panel, label="Injection number:", pos=(I_LEFT, I_TOP))
         self.inj_num = wx.TextCtrl(panel, pos=(S_LEFT, S_TOP + 20), size=(170, -1))
-        self.inj_num.SetValue(next_injection_num)
+        self.inj_num.SetValue('')
 
         # Substance (default from YAML)
         wx.StaticText(panel, label="Substance:", pos=(I_LEFT + COL, I_TOP))
         self.substance = wx.ComboBox(panel, choices=licences, style=wx.CB_READONLY,
                                      pos=(I_LEFT + COL, I_TOP + 20), size=(170, -1))
-        self.substance.SetSelection(default_params['mice']['default_substance'])
+        item = self.substance.FindString(default_params['mice']['default_substance'])
+        self.substance.SetSelection(item)
 
         # Volume (default 0.3 uL)
         wx.StaticText(panel, label="Injected volume:", pos=(S_LEFT + 2 * COL, S_TOP))
@@ -315,15 +319,15 @@ class window(wx.Frame):
         # =============================================================================
 
         self.quit_button = wx.Button(panel, label="Quit",
-                                     pos=(30, L_TOP + ROW),
+                                     pos=(30, S_TOP + 4*ROW),
                                      size=(BUTTON_WIDTH, BUTTON_HEIGHT))
         self.Bind(wx.EVT_BUTTON, self.event_quit_button, self.quit_button)
 
         # status text
         self.status_text = wx.TextCtrl(panel, value="Status updates will appear here:\n",
                                        style=wx.TE_MULTILINE,
-                                       pos=(S_LEFT + COL, L_TOP),
-                                       size=(WINDOW_WIDTH - S_LEFT - COL - 30, WINDOW_HEIGHT - L_TOP - 30))
+                                       pos=(S_LEFT + COL, S_TOP + 4*ROW),
+                                       size=(WINDOW_WIDTH - S_LEFT - COL - 30, WINDOW_HEIGHT - S_TOP - 30))
 
     # =============================================================================
     # Events for menus and button presses
@@ -376,7 +380,7 @@ class window(wx.Frame):
                                                         mouse_id=session_dict['mouse_id'],
                                                         date=session_dict['day'],
                                                         trial=session_dict['trial'])
-            file = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier + '.yaml')
+            file = os.path.join(login.get_neurophys_wahl_directory(), 'REL_BACKUP_PATH', identifier + '.yaml')
             # TODO show prompt if a backup file with this identifier already exists and ask the user to overwrite
             # if os.path.isfile(file):
             #     message = 'The backup file of the session you wanted to enter into the database with the unique identifier ' \
