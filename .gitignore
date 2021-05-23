@@ -2,3 +2,4 @@
 /__pycache__/
 /gui_params.yaml
 schema/__pycache__/
+.ipynb_checkpoints/
