@@ -70,13 +70,18 @@ E_TOP = M_TOP + W_HEIGHT + 10
 E_HEIGHT = M_HEIGHT - (W_HEIGHT + 10)
 E_WIDTH = W_WIDTH
 
+# Load mouse box
+L_LEFT = M_LEFT
+L_TOP = S_TOP + 4*ROW
+L_HEIGHT = ROW + BUTTON_HEIGHT + 50
+L_WIDTH = BUTTON_WIDTH + 50
+
 # WINDOW SIZE
 WINDOW_WIDTH = M_LEFT + M_WIDTH + I_WIDTH + 40
 WINDOW_HEIGHT = 1100
 
-
 # Status box
-B_TOP = E_TOP + 350
+B_TOP = L_TOP
 
 # relative path to manual_submission backup folder inside the Neurophysiology Wahl directory (common for all users)
 REL_BACKUP_PATH_MOUSE = "Datajoint/manual_mouse_submissions"
@@ -146,7 +151,7 @@ class window(wx.Frame):
 
     def __init__(self, parent, id):
 
-        wx.Frame.__init__(self, parent, id, '{} ({}): Enter data into pipeline'.format(inv_fullname, investigator),
+        wx.Frame.__init__(self, parent, id, '{} ({}): Enter mouse data into database'.format(inv_fullname, investigator),
                           size=(WINDOW_WIDTH, WINDOW_HEIGHT))
         panel = wx.Panel(self)
 
@@ -377,19 +382,38 @@ class window(wx.Frame):
         self.Bind(wx.EVT_BUTTON, self.event_submit_euthanasia, self.submit_euthanasia_button)
 
         # =============================================================================
+        # Bottom left box: Load mouse
+        # =============================================================================
+
+        load_box = wx.StaticBox(panel, label='LOAD MOUSE', pos=(L_LEFT - 20, L_TOP - 30), size=(L_WIDTH, L_HEIGHT))
+        load_box.SetForegroundColour(BOX_TITLE_COLOR)
+
+        wx.StaticText(panel, label="Mouse ID:", pos=(L_LEFT, L_TOP))
+        self.mouse = wx.ComboBox(panel, choices=mouse_ids, style=wx.CB_READONLY,
+                                 pos=(L_LEFT, L_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        item = self.mouse.FindString(default_params['behavior']['default_mouse'])
+        self.mouse.SetSelection(item)
+
+        # Submit euthanasia button
+        self.load_mouse_button = wx.Button(panel, label="Load mouse",
+                                                 pos=(L_LEFT, L_TOP + ROW),
+                                                 size=(BUTTON_WIDTH, BUTTON_HEIGHT))
+        self.Bind(wx.EVT_BUTTON, self.event_load_mouse, self.load_mouse_button)
+
+        # =============================================================================
         # Submit and close buttons
         # =============================================================================
 
         self.quit_button = wx.Button(panel, label="Quit",
-                                     pos=(30, S_TOP + 3*ROW + 40),
+                                     pos=(M_LEFT, B_TOP + L_HEIGHT),
                                      size=(BUTTON_WIDTH, BUTTON_HEIGHT))
         self.Bind(wx.EVT_BUTTON, self.event_quit_button, self.quit_button)
 
         # status text
         self.status_text = wx.TextCtrl(panel, value="Status updates will appear here:\n",
                                        style=wx.TE_MULTILINE,
-                                       pos=(S_LEFT + COL, S_TOP + 3*ROW + 40),
-                                       size=(WINDOW_WIDTH - S_LEFT - COL - 30, WINDOW_HEIGHT - S_TOP - S_HEIGHT - ROW))
+                                       pos=(S_LEFT + COL + 30, B_TOP - 23),
+                                       size=(WINDOW_WIDTH - S_LEFT - COL - 60, WINDOW_HEIGHT - S_TOP - S_HEIGHT - ROW))
 
     # =============================================================================
     # Events for menus and button presses
@@ -409,6 +433,12 @@ class window(wx.Frame):
 
     def event_submit_euthanasia(self, event):
         pass
+
+    def event_load_mouse(self, event):
+        pass
+
+
+
 
     def event_submit_session(self, event):
         """ The user clicked on the button to submit a session """
