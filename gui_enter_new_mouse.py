@@ -31,11 +31,6 @@ from schema import common_mice, common_exp, common_behav  # , common_img, common
 # HARDCODED PARAMETER FOR GUI
 # =============================================================================
 
-WINDOW_WIDTH = 1350
-WINDOW_HEIGHT = 1100
-
-WINDOW_WIDTH_L = 900
-
 BOX_WIDTH = 170
 BOX_HEIGHT = -1                         # -1 makes text boxes automatically one line high
 BOX_TITLE_COLOR = (0, 0, 0)             # in RGB
@@ -64,12 +59,21 @@ I_HEIGHT = S_HEIGHT
 I_WIDTH = S_WIDTH
 
 # New weight box
-W_LEFT = WINDOW_WIDTH_L - 20
+W_LEFT = I_LEFT
 W_TOP = M_TOP
+W_HEIGHT = 2*ROW
+W_WIDTH = I_WIDTH
 
 # Sacrificed (euthanized) box
 E_LEFT = W_LEFT
-E_TOP = M_TOP + 350
+E_TOP = M_TOP + W_HEIGHT + 10
+E_HEIGHT = M_HEIGHT - (W_HEIGHT + 10)
+E_WIDTH = W_WIDTH
+
+# WINDOW SIZE
+WINDOW_WIDTH = M_LEFT + M_WIDTH + I_WIDTH + 40
+WINDOW_HEIGHT = 1100
+
 
 # Status box
 B_TOP = E_TOP + 350
@@ -148,7 +152,7 @@ class window(wx.Frame):
 
         self.job_list = list()  # save jobs in format [ [table, entry_dict, source_path, target_path], [...], ...]
         # =============================================================================
-        # Left box: Add new mouse (3x3 fields + notes)
+        # Left upper box: Add new mouse (3x3 fields + notes)
         # =============================================================================
         mouse_box = wx.StaticBox(panel, label='NEW MOUSE INFORMATION',
                                  pos=(M_LEFT - 20, M_TOP - 30), size=(M_WIDTH, M_HEIGHT))
@@ -212,11 +216,11 @@ class window(wx.Frame):
         self.mouse_notes = wx.TextCtrl(panel, value="", style=wx.TE_MULTILINE, pos=(M_LEFT, M_TOP + 3 * ROW + 20),
                                        size=(COL + BOX_WIDTH, 50))
 
-        # Load mouse button
-        self.load_session_button = wx.Button(panel, label="Load session",
-                                             pos=(M_LEFT + 3 * COL, M_TOP),
-                                             size=(BUTTON_WIDTH, BUTTON_HEIGHT))
-        self.Bind(wx.EVT_BUTTON, self.event_load_session, self.load_session_button)
+        # # Load mouse button
+        # self.load_session_button = wx.Button(panel, label="Load session",
+        #                                      pos=(M_LEFT + 3 * COL, M_TOP),
+        #                                      size=(BUTTON_WIDTH, BUTTON_HEIGHT))
+        # self.Bind(wx.EVT_BUTTON, self.event_load_session, self.load_session_button)
 
         # Submit mouse button
         self.submit_surgery_button = wx.Button(panel, label="Add new mouse",
@@ -225,7 +229,7 @@ class window(wx.Frame):
         self.Bind(wx.EVT_BUTTON, self.event_submit_mouse, self.submit_surgery_button)
 
         # =============================================================================
-        # Middle upper box: Enter new surgery
+        # Left lower box: Enter new surgery (2x3 fields + notes)
         # =============================================================================
 
         surg_box = wx.StaticBox(panel, label='NEW SURGERY', pos=(S_LEFT - 20, S_TOP - 30), size=(S_WIDTH, S_HEIGHT))
@@ -273,7 +277,7 @@ class window(wx.Frame):
         self.Bind(wx.EVT_BUTTON, self.event_submit_surgery, self.submit_surgery_button)
 
         # =============================================================================
-        # Middle lower box: Enter new injection
+        # Right lower box: Enter new injection (2x3 fields + notes)
         # =============================================================================
 
         inj_box = wx.StaticBox(panel, label='NEW INJECTION', pos=(I_LEFT - 20, I_TOP - 30), size=(I_WIDTH, I_HEIGHT))
@@ -316,25 +320,75 @@ class window(wx.Frame):
         self.inj_notes = wx.TextCtrl(panel, value="", style=wx.TE_MULTILINE, pos=(I_LEFT, I_TOP + 2 * ROW + 20),
                                      size=(COL + BOX_WIDTH, 50))
 
-        # Submit surgery button
+        # Submit injection button
         self.submit_injection_button = wx.Button(panel, label="Add new Injection",
                                                pos=(I_LEFT + 2 * COL, I_TOP + 2 * ROW + 20),
                                                size=(BUTTON_WIDTH, BUTTON_HEIGHT))
         self.Bind(wx.EVT_BUTTON, self.event_submit_injection, self.submit_injection_button)
 
         # =============================================================================
+        # Right upper box: Enter new weight (1x2 fields)
+        # =============================================================================
+
+        weight_box = wx.StaticBox(panel, label='NEW WEIGHT', pos=(W_LEFT - 20, W_TOP - 30), size=(W_WIDTH, W_HEIGHT))
+        weight_box.SetForegroundColour(BOX_TITLE_COLOR)
+
+        # Date of weight (default is current day)
+        wx.StaticText(panel, label="Date (YYYY-MM-DD):", pos=(W_LEFT, W_TOP))
+        self.dow = wx.TextCtrl(panel, pos=(W_LEFT, W_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        self.dow.SetValue(current_day)
+
+        # Weight in grams (default is empty)
+        wx.StaticText(panel, label="Weight (grams):", pos=(W_LEFT + COL, W_TOP))
+        self.weight = wx.TextCtrl(panel, pos=(W_LEFT + COL, W_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        self.weight.SetValue('')
+
+        # Submit weight button
+        self.submit_weight_button = wx.Button(panel, label="Add new weight",
+                                                 pos=(W_LEFT + 2 * COL, W_TOP),
+                                                 size=(BUTTON_WIDTH, BUTTON_HEIGHT-5))
+        self.Bind(wx.EVT_BUTTON, self.event_submit_weight, self.submit_weight_button)
+
+        # =============================================================================
+        # Right middle box: Enter new sacrificed mouse (1x2 fields + notes)
+        # =============================================================================
+
+        sac_box = wx.StaticBox(panel, label='MOUSE EUTHANIZED', pos=(E_LEFT - 20, E_TOP - 30), size=(E_WIDTH, E_HEIGHT))
+        sac_box.SetForegroundColour(BOX_TITLE_COLOR)
+
+        # Date of weight (default is current day)
+        wx.StaticText(panel, label="Date (YYYY-MM-DD):", pos=(E_LEFT, E_TOP))
+        self.doe = wx.TextCtrl(panel, pos=(E_LEFT, E_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        self.doe.SetValue(current_day)
+
+        # Perfused check box (default is unchecked)
+        wx.StaticText(panel, label="Brain kept for storage?", pos=(E_LEFT + COL, E_TOP))
+        self.perfused = wx.CheckBox(panel, label='Perfused', pos=(E_LEFT + COL, E_TOP + 20), size=(130, 20))
+
+        # Reason
+        wx.StaticText(panel, label="Reason:", pos=(E_LEFT, E_TOP + ROW - 10))
+        self.reason = wx.TextCtrl(panel, value="End of experiment", style=wx.TE_MULTILINE,
+                                  pos=(E_LEFT, E_TOP + ROW + 10), size=(COL + BOX_WIDTH, 50))
+
+        # Submit euthanasia button
+        self.submit_euthanasia_button = wx.Button(panel, label="Add euthanasia",
+                                                 pos=(E_LEFT + 2 * COL, E_TOP),
+                                                 size=(BUTTON_WIDTH, BUTTON_HEIGHT-5))
+        self.Bind(wx.EVT_BUTTON, self.event_submit_euthanasia, self.submit_euthanasia_button)
+
+        # =============================================================================
         # Submit and close buttons
         # =============================================================================
 
         self.quit_button = wx.Button(panel, label="Quit",
-                                     pos=(30, S_TOP + 4*ROW),
+                                     pos=(30, S_TOP + 3*ROW + 40),
                                      size=(BUTTON_WIDTH, BUTTON_HEIGHT))
         self.Bind(wx.EVT_BUTTON, self.event_quit_button, self.quit_button)
 
         # status text
         self.status_text = wx.TextCtrl(panel, value="Status updates will appear here:\n",
                                        style=wx.TE_MULTILINE,
-                                       pos=(S_LEFT + COL, S_TOP + 4*ROW),
+                                       pos=(S_LEFT + COL, S_TOP + 3*ROW + 40),
                                        size=(WINDOW_WIDTH - S_LEFT - COL - 30, WINDOW_HEIGHT - S_TOP - S_HEIGHT - ROW))
 
     # =============================================================================
@@ -348,6 +402,12 @@ class window(wx.Frame):
         pass
 
     def event_submit_injection(self, event):
+        pass
+
+    def event_submit_weight(self, event):
+        pass
+
+    def event_submit_euthanasia(self, event):
         pass
 
     def event_submit_session(self, event):
