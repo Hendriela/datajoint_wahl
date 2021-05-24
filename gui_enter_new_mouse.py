@@ -31,30 +31,37 @@ from schema import common_mice, common_exp, common_behav  # , common_img, common
 # HARDCODED PARAMETER FOR GUI
 # =============================================================================
 
-WINDOW_WIDTH = 1500
+WINDOW_WIDTH = 1350
 WINDOW_HEIGHT = 1100
 
 WINDOW_WIDTH_L = 900
 
-BUTTON_WIDTH = 130
-BUTTON_HEIGHT = 40
+BOX_WIDTH = 170
+BOX_HEIGHT = -1                         # -1 makes text boxes automatically one line high
+BOX_TITLE_COLOR = (0, 0, 0)             # in RGB
+
+BUTTON_WIDTH = BOX_WIDTH
+BUTTON_HEIGHT = 50
 
 # New mouse box
-M_LEFT = 30 + 20  # position of the first element in mouse box
+M_LEFT = 30 + 20                        # position of the first element in mouse box
 M_TOP = 20 + 30
 ROW = 70
 COL = 200
-M_HEIGHT = 330  # height of mouse box
+M_HEIGHT = 4 * ROW + BUTTON_HEIGHT      # height of mouse box
+M_WIDTH = 3 * COL + 20                  # width of mouse box
 
 # New surgery box
-S_LEFT = M_LEFT + 600
-S_TOP = M_TOP
-S_HEIGHT = 260
+S_LEFT = M_LEFT
+S_TOP = M_HEIGHT + 70
+S_HEIGHT = 3 * ROW + BUTTON_HEIGHT
+S_WIDTH = M_WIDTH
 
 # New injection box
-I_LEFT = S_LEFT
-I_TOP = S_TOP + 350
-I_HEIGHT = 100
+I_LEFT = S_LEFT + S_WIDTH + 30
+I_TOP = S_TOP
+I_HEIGHT = S_HEIGHT
+I_WIDTH = S_WIDTH
 
 # New weight box
 W_LEFT = WINDOW_WIDTH_L - 20
@@ -143,175 +150,176 @@ class window(wx.Frame):
         # =============================================================================
         # Left box: Add new mouse (3x3 fields + notes)
         # =============================================================================
-        wx.StaticBox(panel, label='NEW MOUSE INFORMATION',
-                     pos=(M_LEFT - 20, M_TOP - 30), size=(WINDOW_WIDTH_L - 2 * M_LEFT, M_HEIGHT))
+        mouse_box = wx.StaticBox(panel, label='NEW MOUSE INFORMATION',
+                                 pos=(M_LEFT - 20, M_TOP - 30), size=(M_WIDTH, M_HEIGHT))
+        mouse_box.SetForegroundColour(BOX_TITLE_COLOR)
 
         # Date of birth (default is current day)
         wx.StaticText(panel, label="Date of birth (YYYY-MM-DD):", pos=(M_LEFT, M_TOP))
-        self.dob = wx.TextCtrl(panel, pos=(M_LEFT, M_TOP + 20), size=(170, -1))
+        self.dob = wx.TextCtrl(panel, pos=(M_LEFT, M_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.dob.SetValue(current_day)
 
         # Sex (default is 'U', undefined)
         wx.StaticText(panel, label="Sex:", pos=(M_LEFT + COL, M_TOP))
         self.sex = wx.ComboBox(panel, choices=sexes, style=wx.CB_READONLY,
-                               pos=(M_LEFT + COL, M_TOP+ 20), size=(170, -1))
+                               pos=(M_LEFT + COL, M_TOP+ 20), size=(BOX_WIDTH, BOX_HEIGHT))
         item = self.sex.FindString(sexes[2])
         self.sex.SetSelection(item)
 
         # Batch (default is 0, no batch)
         wx.StaticText(panel, label="Batch:", pos=(M_LEFT + 2*COL, M_TOP))
-        self.batch = wx.TextCtrl(panel, pos=(M_LEFT + 2*COL, M_TOP + 20), size=(170, -1))
+        self.batch = wx.TextCtrl(panel, pos=(M_LEFT + 2*COL, M_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.batch.SetValue('0')
 
         # Strain (default is 'WT')
         wx.StaticText(panel, label="Strain:", pos=(M_LEFT, M_TOP + ROW))
         self.strain = wx.ComboBox(panel, choices=strains, style=wx.CB_READONLY,
-                                  pos=(M_LEFT, M_TOP + ROW + 20), size=(170, -1))
+                                  pos=(M_LEFT, M_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         item = self.strain.FindString('WT')
         self.strain.SetSelection(item)
 
         # Genotype (default 'WT')
-        self.genotype = wx.Button(panel, label="Genotype:", pos=(M_LEFT + COL, M_TOP + ROW), size=(100, 25))
+        wx.StaticText(panel, label="Genotype:", pos=(M_LEFT + COL, M_TOP + ROW))
         self.genotype = wx.ComboBox(panel, choices=strains, style=wx.CB_READONLY, pos=(M_LEFT + COL, M_TOP + ROW + 20),
-                                    size=(170, -1))
+                                    size=(BOX_WIDTH, -1))
         item = self.genotype.FindString('WT')
         self.genotype.SetSelection(item)
 
         # iRats ID (default empty)
         wx.StaticText(panel, label="iRats ID:", pos=(M_LEFT + 2*COL, M_TOP + ROW))
-        self.irats = wx.TextCtrl(panel, pos=(M_LEFT + 2*COL, M_TOP + ROW + 20), size=(170, -1))
+        self.irats = wx.TextCtrl(panel, pos=(M_LEFT + 2*COL, M_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.irats.SetValue('')
 
         # Cage number (default empty)
         wx.StaticText(panel, label="Cage number:", pos=(M_LEFT, M_TOP + 2*ROW))
-        self.cage = wx.TextCtrl(panel, pos=(M_LEFT, M_TOP + 2*ROW + 20), size=(170, -1))
+        self.cage = wx.TextCtrl(panel, pos=(M_LEFT, M_TOP + 2*ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.cage.SetValue('')
 
         # Cage number
         wx.StaticText(panel, label="Ear marks:", pos=(M_LEFT + COL, M_TOP + 2*ROW))
-        self.ear = wx.TextCtrl(panel, pos=(M_LEFT + COL, M_TOP + 2*ROW + 20), size=(170, -1))
+        self.ear = wx.TextCtrl(panel, pos=(M_LEFT + COL, M_TOP + 2*ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.ear.SetValue('')
 
         # Licence (default from YAML)
-        self.licence = wx.Button(panel, label="Licence:", pos=(M_LEFT + 2*COL, M_TOP + 2*ROW), size=(100, 25))
+        wx.StaticText(panel, label="Licence:", pos=(M_LEFT + 2*COL, M_TOP + 2*ROW))
         self.licence = wx.ComboBox(panel, choices=licences, style=wx.CB_READONLY,
-                                    pos=(M_LEFT + 2*COL, M_TOP + 2*ROW + 20), size=(170, -1))
+                                    pos=(M_LEFT + 2*COL, M_TOP + 2*ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         item = self.licence.FindString(default_params['mice']['default_licence'])
         self.licence.SetSelection(item)
 
         # Notes
         wx.StaticText(panel, label="Notes:", pos=(M_LEFT, M_TOP + 3 * ROW))
         self.mouse_notes = wx.TextCtrl(panel, value="", style=wx.TE_MULTILINE, pos=(M_LEFT, M_TOP + 3 * ROW + 20),
-                                       size=(WINDOW_WIDTH_L - 3 * M_LEFT - 200, 50))
+                                       size=(COL + BOX_WIDTH, 50))
 
         # Load mouse button
         self.load_session_button = wx.Button(panel, label="Load session",
                                              pos=(M_LEFT + 3 * COL, M_TOP),
-                                             size=(150, 50))
+                                             size=(BUTTON_WIDTH, BUTTON_HEIGHT))
         self.Bind(wx.EVT_BUTTON, self.event_load_session, self.load_session_button)
 
         # Submit mouse button
         self.submit_surgery_button = wx.Button(panel, label="Add new mouse",
-                                               pos=(M_LEFT + 3 * COL, M_TOP + 3 * ROW + 20),
-                                               size=(150, 50))
+                                               pos=(M_LEFT + 2 * COL, M_TOP + 3 * ROW + 20),
+                                               size=(BUTTON_WIDTH, BUTTON_HEIGHT))
         self.Bind(wx.EVT_BUTTON, self.event_submit_mouse, self.submit_surgery_button)
 
         # =============================================================================
         # Middle upper box: Enter new surgery
         # =============================================================================
 
-        wx.StaticBox(panel, label='NEW SURGERY',
-                     pos=(S_LEFT - 20, S_TOP - 30), size=(WINDOW_WIDTH_L - 2 * S_LEFT, S_HEIGHT))
+        surg_box = wx.StaticBox(panel, label='NEW SURGERY', pos=(S_LEFT - 20, S_TOP - 30), size=(S_WIDTH, S_HEIGHT))
+        surg_box.SetForegroundColour(BOX_TITLE_COLOR)
 
         # Surgery number (default is empty, will be filled when a mouse is loaded)
         wx.StaticText(panel, label="Surgery number:", pos=(S_LEFT, S_TOP))
-        self.surg_num = wx.TextCtrl(panel, pos=(S_LEFT, S_TOP + 20), size=(170, -1))
+        self.surg_num = wx.TextCtrl(panel, pos=(S_LEFT, S_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.surg_num.SetValue('')
 
         # Date and time of surgery (default is current day, 12 pm)
-        wx.StaticText(panel, label="Date and time of surgery (YYYY-MM-DD HH:MM):", pos=(S_LEFT + COL, S_TOP))
-        self.dos = wx.TextCtrl(panel, pos=(S_LEFT + COL, S_TOP + 20), size=(170, -1))
+        wx.StaticText(panel, label="Datetime (YYYY-MM-DD HH:MM):", pos=(S_LEFT + COL, S_TOP))
+        self.dos = wx.TextCtrl(panel, pos=(S_LEFT + COL, S_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.dos.SetValue(current_day + " 12:00")
 
         # Surgery type (default from YAML)
         wx.StaticText(panel, label="Surgery type:", pos=(S_LEFT + 2 * COL, S_TOP))
-        self.type = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL, S_TOP + 20), size=(170, -1))
+        self.type = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL, S_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.type.SetValue(default_params['mice']['default_surgery_type'])
 
         # Anesthesia (default from YAML)
         wx.StaticText(panel, label="Anesthesia:", pos=(S_LEFT, S_TOP + ROW))
-        self.anesthesia = wx.TextCtrl(panel, pos=(S_LEFT, S_TOP + ROW + 20), size=(170, -1))
+        self.anesthesia = wx.TextCtrl(panel, pos=(S_LEFT, S_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.anesthesia.SetValue(default_params['mice']['default_anesthesia'])
 
         # Pre-OP weight in grams (default is empty)
         wx.StaticText(panel, label="Pre-OP weight (grams):", pos=(S_LEFT + COL, S_TOP + ROW))
-        self.pre_op_weight = wx.TextCtrl(panel, pos=(S_LEFT + COL, S_TOP + ROW + 20), size=(170, -1))
+        self.pre_op_weight = wx.TextCtrl(panel, pos=(S_LEFT + COL, S_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.pre_op_weight.SetValue('')
 
         # Duration
         wx.StaticText(panel, label="Duration of surgery (min):", pos=(S_LEFT + 2 * COL, S_TOP + ROW))
-        self.duration = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL, S_TOP + ROW + 20), size=(170, -1))
+        self.duration = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL, S_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.duration.SetValue('')
 
         # Notes
         wx.StaticText(panel, label="Notes:", pos=(S_LEFT, S_TOP + 2 * ROW))
         self.surgery_notes = wx.TextCtrl(panel, value="", style=wx.TE_MULTILINE, pos=(S_LEFT, S_TOP + 2 * ROW + 20),
-                                         size=(WINDOW_WIDTH_L - 2 * S_LEFT - 200, 50))
+                                         size=(COL + BOX_WIDTH, 50))
 
         # Submit surgery button
         self.submit_surgery_button = wx.Button(panel, label="Add new surgery",
-                                               pos=(S_LEFT + 3 * COL, S_TOP + 3 * ROW + 20),
-                                               size=(150, 50))
+                                               pos=(S_LEFT + 2 * COL, S_TOP + 2 * ROW + 20),
+                                               size=(BUTTON_WIDTH, BUTTON_HEIGHT))
         self.Bind(wx.EVT_BUTTON, self.event_submit_surgery, self.submit_surgery_button)
 
         # =============================================================================
         # Middle lower box: Enter new injection
         # =============================================================================
 
-        wx.StaticBox(panel, label='NEW INJECTION',
-                     pos=(I_LEFT - 20, I_TOP - 30), size=(WINDOW_WIDTH_L - 2 * I_LEFT, I_HEIGHT))
+        inj_box = wx.StaticBox(panel, label='NEW INJECTION', pos=(I_LEFT - 20, I_TOP - 30), size=(I_WIDTH, I_HEIGHT))
+        inj_box.SetForegroundColour(BOX_TITLE_COLOR)
 
         # Injection number (default is empty, will be filled after mouse is loaded)
         wx.StaticText(panel, label="Injection number:", pos=(I_LEFT, I_TOP))
-        self.inj_num = wx.TextCtrl(panel, pos=(S_LEFT, S_TOP + 20), size=(170, -1))
+        self.inj_num = wx.TextCtrl(panel, pos=(I_LEFT, I_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.inj_num.SetValue('')
 
         # Substance (default from YAML)
         wx.StaticText(panel, label="Substance:", pos=(I_LEFT + COL, I_TOP))
-        self.substance = wx.ComboBox(panel, choices=licences, style=wx.CB_READONLY,
-                                     pos=(I_LEFT + COL, I_TOP + 20), size=(170, -1))
+        self.substance = wx.ComboBox(panel, choices=substances, style=wx.CB_READONLY,
+                                     pos=(I_LEFT + COL, I_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         item = self.substance.FindString(default_params['mice']['default_substance'])
         self.substance.SetSelection(item)
 
         # Volume (default 0.3 uL)
-        wx.StaticText(panel, label="Injected volume:", pos=(S_LEFT + 2 * COL, S_TOP))
-        self.volume = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL, S_TOP + 20), size=(170, -1))
-        self.volume.SetValue('0.3')
+        wx.StaticText(panel, label="Injected volume (\u03BCL):", pos=(I_LEFT + 2 * COL, I_TOP))
+        self.volume = wx.TextCtrl(panel, pos=(I_LEFT + 2 * COL, I_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        self.volume.SetValue(default_params['mice']['default_volume'])
 
         # Site (default from YAML)
-        wx.StaticText(panel, label="Injection site:", pos=(S_LEFT, S_TOP + ROW))
-        self.site = wx.TextCtrl(panel, pos=(S_LEFT, S_TOP + ROW + 20), size=(170, -1))
+        wx.StaticText(panel, label="Injection site:", pos=(I_LEFT, I_TOP + ROW))
+        self.site = wx.TextCtrl(panel, pos=(I_LEFT, I_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.site.SetValue(default_params['mice']['default_site'])
 
         # Coordinates (default empty)
-        wx.StaticText(panel, label="Stereotaxic coordinates:", pos=(S_LEFT + COL, S_TOP + ROW))
-        self.coordinates = wx.TextCtrl(panel, pos=(S_LEFT + COL, S_TOP + ROW + 20), size=(170, -1))
-        self.coordinates.SetValue('')
+        wx.StaticText(panel, label="Stereotaxic coordinates:", pos=(I_LEFT + COL, I_TOP + ROW))
+        self.coordinates = wx.TextCtrl(panel, pos=(I_LEFT + COL, I_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        self.coordinates.SetValue(default_params['mice']['default_coords'])
 
         # Dilution
-        wx.StaticText(panel, label="Dilution:", pos=(S_LEFT + 2 * COL, S_TOP + ROW))
-        self.dilution = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL, S_TOP + ROW + 20), size=(170, -1))
-        self.dilution.SetValue('')
+        wx.StaticText(panel, label="Dilution:", pos=(I_LEFT + 2 * COL, I_TOP + ROW))
+        self.dilution = wx.TextCtrl(panel, pos=(I_LEFT + 2 * COL, I_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        self.dilution.SetValue(default_params['mice']['default_dilution'])
 
         # Notes
-        wx.StaticText(panel, label="Notes:", pos=(S_LEFT, S_TOP + 2 * ROW))
-        self.inj_notes = wx.TextCtrl(panel, value="", style=wx.TE_MULTILINE, pos=(S_LEFT, S_TOP + 2 * ROW + 20),
-                                       size=(WINDOW_WIDTH_L - 2 * S_LEFT - 200, 50))
+        wx.StaticText(panel, label="Notes:", pos=(I_LEFT, I_TOP + 2 * ROW))
+        self.inj_notes = wx.TextCtrl(panel, value="", style=wx.TE_MULTILINE, pos=(I_LEFT, I_TOP + 2 * ROW + 20),
+                                     size=(COL + BOX_WIDTH, 50))
 
         # Submit surgery button
         self.submit_injection_button = wx.Button(panel, label="Add new Injection",
-                                               pos=(S_LEFT + 3 * COL, S_TOP + 3 * ROW + 20),
-                                               size=(150, 50))
+                                               pos=(I_LEFT + 2 * COL, I_TOP + 2 * ROW + 20),
+                                               size=(BUTTON_WIDTH, BUTTON_HEIGHT))
         self.Bind(wx.EVT_BUTTON, self.event_submit_injection, self.submit_injection_button)
 
         # =============================================================================
@@ -327,7 +335,7 @@ class window(wx.Frame):
         self.status_text = wx.TextCtrl(panel, value="Status updates will appear here:\n",
                                        style=wx.TE_MULTILINE,
                                        pos=(S_LEFT + COL, S_TOP + 4*ROW),
-                                       size=(WINDOW_WIDTH - S_LEFT - COL - 30, WINDOW_HEIGHT - S_TOP - 30))
+                                       size=(WINDOW_WIDTH - S_LEFT - COL - 30, WINDOW_HEIGHT - S_TOP - S_HEIGHT - ROW))
 
     # =============================================================================
     # Events for menus and button presses
