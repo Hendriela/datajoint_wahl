@@ -18,7 +18,10 @@ mice:
   default_surgery_type: 'default_surgery_type'
   default_anesthesia: 'default_anesthesia'
   default_substance: 'default_substance'
+  default_volume: '0.3'             # in uL
   default_site: 'default_injection_site'
+  default_coords: 'AP: -0.0; ML: -0.0; DV: -0.0'
+  default_dilution: 'none'
 
 behavior:
   default_mouse: 'last_mouse'   # if this is 'last_mouse', the default mouse will be the mouse with the highest ID
