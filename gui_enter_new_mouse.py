@@ -189,7 +189,7 @@ class window(wx.Frame):
 
         # Genotype (default 'WT')
         wx.StaticText(panel, label="Genotype:", pos=(M_LEFT + COL, M_TOP + ROW))
-        self.genotype = wx.ComboBox(panel, choices=strains, style=wx.CB_READONLY, pos=(M_LEFT + COL, M_TOP + ROW + 20),
+        self.genotype = wx.ComboBox(panel, choices=genotypes, style=wx.CB_READONLY, pos=(M_LEFT + COL, M_TOP + ROW + 20),
                                     size=(BOX_WIDTH, -1))
         item = self.genotype.FindString('WT')
         self.genotype.SetSelection(item)
@@ -420,6 +420,17 @@ class window(wx.Frame):
     # =============================================================================
 
     def event_submit_mouse(self, event):
+        """Handle user click on "Submit Mouse" button"""
+        #mouse_dict = dict(username=investigator,
+        #                  mouse_id = ,
+        #                  dob = ,
+        #                  sex = ,
+        #                  batch = ,
+        #                  licence_id = ,
+        #                  strain = ,
+        #                  genotype = ,
+        #                  irats_id = ,
+        #                  )
         pass
 
     def event_submit_surgery(self, event):
