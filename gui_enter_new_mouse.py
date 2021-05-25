@@ -421,17 +421,33 @@ class window(wx.Frame):
 
     def event_submit_mouse(self, event):
         """Handle user click on "Submit Mouse" button"""
-        #mouse_dict = dict(username=investigator,
-        #                  mouse_id = ,
-        #                  dob = ,
-        #                  sex = ,
-        #                  batch = ,
-        #                  licence_id = ,
-        #                  strain = ,
-        #                  genotype = ,
-        #                  irats_id = ,
-        #                  )
-        pass
+        # auto-generate mouse_id
+        id_s = (common_mice.Mouse() & "username = '{}'".format(investigator)).fetch("mouse_id")
+        mouse_id = max(id_s.astype(int)) + 1
+
+        # create database entry
+        mouse_dict = dict(username=investigator,
+                          mouse_id="{}".format(mouse_id),
+                          dob=self.dob.GetValue(),
+                          sex=self.sex.GetValue(),
+                          batch=self.batch.GetValue(),
+                          strain=self.strain.GetValue(),
+                          genotype=self.genotype.GetValue(),
+                          irats_id=self.irats.GetValue(),
+                          cage_num=self.cage.GetValue(),
+                          ear_mark=self.ear.GetValue(),
+                          licence_id=self.licence.GetValue(),
+                          info=self.mouse_notes.GetValue(),
+                          )
+        try:
+            common_mice.Mouse().insert1(mouse_dict)
+            self.status_text.write('Successfully entered new entry: ' + str(mouse_dict) + '\n')
+            return True
+
+        except Exception as ex:
+            print('Exception manually caught:', ex)
+            self.status_text.write('Error while entering ' + str(mouse_dict) + ' : ' + str(ex) + '\n')
+            return False
 
     def event_submit_surgery(self, event):
         pass
