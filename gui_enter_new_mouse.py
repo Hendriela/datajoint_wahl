@@ -440,14 +440,20 @@ class window(wx.Frame):
                           info=self.mouse_notes.GetValue(),
                           )
         try:
+            # insert mouse into database
             common_mice.Mouse().insert1(mouse_dict)
             self.status_text.write('Successfully entered new entry: ' + str(mouse_dict) + '\n')
-            return True
+
+            # save dictionary that is entered in a backup YAML file for faster re-population
+            identifier = "%s_%s_%s" % (investigator, mouse_id, current_day)
+            filename = os.path.join(login.get_neurophys_wahl_directory(), "Datajoint/manual_mouse_submissions", identifier + '.yaml')
+            with open(filename, 'w') as outfile:
+                yaml.dump(mouse_dict, outfile, default_flow_style=False)
+            self.status_text.write('Created backup file at %s' % filename)
 
         except Exception as ex:
             print('Exception manually caught:', ex)
             self.status_text.write('Error while entering ' + str(mouse_dict) + ' : ' + str(ex) + '\n')
-            return False
 
     def event_submit_surgery(self, event):
         pass
