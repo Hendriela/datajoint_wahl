@@ -194,7 +194,7 @@ class window(wx.Frame):
 
         # Genotype (default 'WT')
         wx.StaticText(panel, label="Genotype:", pos=(M_LEFT + 2 * COL, M_TOP + ROW))
-        self.genotype = wx.ComboBox(panel, choices=strains, style=wx.CB_READONLY,
+        self.genotype = wx.ComboBox(panel, choices=genotypes, style=wx.CB_READONLY,
                                     pos=(M_LEFT + 2 * COL, M_TOP + ROW + 20), size=(BOX_WIDTH, -1))
         item = self.genotype.FindString('WT')
         self.genotype.SetSelection(item)
@@ -425,8 +425,40 @@ class window(wx.Frame):
     # =============================================================================
 
     def event_submit_mouse(self, event):
-        """Enter mouse data as new entry into the Mouse table"""
-        pass
+        """Handle user click on "Submit Mouse" button"""
+        # auto-generate mouse_id
+        id_s = (common_mice.Mouse() & "username = '{}'".format(investigator)).fetch("mouse_id")
+        mouse_id = max(id_s.astype(int)) + 1
+
+        # create database entry
+        mouse_dict = dict(username=investigator,
+                          mouse_id="{}".format(mouse_id),
+                          dob=self.dob.GetValue(),
+                          sex=self.sex.GetValue(),
+                          batch=self.batch.GetValue(),
+                          strain=self.strain.GetValue(),
+                          genotype=self.genotype.GetValue(),
+                          irats_id=self.irats.GetValue(),
+                          cage_num=self.cage.GetValue(),
+                          ear_mark=self.ear.GetValue(),
+                          licence_id=self.licence.GetValue(),
+                          info=self.mouse_notes.GetValue(),
+                          )
+        try:
+            # insert mouse into database
+            common_mice.Mouse().insert1(mouse_dict)
+            self.status_text.write('Successfully entered new entry: ' + str(mouse_dict) + '\n')
+
+            # save dictionary that is entered in a backup YAML file for faster re-population
+            identifier = "%s_%s_%s" % (investigator, mouse_id, current_day)
+            filename = os.path.join(login.get_neurophys_wahl_directory(), "Datajoint/manual_mouse_submissions", identifier + '.yaml')
+            with open(filename, 'w') as outfile:
+                yaml.dump(mouse_dict, outfile, default_flow_style=False)
+            self.status_text.write('Created backup file at %s' % filename)
+
+        except Exception as ex:
+            print('Exception manually caught:', ex)
+            self.status_text.write('Error while entering ' + str(mouse_dict) + ' : ' + str(ex) + '\n')
 
     def event_submit_surgery(self, event):
         """Enter surgery data as new entry into the Surgery table"""
