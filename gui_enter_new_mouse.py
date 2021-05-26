@@ -426,13 +426,10 @@ class window(wx.Frame):
 
     def event_submit_mouse(self, event):
         """Handle user click on "Submit Mouse" button"""
-        # auto-generate mouse_id
-        id_s = (common_mice.Mouse() & "username = '{}'".format(investigator)).fetch("mouse_id")
-        mouse_id = max(id_s.astype(int)) + 1
 
         # create database entry
         mouse_dict = dict(username=investigator,
-                          mouse_id="{}".format(mouse_id),
+                          mouse_id=self.mouse_id.GetValue(),
                           dob=self.dob.GetValue(),
                           sex=self.sex.GetValue(),
                           batch=self.batch.GetValue(),
@@ -450,11 +447,11 @@ class window(wx.Frame):
             self.status_text.write('Successfully entered new entry: ' + str(mouse_dict) + '\n')
 
             # save dictionary that is entered in a backup YAML file for faster re-population
-            identifier = "%s_%s_%s" % (investigator, mouse_id, current_day)
+            identifier = "%s_%s_%s" % (investigator, self.mouse_id.GetValue(), current_day)
             filename = os.path.join(login.get_neurophys_wahl_directory(), "Datajoint/manual_mouse_submissions", identifier + '.yaml')
             with open(filename, 'w') as outfile:
                 yaml.dump(mouse_dict, outfile, default_flow_style=False)
-            self.status_text.write('Created backup file at %s' % filename)
+            self.status_text.write('Created backup file at %s' % filename + '\n')
 
         except Exception as ex:
             print('Exception manually caught:', ex)
