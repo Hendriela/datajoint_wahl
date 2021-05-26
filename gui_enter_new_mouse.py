@@ -163,51 +163,56 @@ class window(wx.Frame):
                                  pos=(M_LEFT - 20, M_TOP - 30), size=(M_WIDTH, M_HEIGHT))
         mouse_box.SetForegroundColour(BOX_TITLE_COLOR)
 
+        # Mouse ID (default is highest existing mouse ID + 1)
+        wx.StaticText(panel, label="Mouse ID:", pos=(M_LEFT, M_TOP))
+        self.mouse_id = wx.TextCtrl(panel, pos=(M_LEFT, M_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        self.mouse_id.SetValue(str(int(mouse_ids[0]) + 1))
+
         # Date of birth (default is current day)
-        wx.StaticText(panel, label="Date of birth (YYYY-MM-DD):", pos=(M_LEFT, M_TOP))
-        self.dob = wx.TextCtrl(panel, pos=(M_LEFT, M_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        wx.StaticText(panel, label="Date of birth (YYYY-MM-DD):", pos=(M_LEFT + COL, M_TOP))
+        self.dob = wx.TextCtrl(panel, pos=(M_LEFT + COL, M_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.dob.SetValue(current_day)
 
         # Sex (default is 'U', undefined)
-        wx.StaticText(panel, label="Sex:", pos=(M_LEFT + COL, M_TOP))
+        wx.StaticText(panel, label="Sex:", pos=(M_LEFT + 2 * COL, M_TOP))
         self.sex = wx.ComboBox(panel, choices=sexes, style=wx.CB_READONLY,
-                               pos=(M_LEFT + COL, M_TOP+ 20), size=(BOX_WIDTH, BOX_HEIGHT))
+                               pos=(M_LEFT + 2 * COL, M_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         item = self.sex.FindString(sexes[2])
         self.sex.SetSelection(item)
 
         # Batch (default is 0, no batch)
-        wx.StaticText(panel, label="Batch:", pos=(M_LEFT + 2*COL, M_TOP))
-        self.batch = wx.TextCtrl(panel, pos=(M_LEFT + 2*COL, M_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        wx.StaticText(panel, label="Batch:", pos=(M_LEFT, M_TOP + ROW))
+        self.batch = wx.TextCtrl(panel, pos=(M_LEFT, M_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.batch.SetValue('0')
 
         # Strain (default is 'WT')
-        wx.StaticText(panel, label="Strain:", pos=(M_LEFT, M_TOP + ROW))
+        wx.StaticText(panel, label="Strain:", pos=(M_LEFT + COL, M_TOP + ROW))
         self.strain = wx.ComboBox(panel, choices=strains, style=wx.CB_READONLY,
-                                  pos=(M_LEFT, M_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+                                  pos=(M_LEFT + COL, M_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         item = self.strain.FindString('WT')
         self.strain.SetSelection(item)
 
         # Genotype (default 'WT')
-        wx.StaticText(panel, label="Genotype:", pos=(M_LEFT + COL, M_TOP + ROW))
-        self.genotype = wx.ComboBox(panel, choices=strains, style=wx.CB_READONLY, pos=(M_LEFT + COL, M_TOP + ROW + 20),
-                                    size=(BOX_WIDTH, -1))
+        wx.StaticText(panel, label="Genotype:", pos=(M_LEFT + 2 * COL, M_TOP + ROW))
+        self.genotype = wx.ComboBox(panel, choices=strains, style=wx.CB_READONLY,
+                                    pos=(M_LEFT + 2 * COL, M_TOP + ROW + 20), size=(BOX_WIDTH, -1))
         item = self.genotype.FindString('WT')
         self.genotype.SetSelection(item)
 
         # iRats ID (default empty)
-        wx.StaticText(panel, label="iRats ID:", pos=(M_LEFT + 2*COL, M_TOP + ROW))
-        self.irats = wx.TextCtrl(panel, pos=(M_LEFT + 2*COL, M_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        wx.StaticText(panel, label="iRats ID:", pos=(M_LEFT, M_TOP + 2 * ROW))
+        self.irats = wx.TextCtrl(panel, pos=(M_LEFT, M_TOP + 2 * ROW + 20), size=(BOX_WIDTH/2, BOX_HEIGHT))
         self.irats.SetValue('')
 
-        # Cage number (default empty)
-        wx.StaticText(panel, label="Cage number:", pos=(M_LEFT, M_TOP + 2*ROW))
-        self.cage = wx.TextCtrl(panel, pos=(M_LEFT, M_TOP + 2*ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
-        self.cage.SetValue('')
-
-        # Cage number
-        wx.StaticText(panel, label="Ear marks:", pos=(M_LEFT + COL, M_TOP + 2*ROW))
-        self.ear = wx.TextCtrl(panel, pos=(M_LEFT + COL, M_TOP + 2*ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        # Ear marks (default empty)
+        wx.StaticText(panel, label="Ear marks:", pos=(M_LEFT + COL/2, M_TOP + 2*ROW))
+        self.ear = wx.TextCtrl(panel, pos=(M_LEFT + COL/2, M_TOP + 2*ROW + 20), size=(BOX_WIDTH/2 - 15, BOX_HEIGHT))
         self.ear.SetValue('')
+
+        # Cage number (default empty)
+        wx.StaticText(panel, label="Cage number:", pos=(M_LEFT + COL, M_TOP + 2*ROW))
+        self.cage = wx.TextCtrl(panel, pos=(M_LEFT + COL, M_TOP + 2*ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        self.cage.SetValue('')
 
         # Licence (default from YAML)
         wx.StaticText(panel, label="Licence:", pos=(M_LEFT + 2*COL, M_TOP + 2*ROW))
@@ -394,7 +399,7 @@ class window(wx.Frame):
         item = self.mouse.FindString(default_params['behavior']['default_mouse'])
         self.mouse.SetSelection(item)
 
-        # Submit euthanasia button
+        # Load mouse button
         self.load_mouse_button = wx.Button(panel, label="Load mouse",
                                                  pos=(L_LEFT, L_TOP + ROW),
                                                  size=(BUTTON_WIDTH, BUTTON_HEIGHT))
@@ -420,21 +425,27 @@ class window(wx.Frame):
     # =============================================================================
 
     def event_submit_mouse(self, event):
+        """Enter mouse data as new entry into the Mouse table"""
         pass
 
     def event_submit_surgery(self, event):
+        """Enter surgery data as new entry into the Surgery table"""
         pass
 
     def event_submit_injection(self, event):
+        """Enter new injection for the currently selected surgery"""
         pass
 
     def event_submit_weight(self, event):
+        """Enter a new weight for the currently selected mouse"""
         pass
 
     def event_submit_euthanasia(self, event):
+        """Move the currently selected mouse to the Sacrificed table"""
         pass
 
     def event_load_mouse(self, event):
+        """Load data of an already existing mouse to add surgeries/weights/euthanasia"""
         pass
 
 
