@@ -84,8 +84,7 @@ WINDOW_HEIGHT = 1100
 B_TOP = L_TOP
 
 # relative path to manual_submission backup folder inside the Neurophysiology Wahl directory (common for all users)
-REL_BACKUP_PATH_MOUSE = "Datajoint/manual_mouse_submissions"
-REL_BACKUP_PATH_SURGERY = "Datajoint/manual_surgery_submissions"
+REL_BACKUP_PATH = "Datajoint/manual_submissions"
 
 # =============================================================================
 # DEFAULT PARAMETERS
@@ -452,26 +451,16 @@ class window(wx.Frame):
                           cage_num=self.cage.GetValue(),
                           ear_mark=self.ear.GetValue(),
                           licence_id=self.licence.GetValue(),
-                          info=self.mouse_notes.GetValue(),
-                          )
-        try:
-            # insert mouse into database
-            common_mice.Mouse().insert1(mouse_dict)
-            self.status_text.write('Successfully entered new entry: ' + str(mouse_dict) + '\n')
+                          info=self.mouse_notes.GetValue())
 
-            # save dictionary that is entered in a backup YAML file for faster re-population
-            identifier = "%s_%s_%s" % (investigator, self.mouse_id.GetValue(), current_day)
-            filename = os.path.join(login.get_neurophys_wahl_directory(), "Datajoint/manual_mouse_submissions", identifier + '.yaml')
-            with open(filename, 'w') as outfile:
-                yaml.dump(mouse_dict, outfile, default_flow_style=False)
-            self.status_text.write('Created backup file at %s' % filename + '\n')
-
-        except Exception as ex:
-            print('Exception manually caught:', ex)
-            self.status_text.write('Error while entering ' + str(mouse_dict) + ' : ' + str(ex) + '\n')
+        # Insert into database and save backup YAML
+        identifier = 'mouse_{}_M{:03d}_{}'.format(investigator, self.mouse_id.GetValue(), current_day)
+        self.safe_insert(common_mice.Mouse(), mouse_dict, identifier, REL_BACKUP_PATH)
 
     def event_submit_surgery(self, event):
         """Enter surgery data as new entry into the Surgery table"""
+
+        # Get data from relevant fields
         surg_dict = dict(username=investigator,
                          mouse_id=self.curr_mouse.GetValue(),
                          surgery_num=self.surg_num.GetValue(),
@@ -479,11 +468,33 @@ class window(wx.Frame):
                          surgery_type=self.type.GetValue(),
                          anesthesia=self.anesthesia.GetValue(),
                          pre_op_weight=self.pre_op_weight.GetValue(),
-                         stroke_params=self.st)
+                         stroke_params=self.stroke_params.GetValue(),
+                         duration=self.duration.GetValue(),
+                         surgery_notes=self.surgery_notes.GetValue())
+
+        # Insert into database and save backup YAML
+        identifier = 'surgery_{}_M{:03d}_{}'.format(investigator, self.mouse_id.GetValue(), self.surg_num.GetValue())
+        self.safe_insert(common_mice.Mouse(), surg_dict, identifier, REL_BACKUP_PATH)
 
     def event_submit_injection(self, event):
         """Enter new injection for the currently selected surgery"""
-        pass
+
+        # Get data from relevant fields
+        inj_dict = dict(username=investigator,
+                         mouse_id=self.curr_mouse.GetValue(),
+                         surgery_num=self.surg_num.GetValue(),
+                         injection_num=self.inj_num.GetValue(),
+                         substance_name=self.substance.GetValue(),
+                         volume=self.volume.GetValue(),
+                         dilution=self.dilution.GetValue(),
+                         site=self.site.GetValue(),
+                         coordinates=self.coordinates.GetValue(),
+                         injection_notes=self.inj_notes.GetValue())
+
+        # Insert into database and save backup YAML
+        identifier = 'injection_{}_M{:03d}_{}_{}'.format(investigator, self.mouse_id.GetValue(),
+                                                         self.surg_num.GetValue(), self.inj_num.GetValue())
+        self.safe_insert(common_mice.Mouse(), inj_dict, identifier, REL_BACKUP_PATH)
 
     def event_submit_weight(self, event):
         """Enter a new weight for the currently selected mouse"""
@@ -686,7 +697,6 @@ class window(wx.Frame):
             self.job_list.append(
                 [common_behav.RawSensoryEventsFile(), raw_event_dict, self.behav_folder.GetValue(), file])
 
-
     def event_select_session_folder(self, event):
         """ User clicked on select session folder button """
 
@@ -788,14 +798,19 @@ class window(wx.Frame):
 
         print('Transfer ended.')
 
-    def save_insert(self, table, dictionary):
-        """
-        Returns True, if the new_entry could be successfully entered into the database
-        """
+    def safe_insert(self, table, dictionary, identifier, backup):
+        """ Enter a dict into a table. If successful, returns True and the dict is saved in a backup YAML file."""
 
         try:
             table.insert1(dictionary)
-            self.status_text.write('Sucessfully entered new entry: ' + str(dictionary) + '\n')
+            self.status_text.write('Sucessfully entered new entry in table "{}": \n\t'.format(table.table_name) +
+                                   str(dictionary) + '\n')
+
+            # save dictionary in a backup YAML file for faster re-population
+            filename = os.path.join(login.get_neurophys_wahl_directory(), backup, identifier + '.yaml')
+            with open(filename, 'w') as outfile:
+                yaml.dump(dictionary, outfile, default_flow_style=False)
+            self.status_text.write('Created backup file at %s' % filename + '\n')
             return True
 
         except Exception as ex:
