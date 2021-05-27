@@ -275,10 +275,14 @@ class window(wx.Frame):
         self.duration = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL, S_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.duration.SetValue('')
 
+        # Stroke parameters
+        wx.StaticText(panel, label="Stroke parameters (if applicable):", pos=(S_LEFT, S_TOP + 2 * ROW))
+        self.stroke_params = wx.TextCtrl(panel, value="", style=wx.TE_MULTILINE, pos=(S_LEFT, S_TOP + 2 * ROW + 20),
+                                         size=(BOX_WIDTH, 50))
         # Notes
-        wx.StaticText(panel, label="Notes:", pos=(S_LEFT, S_TOP + 2 * ROW))
-        self.surgery_notes = wx.TextCtrl(panel, value="", style=wx.TE_MULTILINE, pos=(S_LEFT, S_TOP + 2 * ROW + 20),
-                                         size=(COL + BOX_WIDTH, 50))
+        wx.StaticText(panel, label="Notes:", pos=(S_LEFT + COL, S_TOP + 2 * ROW))
+        self.surgery_notes = wx.TextCtrl(panel, value="", style=wx.TE_MULTILINE, pos=(S_LEFT + COL, S_TOP + 2*ROW + 20),
+                                         size=(BOX_WIDTH, 50))
 
         # Submit surgery button
         self.submit_surgery_button = wx.Button(panel, label="Add new surgery",
@@ -468,7 +472,14 @@ class window(wx.Frame):
 
     def event_submit_surgery(self, event):
         """Enter surgery data as new entry into the Surgery table"""
-        pass
+        surg_dict = dict(username=investigator,
+                         mouse_id=self.curr_mouse.GetValue(),
+                         surgery_num=self.surg_num.GetValue(),
+                         surgery_date=self.dos.GetValue(),
+                         surgery_type=self.type.GetValue(),
+                         anesthesia=self.anesthesia.GetValue(),
+                         pre_op_weight=self.pre_op_weight.GetValue(),
+                         stroke_params=self.st)
 
     def event_submit_injection(self, event):
         """Enter new injection for the currently selected surgery"""
@@ -513,6 +524,8 @@ class window(wx.Frame):
         item = self.licence.FindString(entry['licence_id'])
         self.licence.SetSelection(item)
         self.mouse_notes.SetValue(entry['info'])
+
+        self.curr_mouse.SetValue(entry['mouse_id'])
 
         self.status_text.write(
             'Successfully loaded info for mouse {}. You can now add new data associated with this mouse. \n\t'
