@@ -73,7 +73,7 @@ E_WIDTH = W_WIDTH
 # Load mouse box
 L_LEFT = M_LEFT
 L_TOP = S_TOP + 4*ROW
-L_HEIGHT = ROW + BUTTON_HEIGHT + 50
+L_HEIGHT = 2*ROW + BUTTON_HEIGHT + 50
 L_WIDTH = BUTTON_WIDTH + 50
 
 # WINDOW SIZE
@@ -404,6 +404,15 @@ class window(wx.Frame):
                                                  pos=(L_LEFT, L_TOP + ROW),
                                                  size=(BUTTON_WIDTH, BUTTON_HEIGHT))
         self.Bind(wx.EVT_BUTTON, self.event_load_mouse, self.load_mouse_button)
+
+        # Currently loaded mouse field
+        curr_mouse_title = wx.StaticText(panel, label="CURRENTLY LOADED MOUSE:", pos=(L_LEFT, L_TOP + 2*ROW))
+        curr_mouse_title.SetForegroundColour((255, 0, 0))
+        self.curr_mouse = wx.TextCtrl(panel, pos=(L_LEFT, L_TOP + 2*ROW + 20), style=wx.TE_READONLY | wx.TE_CENTER,
+                                      size=(BOX_WIDTH, 30))
+        self.curr_mouse.SetFont(wx.Font(16, wx.DEFAULT, wx.NORMAL, wx.BOLD))
+        self.curr_mouse.SetBackgroundColour((255, 70, 70))
+        self.curr_mouse.SetValue('None')
 
         # =============================================================================
         # Submit and close buttons
