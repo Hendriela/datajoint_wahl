@@ -394,10 +394,10 @@ class window(wx.Frame):
         load_box.SetForegroundColour(BOX_TITLE_COLOR)
 
         wx.StaticText(panel, label="Mouse ID:", pos=(L_LEFT, L_TOP))
-        self.mouse = wx.ComboBox(panel, choices=mouse_ids, style=wx.CB_READONLY,
+        self.new_mouse = wx.ComboBox(panel, choices=mouse_ids, style=wx.CB_READONLY,
                                  pos=(L_LEFT, L_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
-        item = self.mouse.FindString(default_params['behavior']['default_mouse'])
-        self.mouse.SetSelection(item)
+        item = self.new_mouse.FindString(default_params['behavior']['default_mouse'])
+        self.new_mouse.SetSelection(item)
 
         # Load mouse button
         self.load_mouse_button = wx.Button(panel, label="Load mouse",
@@ -484,9 +484,39 @@ class window(wx.Frame):
 
     def event_load_mouse(self, event):
         """Load data of an already existing mouse to add surgeries/weights/euthanasia"""
-        pass
 
+        mouse_dict = dict(username=investigator,
+                          mouse_id=self.new_mouse.GetValue())
+        entries = (common_mice.Mouse() & mouse_dict).fetch(as_dict=True)
+        # check there is only one table corresponding to this
+        if len(entries) != 1:
+            self.status_text.write(
+                'Can not load mouse info for {} because there are {} mice corresponding to this'.format(
+                    mouse_dict, len(entries)) + '\n')
+            return
 
+        entry = entries[0]
+
+        # set the selections in the menus according to the loaded info
+        self.mouse_id.SetValue(entry['mouse_id'])
+        self.dob.SetValue(entry['dob'].strftime('%Y-%m-%d'))
+        item = self.sex.FindString(entry['sex'])
+        self.sex.SetSelection(item)
+        self.batch.SetValue(str(entry['batch']))
+        item = self.strain.FindString(entry['strain'])
+        self.strain.SetSelection(item)
+        item = self.genotype.FindString(entry['genotype'])
+        self.genotype.SetSelection(item)
+        self.irats.SetValue(entry['irats_id'])
+        self.ear.SetValue(entry['ear_mark'])
+        self.cage.SetValue(str(entry['cage_num']))
+        item = self.licence.FindString(entry['licence_id'])
+        self.licence.SetSelection(item)
+        self.mouse_notes.SetValue(entry['info'])
+
+        self.status_text.write(
+            'Successfully loaded info for mouse {}. You can now add new data associated with this mouse. \n\t'
+            '--> Do not change data in the MOUSE box while adding new info!'.format(mouse_dict) + '\n')
 
 
     def event_submit_session(self, event):
