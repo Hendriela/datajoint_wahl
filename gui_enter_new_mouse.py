@@ -457,8 +457,21 @@ class window(wx.Frame):
         identifier = 'mouse_{}_M{:03d}_{}'.format(investigator, self.mouse_id.GetValue(), current_day)
         self.safe_insert(common_mice.Mouse(), mouse_dict, identifier, REL_BACKUP_PATH)
 
+        # Update "load mouse" drop-down menu
+        new_mouse_ids = np.array(np.append(mouse_ids, '5'), dtype=int)      # Insert new mouse ID to the choices
+        new_mouse_ids[::-1].sort()                                          # Sort the list again (descending)
+        self.new_mouse.Clear()                                              # Remove old choices
+        for id in new_mouse_ids:                                            # Add the new ordered list
+            self.new_mouse.Append(str(id))
+        mouse_ids = new_mouse_ids                                           # Update choice list
+
     def event_submit_surgery(self, event):
         """Enter surgery data as new entry into the Surgery table"""
+
+        # Check if a mouse was loaded before submitting a surgery
+        if self.curr_mouse.GetValue() == 'None':
+            self.status_text.write('Load a mouse before submitting a surgery!')
+            return
 
         # Get data from relevant fields
         surg_dict = dict(username=investigator,
@@ -474,16 +487,21 @@ class window(wx.Frame):
 
         # Insert into database and save backup YAML
         identifier = 'surgery_{}_M{:03d}_{}'.format(investigator, self.mouse_id.GetValue(), self.surg_num.GetValue())
-        self.safe_insert(common_mice.Mouse(), surg_dict, identifier, REL_BACKUP_PATH)
+        self.safe_insert(common_mice.Surgery(), surg_dict, identifier, REL_BACKUP_PATH)
 
     def event_submit_injection(self, event):
         """Enter new injection for the currently selected surgery"""
 
+        # Check if a mouse was loaded before submitting an injection
+        if self.curr_mouse.GetValue() == 'None':
+            self.status_text.write('Load a mouse before submitting an injection!')
+            return
+
         # Get data from relevant fields
         inj_dict = dict(username=investigator,
                          mouse_id=self.curr_mouse.GetValue(),
-                         surgery_num=self.surg_num.GetValue(),
-                         injection_num=self.inj_num.GetValue(),
+                         surgery_num=int(self.surg_num.GetValue()),
+                         injection_num=int(self.inj_num.GetValue()),
                          substance_name=self.substance.GetValue(),
                          volume=self.volume.GetValue(),
                          dilution=self.dilution.GetValue(),
@@ -494,15 +512,48 @@ class window(wx.Frame):
         # Insert into database and save backup YAML
         identifier = 'injection_{}_M{:03d}_{}_{}'.format(investigator, self.mouse_id.GetValue(),
                                                          self.surg_num.GetValue(), self.inj_num.GetValue())
-        self.safe_insert(common_mice.Mouse(), inj_dict, identifier, REL_BACKUP_PATH)
+        self.safe_insert(common_mice.Injection(), inj_dict, identifier, REL_BACKUP_PATH)
+
+        # Increase the injection_num counter by 1
+        self.inj_num.SetValue(str(inj_dict['injection_num']+1))
 
     def event_submit_weight(self, event):
         """Enter a new weight for the currently selected mouse"""
-        pass
+
+        # Check if a mouse was loaded before submitting a weight
+        if self.curr_mouse.GetValue() == 'None':
+            self.status_text.write('Load a mouse before submitting a weight measurement!')
+            return
+
+        # Get data from relevant fields
+        weight_dict = dict(username=investigator,
+                           mouse_id=self.curr_mouse.GetValue(),
+                           date_of_weight=self.dow.GetValue(),
+                           weight=self.weight.GetValue())
+
+        # Insert into database and save backup YAML
+        identifier = 'weight_{}_M{:03d}_{}'.format(investigator, self.mouse_id.GetValue(), self.dow.GetValue(),
+                                                   self.inj_num.GetValue())
+        self.safe_insert(common_mice.Weight(), weight_dict, identifier, REL_BACKUP_PATH)
 
     def event_submit_euthanasia(self, event):
         """Move the currently selected mouse to the Sacrificed table"""
-        pass
+
+        # Check if a mouse was loaded before submitting a euthanasia
+        if self.curr_mouse.GetValue() == 'None':
+            self.status_text.write('Load a mouse before submitting a euthanasia!')
+            return
+
+        # Get data from relevant fields
+        weight_dict = dict(username=investigator,
+                           mouse_id=self.curr_mouse.GetValue(),
+                           date_of_sacrifice=self.doe.GetValue(),
+                           perfused=int(self.perfused.GetValue()),
+                           reason=self.reason.GetValue())
+
+        # Insert into database and save backup YAML
+        identifier = 'sacrificed_{}_M{:03d}'.format(investigator, self.mouse_id.GetValue())
+        self.safe_insert(common_mice.Sacrificed(), weight_dict, identifier, REL_BACKUP_PATH)
 
     def event_load_mouse(self, event):
         """Load data of an already existing mouse to add surgeries/weights/euthanasia"""
@@ -538,265 +589,17 @@ class window(wx.Frame):
 
         self.curr_mouse.SetValue(entry['mouse_id'])
 
+        # Set the surgery_num to the next integer and injection_num to 0, ready for a new surgery submission
+        mouse_filter = "mouse_id = '{}'".format(entry['mouse_id'])
+        self.surg_num.SetValue(str(max((common_mice.Surgery()&username_filter&mouse_filter).fetch('surgery_num'))+1))
+
         self.status_text.write(
             'Successfully loaded info for mouse {}. You can now add new data associated with this mouse. \n\t'
             '--> Do not change data in the MOUSE box while adding new info!'.format(mouse_dict) + '\n')
 
-
-    def event_submit_session(self, event):
-        """ The user clicked on the button to submit a session """
-
-        # create session dictionary that can be entered into datajoint pipeline
-        session_dict = dict(username=investigator,
-                            mouse_id=self.mouse_name.GetValue(),
-                            day=self.day.GetValue(),
-                            trial=int(self.trial.GetValue()),
-                            path=Path(self.session_folder.GetValue()),
-                            anesthesia=self.anesthesia.GetValue(),
-                            setup=self.setup.GetValue(),
-                            task=self.task.GetValue(),
-                            stage=int(self.stage.GetValue()),
-                            experimenter=self.experimenter.GetValue(),
-                            notes=self.notes.GetValue()
-                            )
-
-        # check if the session is already in the database (most common error)
-        key = dict(username=investigator,
-                   mouse_id=self.mouse_name.GetValue(),
-                   day=self.day.GetValue(),
-                   trial=int(self.trial.GetValue()))
-        if len(common_exp.Session() & key) > 0:
-            message = 'The session you wanted to enter into the database already exists.\n' + \
-                      'Therefore, nothing was entered into the database.'
-            wx.MessageBox(message, caption="Session already in database", style=wx.OK | wx.ICON_INFORMATION)
-            return
-
-        # add entry to database
-        try:
-            common_exp.Session().helper_insert1(session_dict)
-            self.status_text.write('Sucessfully entered new session: ' + str(key) + '\n')
-
-            # save dictionary that is entered in a backup YAML file for faster re-population
-            identifier = common_exp.Session().create_id(investigator_name=investigator,
-                                                        mouse_id=session_dict['mouse_id'],
-                                                        date=session_dict['day'],
-                                                        trial=session_dict['trial'])
-            file = os.path.join(login.get_neurophys_wahl_directory(), 'REL_BACKUP_PATH', identifier + '.yaml')
-            # TODO show prompt if a backup file with this identifier already exists and ask the user to overwrite
-            # if os.path.isfile(file):
-            #     message = 'The backup file of the session you wanted to enter into the database with the unique identifier ' \
-            #               '{} already exists.\nTherefore, nothing was entered into the database.'.format(identifier)
-            #     wx.MessageBox(message, caption="Backup file already exists", style=wx.OK | wx.ICON_INFORMATION)
-            #     return
-            # else:
-
-            # Transform session path from Path to string (with universal / separator) to make it YAML-compatible
-            session_dict['path'] = str(session_dict['path']).replace("\\", "/")
-            with open(file, 'w') as outfile:
-                yaml.dump(session_dict, outfile, default_flow_style=False)
-
-        except Exception as ex:
-            print('Exception manually caught:', ex)
-            self.status_text.write('Error: ' + str(ex) + '\n')
-
-    def event_load_session(self, event):
-        """ User wants to load additional information about session into GUI """
-
-        session_dict = dict(username=investigator,
-                            mouse_id=self.mouse_name.GetValue(),
-                            day=self.day.GetValue(),
-                            trial=int(self.trial.GetValue()))
-        entries = (common_exp.Session() & session_dict).fetch(as_dict=True)
-        # check there is only one table corresponding to this
-        if len(entries) > 1:
-            self.status_text.write(
-                'Can not load session info for {} because there are {} sessions corresponding to this'.format(
-                    session_dict, len(entries)) + '\n')
-            return
-
-        entry = entries[0]
-
-        # set the selections in the menus according to the loaded info
-        item = self.setup.FindString(entry['setup'])
-        self.setup.SetSelection(item)
-        item = self.task.FindString(entry['task'])
-        self.task.SetSelection(item)
-        self.stage.SetValue(str(entry['stage']))
-        item = self.anesthesia.FindString(entry['anesthesia'])
-        self.anesthesia.SetSelection(item)
-        item = self.experimenter.FindString(entry['experimenter'])
-        self.experimenter.SetSelection(item)
-        self.notes.SetValue(entry['notes'])
-
-    def event_submit_behavior(self, event):
-        """ User clicked on button to submit the behavioral data """
-
-        # go through all behavioral files and upload if checkbox is set
-        session_key = dict(name=self.mouse_name.GetValue(),
-                           day=self.day.GetValue(),
-                           trial=int(self.trial.GetValue()))
-        trial = int(self.trial.GetValue())
-        # wheel
-        if self.wheel_checkbox.GetValue():
-            # insert the main table
-            wheel_dict = dict(**session_key,
-                              wheel_type=self.wheel.GetValue())
-            self.save_insert(common_behav.Wheel(), wheel_dict)
-
-            # add job to transfer file later
-            file = default_params['behavior']['wheel_file'].format(trial)
-            raw_wheel_dict = dict(**session_key,
-                                  file_name=file)
-
-            self.job_list.append([common_behav.RawWheelFile(), raw_wheel_dict, self.behav_folder.GetValue(), file])
-        # synchronization
-        if self.sync_checkbox.GetValue():
-            sync_dict = dict(**session_key,
-                             sync_type=self.imaging_sync.GetValue())
-            self.save_insert(common_behav.Synchronization(), sync_dict)
-
-            file = default_params['behavior']['synch_file'].format(trial)
-            raw_sync_dict = dict(**session_key,
-                                 file_name=file)
-            self.job_list.append(
-                [common_behav.RawSynchronizationFile(), raw_sync_dict, self.behav_folder.GetValue(), file])
-        # video
-        if self.video_checkbox.GetValue():
-            video_dict = dict(**session_key,
-                              camera_nr=0,  # TODO: modify for multiple cameras
-                              camera_position=self.camera_pos.GetValue(),
-                              frame_rate=int(self.frame_rate.GetValue()))
-            self.save_insert(common_behav.Video(), video_dict)
-
-            file = self.video_file.GetValue().format(trial)
-            raw_video_dict = dict(**session_key,
-                                  camera_nr=0,
-                                  part=0,
-                                  file_name=file)
-            self.job_list.append([common_behav.RawVideoFile(), raw_video_dict, self.behav_folder.GetValue(), file])
-        # whisker stimulator
-        if self.whisker_checkbox.GetValue():
-            whisker_dict = dict(**session_key,
-                                stimulator_type=self.stimulator.GetValue())
-            self.save_insert(common_behav.WhiskerStimulator(), whisker_dict)
-
-            file = default_params['behavior']['whisker_file'].format(trial)
-            raw_whisker_dict = dict(**session_key,
-                                    file_name=file)
-            self.job_list.append(
-                [common_behav.RawWhiskerStimulatorFile(), raw_whisker_dict, self.behav_folder.GetValue(), file])
-        # events
-        if self.event_checkbox.GetValue():
-            event_dict = dict(**session_key,
-                              sensory_event_type=self.event_type.GetValue())
-            self.save_insert(common_behav.SensoryEvents(), event_dict)
-
-            file = default_params['behavior']['event_file'].format(trial)
-            raw_event_dict = dict(**session_key,
-                                  file_name=file)
-            self.job_list.append(
-                [common_behav.RawSensoryEventsFile(), raw_event_dict, self.behav_folder.GetValue(), file])
-
-    def event_select_session_folder(self, event):
-        """ User clicked on select session folder button """
-
-        # open file dialog
-        folder_dialog = wx.DirDialog(parent=None, message="Choose directory of session",
-                                     defaultPath=self.session_folder.GetValue(),
-                                     style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
-        exit_flag = folder_dialog.ShowModal()
-        # update the folder in the text box when the user exited with ok
-        if exit_flag == wx.ID_OK:
-            self.session_folder.SetValue(folder_dialog.GetPath())
-
-    def event_select_behav_folder(self, event):
-        """ User clicked on select behavior folder button """
-
-        # open file dialog
-        folder_dialog = wx.DirDialog(parent=None, message="Choose directory of behavioral data",
-                                     defaultPath=default_params['paths']['default_behav_folder'],
-                                     style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
-        exit_flag = folder_dialog.ShowModal()
-        # update the folder in the text box when the user exited with ok
-        if exit_flag == wx.ID_OK:
-            self.behav_folder.SetValue(folder_dialog.GetPath())
-
-    def event_select_img_folder(self, event):
-        """ User clicked on select imaging folder button """
-
-        # open file dialog
-        folder_dialog = wx.DirDialog(parent=None, message="Choose directory of imaging data",
-                                     defaultPath=default_params['paths']['default_img_folder'],
-                                     style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
-        exit_flag = folder_dialog.ShowModal()
-        # update the folder in the text box when the user exited with ok
-        if exit_flag == wx.ID_OK:
-            self.img_folder.SetValue(folder_dialog.GetPath())
-
-    def event_select_el_folder(self, event):
-        """ User clicked on select electrical folder button """
-
-        # open file dialog
-        folder_dialog = wx.DirDialog(parent=None, message="Choose directory of electrical recording data",
-                                     defaultPath=default_params['paths']['default_el_folder'],
-                                     style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
-        exit_flag = folder_dialog.ShowModal()
-        # update the folder in the text box when the user exited with ok
-        if exit_flag == wx.ID_OK:
-            self.el_folder.SetValue(folder_dialog.GetPath())
-
     def event_quit_button(self, event):
         """ User pressed quit button """
         self.Close(True)
-
-    def event_transfer_data(self, event):
-        """ Transfer data to the neurophysiology server and add Raw...File to database """
-
-        jobs = self.job_list
-        print('Transfering the files for {} entries in the job list.'.format(len(jobs)))
-
-        while jobs:  # do as long as the list is not empty
-            job = jobs.pop(0)  # get first job (FIFO)
-
-            # extract variables for better code readablility
-            table = job[0]
-            new_entry = job[1]
-            source_folder = job[2]
-            file_name = job[3]
-
-            # enter Raw...File into database
-            successful = self.save_insert(table, new_entry)
-
-            if not successful:
-                continue  # jump to next job and do not transfer the data for this
-
-            # transfer file to neurophysiology folder
-            source_path = os.path.join(source_folder, file_name)
-
-            folder_id = common_exp.Session().create_id(new_entry['name'], new_entry['day'], new_entry['trial'])
-            target_folder = os.path.join(path_neurophys_data, folder_id)
-
-            target_path = os.path.join(target_folder, file_name)
-
-            # create directory if it does not exists
-            if not os.path.exists(target_folder):
-                os.makedirs(target_folder)
-
-            # print the size of the file if it is large and will take a while
-            size = os.path.getsize(source_path)
-            if size > 1e7:  # 10 MB
-                print('Copying large file of size {:.2f}GB...'.format(size / 1e9) + '\n')
-                print('File:', source_path)
-
-            # copy the file to the neurophysiology directory
-            if os.name == 'nt':  # windows pc
-                os.system('copy "{}" "{}" '.format(source_path, target_path))
-            else:  # assuming linux
-                os.system('cp "{}" "{}" '.format(source_path, target_path))
-
-            print('Copied file ' + source_path + '\n')
-
-        print('Transfer ended.')
 
     def safe_insert(self, table, dictionary, identifier, backup):
         """ Enter a dict into a table. If successful, returns True and the dict is saved in a backup YAML file."""
