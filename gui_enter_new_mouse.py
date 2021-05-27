@@ -454,16 +454,24 @@ class window(wx.Frame):
                           info=self.mouse_notes.GetValue())
 
         # Insert into database and save backup YAML
-        identifier = 'mouse_{}_M{:03d}_{}'.format(investigator, self.mouse_id.GetValue(), current_day)
-        self.safe_insert(common_mice.Mouse(), mouse_dict, identifier, REL_BACKUP_PATH)
+        identifier = 'mouse_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), current_day)
+        success = self.safe_insert(common_mice.Mouse(), mouse_dict, identifier, REL_BACKUP_PATH)
 
-        # Update "load mouse" drop-down menu
-        new_mouse_ids = np.array(np.append(mouse_ids, '5'), dtype=int)      # Insert new mouse ID to the choices
-        new_mouse_ids[::-1].sort()                                          # Sort the list again (descending)
-        self.new_mouse.Clear()                                              # Remove old choices
-        for id in new_mouse_ids:                                            # Add the new ordered list
-            self.new_mouse.Append(str(id))
-        mouse_ids = new_mouse_ids                                           # Update choice list
+        if success:
+            # Update "load mouse" drop-down menu
+            new_mouse_id = self.mouse_id.GetValue()
+            curr_mouse_ids = self.new_mouse.GetItems()
+            if new_mouse_id not in curr_mouse_ids:
+                new_mouse_ids = np.array(np.append(curr_mouse_ids, self.mouse_id.GetValue()), dtype=int)    # Insert new mouse ID to the choices
+                new_mouse_ids[::-1].sort()                                          # Sort the list again (descending)
+                self.new_mouse.Clear()                                              # Remove old choices
+                for id in new_mouse_ids:                                            # Add the new ordered list
+                    self.new_mouse.Append(str(id))
+                item = self.new_mouse.FindString(self.mouse_id.GetValue())
+                self.new_mouse.SetSelection(item)
+
+            # Set the new mouse as "loaded" so that surgeries can directly be added to it
+            self.curr_mouse.SetValue(new_mouse_id)
 
     def event_submit_surgery(self, event):
         """Enter surgery data as new entry into the Surgery table"""
@@ -512,10 +520,11 @@ class window(wx.Frame):
         # Insert into database and save backup YAML
         identifier = 'injection_{}_M{:03d}_{}_{}'.format(investigator, self.mouse_id.GetValue(),
                                                          self.surg_num.GetValue(), self.inj_num.GetValue())
-        self.safe_insert(common_mice.Injection(), inj_dict, identifier, REL_BACKUP_PATH)
+        success = self.safe_insert(common_mice.Injection(), inj_dict, identifier, REL_BACKUP_PATH)
 
-        # Increase the injection_num counter by 1
-        self.inj_num.SetValue(str(inj_dict['injection_num']+1))
+        if success:
+            # Increase the injection_num counter by 1
+            self.inj_num.SetValue(str(inj_dict['injection_num']+1))
 
     def event_submit_weight(self, event):
         """Enter a new weight for the currently selected mouse"""
