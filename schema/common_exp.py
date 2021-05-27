@@ -103,7 +103,7 @@ class Session(dj.Manual):
 
         # first part: mouse identifier
         mouse_id_str = 'M{:03d}'.format(int(mouse_id))
-        first_part = investigator_name + '_' + mouse_id_str
+        first_part = 'session_' + investigator_name + '_' + mouse_id_str
 
         # second: date to string
         date_str = str(date)

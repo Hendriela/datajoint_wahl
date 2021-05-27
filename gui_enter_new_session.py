@@ -57,7 +57,7 @@ I_TOP = B_TOP
 L_TOP = B_TOP + 500
 
 # relative path to manual_submission backup folder inside the Neurophysiology Wahl directory (common for all users)
-REL_BACKUP_PATH = "Datajoint/manual_session_submissions"
+REL_BACKUP_PATH = "Datajoint/manual_submissions"
 
 # =============================================================================
 # DEFAULT PARAMETERS
@@ -509,7 +509,6 @@ class window(wx.Frame):
                             anesthesia=self.anesthesia.GetValue(),
                             setup=self.setup.GetValue(),
                             task=self.task.GetValue(),
-                            stage=int(self.stage.GetValue()),
                             experimenter=self.experimenter.GetValue(),
                             notes=self.notes.GetValue()
                             )
