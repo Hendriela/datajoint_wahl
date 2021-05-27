@@ -168,7 +168,7 @@ class Session(dj.Manual):
 
         # In the current version we save the relative path (excluding base directory) which the user saves in the GUI,
         # including the leading directory separator ('\\') so the absolute path can be recovered by adding both strings
-        base_directory = login.get_neurophys_directory()
+        base_directory = login.get_neurophys_data_directory()
         path = self.fetch1('path')
         return base_directory + path
 
