@@ -1,6 +1,8 @@
 """Schema for mouse related information"""
 
 import datajoint as dj
+from dateutil.parser import parse
+
 schema = dj.schema('common_mice', locals(), create_tables=True)
 
 
@@ -157,11 +159,15 @@ class Surgery(dj.Manual):
             # get relevant info from row
             experimenter = row["username"]
             mouse_id = row["mouse_id"]
-            date = row["surgery_date"][:10]     # remove time part to match Weight table datetime format
+            date = row["surgery_date"]
             weight = row["pre_op_weight"]
 
+            # get rid of hours and minutes by parsing date into datetime object, then back into string
+            date_parsed = parse(date)
+            date_str = date_parsed.strftime("%Y-%m-%d")
+
             # check if row is already present in Weight table
-            if len(Weight() & "username='{}'".format(experimenter) & "mouse_id = '{}'".format(mouse_id) & "date_of_weight = '{}'".format(date)) > 0:
+            if len(Weight() & "username='{}'".format(experimenter) & "mouse_id = '{}'".format(mouse_id) & "date_of_weight = '{}'".format(date_str)) > 0:
                 print("A weight has already been recorded for this mouse and date, pre_op_weight will not be added to Weights table.")
             else:
                 #insert row into Weight table
