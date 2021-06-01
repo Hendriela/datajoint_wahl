@@ -121,7 +121,9 @@ for key, value in default_params['paths'].items():
 username_filter = "username = '{}'".format(default_params['username'])
 raw_mouse_ids = (common_mice.Mouse() & username_filter) - common_mice.Sacrificed()
 mouse_ids = raw_mouse_ids.fetch('mouse_id', order_by='mouse_id DESC')
-if default_params['behavior']['default_mouse'] == 'last_mouse':
+if len(mouse_ids) == 0:
+    default_params['behavior']['default_mouse'] = 0
+elif default_params['behavior']['default_mouse'] == 'last_mouse':
     default_params['behavior']['default_mouse'] = mouse_ids[0]
 
 
@@ -165,7 +167,7 @@ class window(wx.Frame):
         # Mouse ID (default is highest existing mouse ID + 1)
         wx.StaticText(panel, label="Mouse ID:", pos=(M_LEFT, M_TOP))
         self.mouse_id = wx.TextCtrl(panel, pos=(M_LEFT, M_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
-        self.mouse_id.SetValue(str(int(mouse_ids[0]) + 1))
+        self.mouse_id.SetValue(str(default_params['behavior']['default_mouse'] + 1))
 
         # Date of birth (default is current day)
         wx.StaticText(panel, label="Date of birth (YYYY-MM-DD):", pos=(M_LEFT + COL, M_TOP))
@@ -397,9 +399,9 @@ class window(wx.Frame):
         load_box.SetForegroundColour(BOX_TITLE_COLOR)
 
         wx.StaticText(panel, label="Mouse ID:", pos=(L_LEFT, L_TOP))
-        self.new_mouse = wx.ComboBox(panel, choices=mouse_ids, style=wx.CB_READONLY,
+        self.new_mouse = wx.ComboBox(panel, choices=np.array(mouse_ids, dtype=str), style=wx.CB_READONLY,
                                  pos=(L_LEFT, L_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
-        item = self.new_mouse.FindString(default_params['behavior']['default_mouse'])
+        item = self.new_mouse.FindString(str(default_params['behavior']['default_mouse']))
         self.new_mouse.SetSelection(item)
 
         # Load mouse button
@@ -494,7 +496,7 @@ class window(wx.Frame):
                          surgery_notes=self.surgery_notes.GetValue())
 
         # Insert into database and save backup YAML
-        identifier = 'surgery_{}_M{:03d}_{}'.format(investigator, self.mouse_id.GetValue(), self.surg_num.GetValue())
+        identifier = 'surgery_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), self.surg_num.GetValue())
         self.safe_insert(common_mice.Surgery(), surg_dict, identifier, REL_BACKUP_PATH)
 
     def event_submit_injection(self, event):
