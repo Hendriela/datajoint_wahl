@@ -122,7 +122,7 @@ username_filter = "username = '{}'".format(default_params['username'])
 raw_mouse_ids = (common_mice.Mouse() & username_filter) - common_mice.Sacrificed()
 mouse_ids = raw_mouse_ids.fetch('mouse_id', order_by='mouse_id DESC')
 if len(mouse_ids) == 0:
-    default_params['behavior']['default_mouse'] = 0
+    default_params['behavior']['default_mouse'] = 1
 elif default_params['behavior']['default_mouse'] == 'last_mouse':
     default_params['behavior']['default_mouse'] = mouse_ids[0]
 
@@ -520,7 +520,7 @@ class window(wx.Frame):
                          injection_notes=self.inj_notes.GetValue())
 
         # Insert into database and save backup YAML
-        identifier = 'injection_{}_M{:03d}_{}_{}'.format(investigator, self.mouse_id.GetValue(),
+        identifier = 'injection_{}_M{:03d}_{}_{}'.format(investigator, int(self.mouse_id.GetValue()),
                                                          self.surg_num.GetValue(), self.inj_num.GetValue())
         success = self.safe_insert(common_mice.Injection(), inj_dict, identifier, REL_BACKUP_PATH)
 
@@ -582,7 +582,7 @@ class window(wx.Frame):
         entry = entries[0]
 
         # set the selections in the menus according to the loaded info
-        self.mouse_id.SetValue(entry['mouse_id'])
+        self.mouse_id.SetValue(str(entry['mouse_id']))
         self.dob.SetValue(entry['dob'].strftime('%Y-%m-%d'))
         item = self.sex.FindString(entry['sex'])
         self.sex.SetSelection(item)
@@ -598,11 +598,15 @@ class window(wx.Frame):
         self.licence.SetSelection(item)
         self.mouse_notes.SetValue(entry['info'])
 
-        self.curr_mouse.SetValue(entry['mouse_id'])
+        self.curr_mouse.SetValue(str(entry['mouse_id']))
 
         # Set the surgery_num to the next integer and injection_num to 0, ready for a new surgery submission
         mouse_filter = "mouse_id = '{}'".format(entry['mouse_id'])
-        self.surg_num.SetValue(str(max((common_mice.Surgery()&username_filter&mouse_filter).fetch('surgery_num'))+1))
+        try:
+            self.surg_num.SetValue(str(max((common_mice.Surgery() & username_filter &
+                                            mouse_filter).fetch('surgery_num'))+1))
+        except ValueError:
+            self.surg_num.SetValue('0')
 
         self.status_text.write(
             'Successfully loaded info for mouse {}. You can now add new data associated with this mouse. \n\t'
