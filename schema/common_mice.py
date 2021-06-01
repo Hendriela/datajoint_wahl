@@ -157,7 +157,7 @@ class Surgery(dj.Manual):
             # get relevant info from row
             experimenter = row["username"]
             mouse_id = row["mouse_id"]
-            date = row["surgery_date"]
+            date = row["surgery_date"][:10]     # remove time part to match Weight table datetime format
             weight = row["pre_op_weight"]
 
             # check if row is already present in Weight table

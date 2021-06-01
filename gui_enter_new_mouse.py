@@ -606,7 +606,7 @@ class window(wx.Frame):
             self.surg_num.SetValue(str(max((common_mice.Surgery() & username_filter &
                                             mouse_filter).fetch('surgery_num'))+1))
         except ValueError:
-            self.surg_num.SetValue('0')
+            self.surg_num.SetValue('1')
 
         self.status_text.write(
             'Successfully loaded info for mouse {}. You can now add new data associated with this mouse. \n\t'
@@ -618,7 +618,6 @@ class window(wx.Frame):
 
     def safe_insert(self, table, dictionary, identifier, backup):
         """ Enter a dict into a table. If successful, returns True and the dict is saved in a backup YAML file."""
-
         try:
             table.insert1(dictionary)
             self.status_text.write('Sucessfully entered new entry in table "{}": \n\t'.format(table.table_name) +
