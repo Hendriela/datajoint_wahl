@@ -43,11 +43,11 @@ class Setup(dj.Lookup):
 @schema
 class Task(dj.Lookup):
     definition = """ # Experimental task for the mouse
-    task        : varchar(128)     # Unique name of the task
+    task            : varchar(128)      # Unique name of the task
     ---
-    -> common_mice.Investigator    # Keep track of whose task it is for GUI
-    stage       : tinyint          # Counter for e.g. difficulty in case of learning task
-    task_details : varchar(1048)   # Task description
+    -> common_mice.Investigator         # Keep track of whose task it is for GUI
+    stage           : tinyint           # Counter for e.g. difficulty in case of learning task
+    task_details    : varchar(1048)     # Task description
     """
 
     contents = [

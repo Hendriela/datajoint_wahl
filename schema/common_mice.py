@@ -59,7 +59,7 @@ class Licence(dj.Lookup):
 class Mouse(dj.Manual):
     definition = """ # Basic information about the Mouse
       -> Investigator                          # Link to investigator to which this mouse belongs
-      mouse_id      : varchar(10)              # Name of mouse (unique per investigator)
+      mouse_id      : smallint                 # ID of mouse (unique per investigator)
       ---
       dob           : date                     # Day of birth (year-month-day)
       sex           : enum('M', 'F', 'U')      # Sex of mouse - Male, Female, or Unknown/Unclassified
