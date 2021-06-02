@@ -142,6 +142,7 @@ licences = common_mice.Licence().fetch('licence_id')
 
 # Surgery info
 substances = common_mice.Substance().fetch('substance_name')
+types = common_mice.SurgeryType().fetch('surgery_type')
 
 # =============================================================================
 # Default parameter for dropdown menus and text boxes
@@ -158,7 +159,7 @@ class window(wx.Frame):
 
         self.job_list = list()  # save jobs in format [ [table, entry_dict, source_path, target_path], [...], ...]
         # =============================================================================
-        # Left upper box: Add new mouse (3x3 fields + notes)
+        # Left upper box: Add new MOUSE (3x3 fields + notes)
         # =============================================================================
         mouse_box = wx.StaticBox(panel, label='NEW MOUSE INFORMATION',
                                  pos=(M_LEFT - 20, M_TOP - 30), size=(M_WIDTH, M_HEIGHT))
@@ -240,7 +241,7 @@ class window(wx.Frame):
         self.Bind(wx.EVT_BUTTON, self.event_submit_mouse, self.submit_surgery_button)
 
         # =============================================================================
-        # Left lower box: Enter new surgery (2x3 fields + notes)
+        # Left lower box: Enter new SURGERY (2x3 fields + notes)
         # =============================================================================
 
         surg_box = wx.StaticBox(panel, label='NEW SURGERY', pos=(S_LEFT - 20, S_TOP - 30), size=(S_WIDTH, S_HEIGHT))
@@ -258,8 +259,10 @@ class window(wx.Frame):
 
         # Surgery type (default from YAML)
         wx.StaticText(panel, label="Surgery type:", pos=(S_LEFT + 2 * COL, S_TOP))
-        self.type = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL, S_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
-        self.type.SetValue(default_params['mice']['default_surgery_type'])
+        self.type = wx.ComboBox(panel, choices=types, style=wx.CB_READONLY,
+                                pos=(S_LEFT + 2 * COL, S_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        item = self.type.FindString(default_params['mice']['default_surgery_type'])
+        self.type.SetSelection(item)
 
         # Anesthesia (default from YAML)
         wx.StaticText(panel, label="Anesthesia:", pos=(S_LEFT, S_TOP + ROW))
@@ -495,6 +498,7 @@ class window(wx.Frame):
                          duration=self.duration.GetValue(),
                          surgery_notes=self.surgery_notes.GetValue())
 
+        # Todo: Ask user to overwrite if a weight on that day already exists (happens if a surgery was re-inserted)
         # Insert into database and save backup YAML
         identifier = 'surgery_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), self.surg_num.GetValue())
         self.safe_insert(common_mice.Surgery(), surg_dict, identifier, REL_BACKUP_PATH)
