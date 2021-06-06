@@ -6,19 +6,16 @@ Created on Wed Jun 2 17:33:21 2021
 @author: hheise
 """
 
-import sys
-sys.path.append("..")  # Adds higher directory to python modules path.
-
 import login
 import os
 import glob
 import yaml
 from glob import glob
+from schema import common_mice, common_exp
+import gui_enter_new_mouse
 
 # connect to datajoint database
 login.connect()
-from schema import common_mice, common_exp
-import gui_enter_new_mouse
 
 
 def restore_data(tables=None, adjust_funcs=None, verbose=False):
@@ -55,6 +52,7 @@ def restore_data(tables=None, adjust_funcs=None, verbose=False):
                 else:
                     success = restore_data_from_yaml(file, verbose=verbose)
 
+                # Keep track of successful and unsuccessful inserts
                 if success:
                     successful += 1
                 else:
