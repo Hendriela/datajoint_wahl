@@ -123,6 +123,23 @@ class Substance(dj.Lookup):
 
 
 @schema
+class SurgeryType(dj.Lookup):
+    definition = """  # Different types of surgery
+    surgery_type        : varchar(64)    # Description of surgery
+    ---
+    """
+    contents = [
+        ['Virus injection'],
+        ['Head post'],
+        ['Hippocampal window'],
+        ['Motor cortex window'],
+        ['Widefield preparation'],
+        ['Photothrombotic stroke'],
+        ['Microsphere injection']
+    ]
+
+
+@schema
 class Surgery(dj.Manual):
     definition = """ # Table to keep track of surgeries on mice
     -> Mouse
@@ -191,18 +208,3 @@ class Injection(dj.Manual):
     injection_notes     : varchar(2048)  # Additional notes
     """
 
-@schema
-class SurgeryType(dj.Lookup):
-    definition = """  # Different types of surgery
-    surgery_type        : varchar(64)    # Description of surgery
-    ---
-    """
-    contents = [
-        ['Virus injection'],
-        ['Head post'],
-        ['Hippocampal window'],
-        ['Motor cortex window'],
-        ['Widefield preparation'],
-        ['Photothrombotic stroke'],
-        ['Microsphere injection']
-    ]
