@@ -15,7 +15,7 @@ Mouse().insert1({"username": "hheise", "mouse_id": 0, "dob": "1900-07-28", "sex"
                  "strain": "WT", "genotype": "n.d.", "irats_id": "BJ1234", "cage_num": 1100589, "ear_mark": "RLL",
                  "licence_id": "241/2018-B", "info": "This is a dummy test mouse."})
 
-Mouse().insert1({"username": "hheise", "mouse_id": 1, "dob": "2021-01-24", "sex": "M", "batch": 1,
+common_mice.Mouse().insert1({"username": "hheise", "mouse_id": 1, "dob": "2021-01-24", "sex": "M", "batch": 1,
                  "strain": "Snap25-GCaMP6f", "genotype": "+/+", "irats_id": "BJ1235", "cage_num": 1100589, "ear_mark": "RRLL",
                  "licence_id": "241/2018-A", "info": "This is a second dummy test mouse."})
 
@@ -34,9 +34,11 @@ Weight().insert1({"username": "hheise", "mouse_id": 1, "date_of_weight": "2021-0
 
 # Add surgeries
 # #TODO: It might be useful to automatically add a weight entered in a different table (e.g. Surgery) to the Weight() table
-Surgery().insert1({"username": "hheise", "mouse_id": 1, "surgery_num": 2, "surgery_date": "2021-04-20",
-                   "surgery_type": "microsphere injection", "anesthesia": "triple shot", "weight": 20.9,
+common_mice.Surgery().insert1({"username": "hheise", "mouse_id": '1', "surgery_num": 4, "surgery_date": "2021-04-20",
+                   "surgery_type": "microsphere injection", "anesthesia": "triple shot", "pre_op_weight": 20.9,
                    "stroke_params": 'n.a.', "duration": 30, "surgery_notes": "This is another dummy surgery"})
+
+
 
 Injection.insert1({"username": "hheise", "mouse_id": 1, "surgery_num": 2, "injection_num": 1, "substance_name": "endothelin",
                    "volume": 30, "dilution": "10mg in 0.1ml saline", "site": "HPC",
@@ -50,3 +52,7 @@ Injection.insert1({"username": "hheise", "mouse_id": 1, "surgery_num": 2, "injec
 common_exp.Session.insert1({"username": "hheise", "mouse_id": 2, "day": '1900-01-01', "trial": 1, "id": 'hheise_M001_1900-01-01_00',
                  "path": '\\test_path\\hheise_M001_1900-01-01_00', "counter": 1, "anesthesia": "Awake", "setup": "VR",
                  "task": "Passive", "experimenter": "mpanze", "notes": "A test session"})
+
+common_mice.Surgery().insert1({'username': 'hheise', 'mouse_id': 81, 'surgery_num': 1, 'surgery_date': '2021-04-08 10:00',
+ 'surgery_type': 'Virus injection', 'anesthesia': '2% Isoflurane', 'pre_op_weight': 24.8, 'stroke_params': '',
+ 'duration': 50, 'surgery_notes': ''})

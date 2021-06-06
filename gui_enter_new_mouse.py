@@ -90,7 +90,7 @@ REL_BACKUP_PATH = "Datajoint/manual_submissions"
 # DEFAULT PARAMETERS
 # =============================================================================
 
-# Load YAML file (has to be present in the same folder
+# Load YAML file (has to be present in the same folder)
 with open(r'gui_params.yaml') as file:
     # The FullLoader parameter handles the conversion from YAML scalar values to Python's dictionary format
     default_params = yaml.load(file, Loader=yaml.FullLoader)
@@ -638,6 +638,10 @@ class window(wx.Frame):
             print('Exception manually caught:', ex)
             self.status_text.write('Error while entering ' + str(dictionary) + ' : ' + str(ex) + '\n')
             return False
+
+
+def get_backup_path():
+    return REL_BACKUP_PATH
 
 
 # run the GUI
