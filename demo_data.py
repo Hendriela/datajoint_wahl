@@ -53,6 +53,6 @@ common_exp.Session.insert1({"username": "hheise", "mouse_id": 2, "day": '1900-01
                  "path": '\\test_path\\hheise_M001_1900-01-01_00', "counter": 1, "anesthesia": "Awake", "setup": "VR",
                  "task": "Passive", "experimenter": "mpanze", "notes": "A test session"})
 
-common_mice.Surgery().insert1({'username': 'hheise', 'mouse_id': 81, 'surgery_num': 1, 'surgery_date': '2021-04-08 10:00',
- 'surgery_type': 'Virus injection', 'anesthesia': '2% Isoflurane', 'pre_op_weight': 24.8, 'stroke_params': '',
+common_mice.Surgery().insert1({'username': 'hheise', 'mouse_id': 81, 'surgery_num': 12, 'surgery_date': '2021-04-08 10:00',
+ 'surgery_type': 'nothing', 'anesthesia': '2% Isoflurane', 'pre_op_weight': 24.8, 'stroke_params': '',
  'duration': 50, 'surgery_notes': ''})

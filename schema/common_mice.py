@@ -183,15 +183,21 @@ class Surgery(dj.Manual):
             date_parsed = parse(date)
             date_str = date_parsed.strftime("%Y-%m-%d")
 
-            # check if row is already present in Weight table
-            if len(Weight() & "username='{}'".format(experimenter) & "mouse_id = '{}'".format(mouse_id) & "date_of_weight = '{}'".format(date_str)) > 0:
-                print("A weight has already been recorded for this mouse and date, pre_op_weight will not be added to Weights table.")
-            else:
-                #insert row into Weight table
-                Weight().insert1({"username":experimenter, "mouse_id":mouse_id, "date_of_weight":date, "weight":weight})
+            # The "transaction" context ensures that the database is only changed if both inserts worked
+            connection = Weight.connection
+            with connection.transaction:
+                # check if row is already present in Weight table
+                if len(Weight() & "username='{}'".format(experimenter) & "mouse_id = '{}'".format(mouse_id)
+                       & "date_of_weight = '{}'".format(date_str)) > 0:
+                    print("A weight has already been recorded for this mouse and date, pre_op_weight will not be added "
+                          "to Weights table.")
+                else:
+                    #insert row into Weight table
+                    Weight().insert1({"username": experimenter, "mouse_id": mouse_id, "date_of_weight": date,
+                                      "weight": weight})
 
-            # add row to Surgery table
-            super().insert((row,), **kwargs)
+                # add row to Surgery table
+                super().insert((row,), **kwargs)
 
 
 @schema
