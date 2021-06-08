@@ -547,8 +547,7 @@ class window(wx.Frame):
                            weight=self.weight.GetValue())
 
         # Insert into database and save backup YAML
-        identifier = 'weight_{}_M{:03d}_{}'.format(investigator, self.mouse_id.GetValue(), self.dow.GetValue(),
-                                                   self.inj_num.GetValue())
+        identifier = 'weight_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), self.dow.GetValue())
         self.safe_insert(common_mice.Weight(), weight_dict, identifier, REL_BACKUP_PATH)
 
     def event_submit_euthanasia(self, event):
@@ -567,7 +566,7 @@ class window(wx.Frame):
                            reason=self.reason.GetValue())
 
         # Insert into database and save backup YAML
-        identifier = 'sacrificed_{}_M{:03d}'.format(investigator, self.mouse_id.GetValue())
+        identifier = 'sacrificed_{}_M{:03d}'.format(investigator, int(self.mouse_id.GetValue()))
         self.safe_insert(common_mice.Sacrificed(), weight_dict, identifier, REL_BACKUP_PATH)
 
     def event_load_mouse(self, event):
@@ -613,7 +612,7 @@ class window(wx.Frame):
             self.surg_num.SetValue('1')
 
         self.status_text.write(
-            'Successfully loaded info for mouse {}. You can now add new data associated with this mouse. \n\t'
+            '\nSuccessfully loaded info for mouse {}. You can now add new data associated with this mouse. \n\t'
             '--> Do not change data in the MOUSE box while adding new info!'.format(mouse_dict) + '\n')
 
     def event_quit_button(self, event):

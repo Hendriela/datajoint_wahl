@@ -37,7 +37,7 @@ class Strain(dj.Lookup):
         ['L2/3-RCaMP', 'L2/3Cre;tTA-C;RCaMP', 'RCaMP', 'L2/3'],
         ['L2/3-TIGRE1.0-GCaMP6f', 'L2/3Cre;tTA-C;GCa6f', 'GCaMP6f', 'L2/3'],
         ['L2/3-TIGRE2.0-GCaMP6f', 'Rasgrf2 x Ai148D', 'GCaMP6f', 'L2/3'],
-        ['Thy1-GCaMP6f', 'GP5.17', 'GCaMP6f', 'L2/3, L5, CA1, CA3, dentate gyrus'],
+        ['Thy1-GCaMP6f', 'C57BL/6J-Tg(Thy1-GCaMP6f)GP5.17Dkim/J', 'GCaMP6f', 'L2/3, L5, CA1, CA3, dentate gyrus'],
         ['Snap25-GCaMP6f', 'Snap-Cre;tTA-C;GCaP6 ', 'GCaMP6f', 'all'],
     ]
 
@@ -114,10 +114,14 @@ class Substance(dj.Lookup):
     """
 
     contents = [
-       ['AAV9-hSyn-GCaMP6f', 'pAAV.Syn.GCaMP6f.WPRE.SV40', 'virus', 'addgene', 'https://www.addgene.org/100837/'],
-       ['endothelin', 'endothelin 1 (ET-1)', 'vasoconstrictor', 'Sigma', 'https://www.sigmaaldrich.com/catalog/product/sigma/e7764'],
+       ['AAV9-hSyn-GCaMP6f', 'pAAV.Syn.GCaMP6f.WPRE.SV40', 'Viral calcium indicator', 'addgene',
+        'https://www.addgene.org/100837/'],
+       ['AAV2-CamKII-C1V1', 'pAAV-CaMKIIa-C1V1 (t/t)-TS-mCherry', 'Viral optogenetic stimulant', 'addgene',
+        'https://www.addgene.org/35500/'],
+       ['endothelin', 'endothelin 1 (ET-1)', 'vasoconstrictor', 'Sigma',
+        'https://www.sigmaaldrich.com/catalog/product/sigma/e7764'],
        ['microspheres', 'Fluorescent PMMA Microparticles Red5 20 m', 'microspheres', 'PolyAn',
-         'https://www.poly-an.de/micro-nanoparticles/fluorescent-pmma-microparticles/fluorescent-pmma-microparticles'],
+        'https://www.poly-an.de/micro-nanoparticles/fluorescent-pmma-microparticles/fluorescent-pmma-microparticles'],
        ['TMP', "Trimethoprim", "antibiotic", "Sigma", "https://www.sigmaaldrich.com/catalog/product/sigma/t7883"],
     ]
 
