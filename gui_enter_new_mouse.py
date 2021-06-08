@@ -403,9 +403,21 @@ class window(wx.Frame):
 
         wx.StaticText(panel, label="Mouse ID:", pos=(L_LEFT, L_TOP))
         self.new_mouse = wx.ComboBox(panel, choices=np.array(mouse_ids, dtype=str), style=wx.CB_READONLY,
-                                 pos=(L_LEFT, L_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+                                 pos=(L_LEFT, L_TOP + 20), size=(BOX_WIDTH - 50, BOX_HEIGHT))
         item = self.new_mouse.FindString(str(default_params['behavior']['default_mouse']))
         self.new_mouse.SetSelection(item)
+
+        # Next mouse button
+        self.next_mouse_button = wx.Button(panel, label="\u25B2",
+                                                 pos=(L_LEFT + BOX_WIDTH - 45, L_TOP + 19),
+                                                 size=(20, BOX_HEIGHT))
+        self.Bind(wx.EVT_BUTTON, self.event_next_mouse, self.next_mouse_button)
+
+        # Previous mouse button
+        self.prev_mouse_button = wx.Button(panel, label="\u25BC",
+                                                 pos=(L_LEFT + BOX_WIDTH - 20, L_TOP + 19),
+                                                 size=(20, BOX_HEIGHT))
+        self.Bind(wx.EVT_BUTTON, self.event_prev_mouse, self.prev_mouse_button)
 
         # Load mouse button
         self.load_mouse_button = wx.Button(panel, label="Load mouse",
@@ -569,9 +581,8 @@ class window(wx.Frame):
         identifier = 'sacrificed_{}_M{:03d}'.format(investigator, int(self.mouse_id.GetValue()))
         self.safe_insert(common_mice.Sacrificed(), weight_dict, identifier, REL_BACKUP_PATH)
 
-    def event_load_mouse(self, event):
-        """Load data of an already existing mouse to add surgeries/weights/euthanasia"""
-
+    def load_mouse(self):
+        """ Load data of an already existing mouse to add surgeries/weights/euthanasia """
         mouse_dict = dict(username=investigator,
                           mouse_id=self.new_mouse.GetValue())
         entries = (common_mice.Mouse() & mouse_dict).fetch(as_dict=True)
@@ -614,6 +625,40 @@ class window(wx.Frame):
         self.status_text.write(
             '\nSuccessfully loaded info for mouse {}. You can now add new data associated with this mouse. \n\t'
             '--> Do not change data in the MOUSE box while adding new info!'.format(mouse_dict) + '\n')
+
+    def change_mouse(self, change):
+        """ Change the current mouse ID by the given value and load the new mouse data """
+        curr_id = int(self.new_mouse.GetValue())
+
+        # Do not change mouse_id if the next ID would be out of range of existing IDs
+        if (min(mouse_ids) > curr_id+change) or (curr_id+change > max(mouse_ids)):
+            return
+
+        # If mouse ID does not exist, look for the next existing one
+        elif curr_id+change not in mouse_ids:
+            if change < 0:
+                down = -1
+            else:
+                down = 1
+            while curr_id+change not in mouse_ids:
+                change += down
+
+        # Set the new mouse ID into the field and load mouse data
+        item = self.new_mouse.FindString(str(curr_id+change))
+        self.new_mouse.SetSelection(item)
+        self.load_mouse()
+
+    def event_load_mouse(self, event):
+        """Load data of an already existing mouse to add surgeries/weights/euthanasia"""
+        self.load_mouse()
+
+    def event_next_mouse(self, event):
+        """ Select and load the mouse with the next higher ID """
+        self.change_mouse(1)
+
+    def event_prev_mouse(self, event):
+        """ Select and load the mouse with the next lower ID """
+        self.change_mouse(-1)
 
     def event_quit_button(self, event):
         """ User pressed quit button """
