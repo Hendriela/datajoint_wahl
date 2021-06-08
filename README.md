@@ -22,6 +22,6 @@ If the database got shut down (e.g. if the server was turned off), it has to be 
 
 ## Access the MySQL database
 
-To access the MySQL database directly (for maintenance, user creation etc.), type: <code>mysql -h 127.0.0.1 -u YourAccountName -p</code> and enter your password. Then the <code>mysql><\code> prompt should appear and you can start using MySQL commands to interact with the database.
+To access the MySQL database directly (for maintenance, user creation etc.), type: <code>mysql -h 127.0.0.1 -u YourAccountName -p</code> and enter your password. Then the <code>mysql></code> prompt should appear and you can start using MySQL commands to interact with the database.
   
 Consult the <a href="https://docs.datajoint.io/matlab/v3.4/admin/3-accounts.html">DataJoint Documentation</a> for creating new users and granting privileges.
