@@ -472,7 +472,7 @@ class window(wx.Frame):
                           info=self.mouse_notes.GetValue())
 
         # Insert into database and save backup YAML
-        identifier = 'mouse_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), current_day)
+        identifier = 'mouse_{}_M{:03d}'.format(investigator, int(self.mouse_id.GetValue()))
         success = self.safe_insert(common_mice.Mouse(), mouse_dict, identifier, REL_BACKUP_PATH)
 
         if success:
@@ -512,7 +512,7 @@ class window(wx.Frame):
         common_mice.Mouse.update1(row=mouse_dict)
 
         # Overwrite YAML backup with changes
-        identifier = 'mouse_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), current_day)
+        identifier = 'mouse_{}_M{:03d}'.format(investigator, int(self.mouse_id.GetValue()))
         filename = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier + '.yaml')
         with open(filename, 'w') as outfile:
             yaml.dump(mouse_dict, outfile, default_flow_style=False)
