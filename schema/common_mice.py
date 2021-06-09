@@ -76,6 +76,7 @@ class Mouse(dj.Manual):
       """
     #Todo: make cage number updateable, maybe in mouse GUI?
 
+
 @schema
 class Weight(dj.Manual):
     definition = """ # Table that stores the weights of individual mice
@@ -84,6 +85,28 @@ class Weight(dj.Manual):
     ---
     weight              : decimal(3,1)   # Weight in grams
     """
+
+    def insert1(self, row, **kwargs):
+        try:
+            super().insert((row,), **kwargs)
+        except dj.errors.DuplicateError:
+            # Todo: Ask user if previous weight should be overwritten?
+            print("A weight has already been recorded for this mouse and date, pre_op_weight will not be "
+                  "added to Weights table.")
+
+        row = {'username': 'hheise', 'mouse_id': 81, 'date_of_weight': '2021-06-08', 'weight': 25.0}
+
+        # Warn user if the 85% threshold of that mouse is crossed
+        user_filt = "username='{}'".format(row['username'])
+        mouse_filt = "mouse_id='{}'".format(row['mouse_id'])
+        first_surg = Surgery() & user_filt & mouse_filt & "surgery_num=1"
+        if len(first_surg) == 1:
+            first_surg_date = first_surg.fetch1('surgery_date').strftime("%Y-%m-%d")
+            pre_op_weight = (Weight() & user_filt & mouse_filt &
+                             "date_of_weight='{}'".format(first_surg_date)).fetch1('weight')
+            if row['weight'] < pre_op_weight*0.85:
+                print("WARNING: The weight of M{} of {} is below the 85% pre-surgery threshold of {:.1f}!".format(
+                    row['mouse_id'], row['weight'], pre_op_weight*0.85))
 
 
 @schema
@@ -190,14 +213,9 @@ class Surgery(dj.Manual):
             # The "transaction" context ensures that the database is only changed if both inserts worked
             connection = Weight.connection
             with connection.transaction:
-                # check if row is already present in Weight table
-                if len(Weight() & "username='{}'".format(experimenter) & "mouse_id = '{}'".format(mouse_id)
-                       & "date_of_weight = '{}'".format(date_str)) > 0:
-                    print("A weight has already been recorded for this mouse and date, pre_op_weight will not be added "
-                          "to Weights table.")
-                else:
+                if weight != 0:
                     #insert row into Weight table
-                    Weight().insert1({"username": experimenter, "mouse_id": mouse_id, "date_of_weight": date,
+                    Weight().insert1({"username": experimenter, "mouse_id": mouse_id, "date_of_weight": date_str,
                                       "weight": weight})
 
                 # add row to Surgery table
