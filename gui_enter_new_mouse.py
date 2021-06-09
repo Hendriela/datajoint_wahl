@@ -25,7 +25,7 @@ from pathlib import Path
 
 # connect to datajoint database
 login.connect()
-from schema import common_mice, common_exp, common_behav  # , common_img, common_el
+from schema import common_mice, common_exp  #, common_behav, common_img, common_el
 
 # =============================================================================
 # HARDCODED PARAMETER FOR GUI
@@ -228,17 +228,18 @@ class window(wx.Frame):
         self.mouse_notes = wx.TextCtrl(panel, value="", style=wx.TE_MULTILINE, pos=(M_LEFT, M_TOP + 3 * ROW + 20),
                                        size=(COL + BOX_WIDTH, 50))
 
-        # # Load mouse button
-        # self.load_session_button = wx.Button(panel, label="Load session",
-        #                                      pos=(M_LEFT + 3 * COL, M_TOP),
-        #                                      size=(BUTTON_WIDTH, BUTTON_HEIGHT))
-        # self.Bind(wx.EVT_BUTTON, self.event_load_session, self.load_session_button)
-
         # Submit mouse button
-        self.submit_surgery_button = wx.Button(panel, label="Add new mouse",
+        self.submit_mouse_button = wx.Button(panel, label="Add new\nmouse",
                                                pos=(M_LEFT + 2 * COL, M_TOP + 3 * ROW + 20),
-                                               size=(BUTTON_WIDTH, BUTTON_HEIGHT))
-        self.Bind(wx.EVT_BUTTON, self.event_submit_mouse, self.submit_surgery_button)
+                                               size=(BUTTON_WIDTH/2 + 20, BUTTON_HEIGHT))
+        self.Bind(wx.EVT_BUTTON, self.event_submit_mouse, self.submit_mouse_button)
+
+        # Update mouse button
+        self.update_mouse_button = wx.Button(panel, label="Update\nmouse",
+                                             pos=(M_LEFT + 2 * COL + BUTTON_WIDTH/2 + 20, M_TOP + 3 * ROW + 20),
+                                             size=(BUTTON_WIDTH/2 - 20, BUTTON_HEIGHT))
+        self.Bind(wx.EVT_BUTTON, self.event_update_mouse, self.update_mouse_button)
+        self.update_mouse_button.Disable()  # disabled by default, becomes clickable once a mouse is loaded
 
         # =============================================================================
         # Left lower box: Enter new SURGERY (2x3 fields + notes)
@@ -454,7 +455,7 @@ class window(wx.Frame):
     # =============================================================================
 
     def event_submit_mouse(self, event):
-        """Handle user click on "Submit Mouse" button"""
+        """Insert new mouse to Mouse()"""
 
         # create database entry
         mouse_dict = dict(username=investigator,
@@ -489,6 +490,33 @@ class window(wx.Frame):
 
             # Set the new mouse as "loaded" so that surgeries can directly be added to it
             self.curr_mouse.SetValue(new_mouse_id)
+
+    def event_update_mouse(self, event):
+        """Update info for an existing mouse"""
+
+        # Get info from fields
+        mouse_dict = dict(username=investigator,
+                          mouse_id=self.mouse_id.GetValue(),
+                          dob=self.dob.GetValue(),
+                          sex=self.sex.GetValue(),
+                          batch=self.batch.GetValue(),
+                          strain=self.strain.GetValue(),
+                          genotype=self.genotype.GetValue(),
+                          irats_id=self.irats.GetValue(),
+                          cage_num=self.cage.GetValue(),
+                          ear_mark=self.ear.GetValue(),
+                          licence_id=self.licence.GetValue(),
+                          info=self.mouse_notes.GetValue())
+
+        # Update entry in database
+        common_mice.Mouse.update1(row=mouse_dict)
+
+        # Overwrite YAML backup with changes
+        identifier = 'mouse_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), current_day)
+        filename = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier + '.yaml')
+        with open(filename, 'w') as outfile:
+            yaml.dump(mouse_dict, outfile, default_flow_style=False)
+        self.status_text.write('Updated backup file at %s' % filename + '\n')
 
     def event_submit_surgery(self, event):
         """Enter surgery data as new entry into the Surgery table"""
@@ -622,9 +650,11 @@ class window(wx.Frame):
         except ValueError:
             self.surg_num.SetValue('1')
 
+        # Enable the "update mouse" button
+        self.update_mouse_button.Enable()
+
         self.status_text.write(
-            '\nSuccessfully loaded info for mouse {}. You can now add new data associated with this mouse. \n\t'
-            '--> Do not change data in the MOUSE box while adding new info!'.format(mouse_dict) + '\n')
+            '\nSuccessfully loaded mouse {}. You can now add new or update existing data.'.format(mouse_dict) + '\n')
 
     def change_mouse(self, change):
         """ Change the current mouse ID by the given value and load the new mouse data """
