@@ -94,16 +94,14 @@ class Weight(dj.Manual):
             print("A weight has already been recorded for this mouse and date, pre_op_weight will not be "
                   "added to Weights table.")
 
-        row = {'username': 'hheise', 'mouse_id': 81, 'date_of_weight': '2021-06-08', 'weight': 25.0}
-
         # Warn user if the 85% threshold of that mouse is crossed
         user_filt = "username='{}'".format(row['username'])
         mouse_filt = "mouse_id='{}'".format(row['mouse_id'])
         first_surg = Surgery() & user_filt & mouse_filt & "surgery_num=1"
         if len(first_surg) == 1:
             first_surg_date = first_surg.fetch1('surgery_date').strftime("%Y-%m-%d")
-            pre_op_weight = (Weight() & user_filt & mouse_filt &
-                             "date_of_weight='{}'".format(first_surg_date)).fetch1('weight')
+            pre_op_weight = float((Weight() & user_filt & mouse_filt &
+                             "date_of_weight='{}'".format(first_surg_date)).fetch1('weight'))  # Typecast from decimal to float to allow multiplication
             if row['weight'] < pre_op_weight*0.85:
                 print("WARNING: The weight of M{} of {} is below the 85% pre-surgery threshold of {:.1f}!".format(
                     row['mouse_id'], row['weight'], pre_op_weight*0.85))
