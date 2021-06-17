@@ -96,6 +96,19 @@ class RawChannelFile(dj.Computed):
     filename_channel            : varchar(256)  # name of the raw channel file, relative to the session folder
     """
 
+
+    def make(self, key):
+        path_raw = (RawImagingFile & key).get_paths[0]  # get path of raw imaging file
+        # check if transformation matrix is available
+        param_query = (SpatialAlignmentParameters() & key)
+        if len(param_query) == 0:
+            raise Exception("No transformation matrix available for the following key:\n{}".format(key))
+        M = param_query.fetch1("TransformationMatrix")
+
+        # get Tiffile object
+        with tif.TiffFile(str(path_raw)) as tiffile_raw:
+            # get file info
+
     def get_paths(self):
         """Construct full paths to raw channel files"""
         path_neurophys = login.get_neurophys_data_directory()  # get data directory path on local machine
