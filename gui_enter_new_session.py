@@ -25,7 +25,15 @@ from pathlib import Path
 
 # connect to datajoint database
 login.connect()
-from schema import common_mice, common_exp, common_behav  # , common_img, common_el
+from schema import common_mice, common_exp, common_behav
+
+# import user-specific schema
+if login.get_user() == "hheise":
+    from schema import hheise_behav as user_behav
+elif login.get_user() == "mpanze":
+    from schema import mpanze_behav as user_behav
+elif login.get_user() == "jnambi":
+    from schema import jnambi_behav as user_behav
 
 # =============================================================================
 # HARDCODED PARAMETER FOR GUI
@@ -45,6 +53,13 @@ S_TOP = 20+30
 ROW = 70
 COL = 200
 S_HEIGHT = 330   # height of session box
+S_WIDTH = WINDOW_WIDTH_L-2*S_LEFT
+
+# User-specific information
+U_TOP = S_TOP + 20
+U_LEFT = S_LEFT + 4*COL + 40
+U_HEIGHT = S_HEIGHT
+U_WIDTH = 2*COL+50
 
 # behavior
 B_LEFT = S_LEFT
@@ -147,17 +162,17 @@ class window(wx.Frame):
 
         self.job_list = list()    # save jobs in format [ [table, entry_dict, source_path, target_path], [...], ...]
 # =============================================================================
-# Upper box: Add new session
+# Upper left box: Add new session
 # =============================================================================
         wx.StaticBox(panel, label='SESSION INFORMATION',
-                     pos=(S_LEFT-20, S_TOP-30), size=(WINDOW_WIDTH_L-2*S_LEFT, S_HEIGHT))
+                     pos=(S_LEFT-20, S_TOP-30), size=(S_WIDTH, S_HEIGHT))
 
         # Mouse name
         wx.StaticText(panel,label="Mouse ID:", pos=(S_LEFT, S_TOP))
-        self.mouse_name = wx.ComboBox(panel, choices=mouse_ids, style=wx.CB_READONLY,
+        self.mouse_name = wx.ComboBox(panel, choices=np.array(mouse_ids, dtype=str), style=wx.CB_READONLY,
                                       pos=(S_LEFT, S_TOP+20), size=(170, -1))
         self.mouse_name.Bind(wx.EVT_COMBOBOX, self.event_mouse_selected)
-        item = self.mouse_name.FindString(default_params['behavior']['default_mouse'])
+        item = self.mouse_name.FindString(str(default_params['behavior']['default_mouse']))
         self.mouse_name.SetSelection(item)
 
         # Day of experiment
@@ -178,21 +193,25 @@ class window(wx.Frame):
 
         # Button to select new folder
         self.select_session_folder = wx.Button(panel, label="Select folder",
-                                       pos=(S_LEFT + 2 * COL, S_TOP + ROW + 20),
-                                       size=(100, 25))
+                                       pos=(S_LEFT + 2 * COL, S_TOP + ROW + 20), size=(100, 25))
         self.Bind(wx.EVT_BUTTON, self.event_select_session_folder, self.select_session_folder)
 
+        # Checkbox if session folder should be created automatically
+        # wx.StaticText(panel, label="Find session folder automatically?", pos=(S_LEFT + 2 * COL, S_TOP + ROW))
+        self.autopath = wx.CheckBox(panel, label="Find session folder automatically?",
+                                    pos=(S_LEFT + 2 * COL + 120, S_TOP + ROW + 23), size=(200, 20))
+
         # Setup
-        wx.StaticText(panel,label="Setup:", pos=(S_LEFT,S_TOP+2*ROW))
-        self.setup = wx.ComboBox(panel, choices = setups, style=wx.CB_READONLY,
-                                      pos=(S_LEFT,S_TOP+2*ROW+20), size=(170,-1) )
+        wx.StaticText(panel,label="Setup:", pos=(S_LEFT, S_TOP+2*ROW))
+        self.setup = wx.ComboBox(panel, choices=setups, style=wx.CB_READONLY,
+                                 pos=(S_LEFT, S_TOP+2*ROW+20), size=(170, -1))
         item = self.setup.FindString(default_params['behavior']['default_setup'])
         self.setup.SetSelection(item)
 
         # Task
-        wx.StaticText(panel,label="Task:", pos=(S_LEFT+COL,S_TOP+2*ROW))
-        self.task = wx.ComboBox(panel, choices = tasks, style=wx.CB_READONLY,
-                                      pos=(S_LEFT+COL,S_TOP+2*ROW+20), size=(170,-1) )
+        wx.StaticText(panel, label="Task:", pos=(S_LEFT+COL, S_TOP+2*ROW))
+        self.task = wx.ComboBox(panel, choices=tasks, style=wx.CB_READONLY,
+                                pos=(S_LEFT+COL, S_TOP+2*ROW+20), size=(170, -1))
         item = self.task.FindString(default_params['behavior']['default_task'])
         self.task.SetSelection(item)
 
@@ -229,9 +248,30 @@ class window(wx.Frame):
                                        size=(150, 50) )
         self.Bind( wx.EVT_BUTTON, self.event_submit_session, self.submit_session_button)
 
+        # =============================================================================
+        # Upper left box: Add new session
+        # =============================================================================
+        wx.StaticBox(panel, label='USER-SPECIFIC INFORMATION',
+                     pos=(U_LEFT-40, U_TOP - 50), size=(U_WIDTH, U_HEIGHT))
+
+        # Hendriks parameters
+        wx.StaticBox(panel, label='Hendrik', pos=(U_LEFT-20, U_TOP - 20), size=(2*COL, ROW))
+
+        # Block
+        wx.StaticText(panel, label="Session block:", pos=(U_LEFT, U_TOP))
+        self.block = wx.TextCtrl(panel, pos=(U_LEFT, U_TOP+20), size=(170, -1))
+        self.block.SetValue('0')
+
+        # Condition switch
+        wx.StaticText(panel, label="Trial of condition switch(es):", pos=(U_LEFT + COL, U_TOP))
+        self.switch = wx.TextCtrl(panel, pos=(U_LEFT + COL, U_TOP+20), size=(170, -1))
+        self.switch.SetValue('[-1]')
+
+
 # =============================================================================
 # Enter behavioral data from wheel, video, ...
 # =============================================================================
+        """
         if default_params['imaging']['show_ephys'] == False:
             wx.StaticBox(panel, label='BEHAVIOR RECORDINGS',
                         pos=(B_LEFT-20, B_TOP-30), size=(WINDOW_WIDTH_L-2*S_LEFT, 500))
@@ -321,7 +361,7 @@ class window(wx.Frame):
                                            pos=(B_LEFT+3*COL, B_TOP+5*ROW),
                                            size=(150, 50) )
             self.Bind( wx.EVT_BUTTON, self.event_submit_behavior, self.submit_behav_button)
-
+        """
 # =============================================================================
 # Enter E-phys data
 # =============================================================================
@@ -492,13 +532,33 @@ class window(wx.Frame):
 # Events for menus and button presses
 # =============================================================================
 
+    def get_autopath(self, info):
+        """ Create automatic ABSOLUTE (with neurophys) session folder path based on the session_dict 'info'"""
+        # Hendriks logic
+        if info['username'] == 'hheise':
+            mouse = info['mouse_id']
+            batch = (common_mice.Mouse & username_filter & "mouse_id = {}".format(mouse)).fetch1('batch')
+            if batch == 0:
+                self.status_text.write('Mouse {} has no batch (batch 0). Cannot create session path.\n'.format(mouse))
+                raise Exception
+            path = os.path.join(login.get_neurophys_data_directory(), "Batch"+batch, "M"+mouse, info['day'])
+            return path
+
+        # Matteos logic
+        elif info['username'] == 'mpanze':
+            # FILL IN
+            return None
+        else:
+            return None
+
+
+
     def event_mouse_selected(self, event):
         """ The user selected a mouse name in the dropdown menu """
         print('New mouse selected')
 
     def event_submit_session(self, event):
         """ The user clicked on the button to submit a session """
-
 
         # create session dictionary that can be entered into datajoint pipeline
         session_dict = dict(username=investigator,
@@ -523,6 +583,20 @@ class window(wx.Frame):
                       'Therefore, nothing was entered into the database.'
             wx.MessageBox(message, caption="Session already in database", style=wx.OK | wx.ICON_INFORMATION)
             return
+
+        # find path automatically if box was ticked
+        if int(self.autopath.GetValue()) == 1:
+            auto_path = self.get_autopath(session_dict)
+            if auto_path is None:
+                self.status_text.write('No automatic folder method defined yet for user: ' + str(investigator) + '\n')
+            else:
+                session_dict['path'] = self.get_autopath(session_dict)
+
+        # Store Hendriks additional information in the "notes" section
+        if investigator == 'hheise':
+            session_dict['notes'] = "block=" + self.block.GetValue() + "\n" + \
+                                    "switch=" + self.switch.GetValue() + "\n" + \
+                                    "notes=" + session_dict['notes']
 
         # add entry to database
         try:
@@ -900,7 +974,6 @@ class window(wx.Frame):
             print('Copied file ' + source_path +'\n')
 
         print('Transfer ended.')
-
 
     def save_insert(self, table, dictionary):
         """
