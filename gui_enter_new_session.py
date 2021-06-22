@@ -25,7 +25,7 @@ from pathlib import Path
 
 # connect to datajoint database
 login.connect()
-from schema import common_mice, common_exp, common_behav
+from schema import common_mice, common_exp #, common_behav
 
 # import user-specific schema
 if login.get_user() == "hheise":
@@ -133,11 +133,11 @@ tasks = (common_exp.Task() & "username = '{}'".format(investigator)).fetch('task
 anesthesias = common_exp.Anesthesia().fetch('anesthesia')
 experimenters = common_mice.Investigator().fetch('username')
 
-wheels = common_behav.WheelType().fetch('wheel_type')
-signals = common_behav.SynchronizationType().fetch('sync_type')
-camera_pos = common_behav.CameraPosition().fetch('camera_position')
-stimulators = common_behav.StimulatorType().fetch('stimulator_type')
-event_types = common_behav.SensoryEventType().fetch('sensory_event_type')
+# wheels = common_behav.WheelType().fetch('wheel_type')
+# signals = common_behav.SynchronizationType().fetch('sync_type')
+# camera_pos = common_behav.CameraPosition().fetch('camera_position')
+# stimulators = common_behav.StimulatorType().fetch('stimulator_type')
+# event_types = common_behav.SensoryEventType().fetch('sensory_event_type')
 
 # microscopes = img.Microscope().fetch('microscope')
 # lasers = img.Laser().fetch('laser')
@@ -537,12 +537,13 @@ class window(wx.Frame):
         """ Create automatic ABSOLUTE (with neurophys) session folder path based on the session_dict 'info'"""
         # Hendriks logic
         if info['username'] == 'hheise':
-            mouse = info['mouse_id']
-            batch = (common_mice.Mouse & username_filter & "mouse_id = {}".format(mouse)).fetch1('batch')
+            mouse = str(info['mouse_id'])
+            batch = str((common_mice.Mouse & username_filter & "mouse_id = {}".format(mouse)).fetch1('batch'))
             if batch == 0:
                 self.status_text.write('Mouse {} has no batch (batch 0). Cannot create session path.\n'.format(mouse))
                 raise Exception
-            path = os.path.join(login.get_neurophys_data_directory(), "Batch"+batch, "M"+mouse, info['day'])
+            path = os.path.join(login.get_neurophys_data_directory(),
+                                "Batch"+batch, "M"+mouse, info['day'].replace('-', ''))
             return path
 
         # Matteos logic
@@ -565,21 +566,21 @@ class window(wx.Frame):
         session_dict = dict(username=investigator,
                             mouse_id=self.mouse_name.GetValue(),
                             day=self.day.GetValue(),
-                            trial=int(self.trial.GetValue()),
-                            path=Path(self.session_folder.GetValue()),
+                            session_num=int(self.trial.GetValue()),
+                            session_path=Path(self.session_folder.GetValue()),
                             anesthesia=self.anesthesia.GetValue(),
                             setup=self.setup.GetValue(),
                             task=self.task.GetValue(),
                             experimenter=self.experimenter.GetValue(),
-                            notes=self.notes.GetValue()
+                            session_notes=self.notes.GetValue()
                             )
 
         # check if the session is already in the database (most common error)
         key = dict(username=investigator,
                    mouse_id=self.mouse_name.GetValue(),
                    day=self.day.GetValue(),
-                   trial=int(self.trial.GetValue()))
-        if len( common_exp.Session() & key) > 0:
+                   session_num=int(self.trial.GetValue()))
+        if len(common_exp.Session() & key) > 0:
             message = 'The session you wanted to enter into the database already exists.\n' + \
                       'Therefore, nothing was entered into the database.'
             wx.MessageBox(message, caption="Session already in database", style=wx.OK | wx.ICON_INFORMATION)
@@ -591,13 +592,14 @@ class window(wx.Frame):
             if auto_path is None:
                 self.status_text.write('No automatic folder method defined yet for user: ' + str(investigator) + '\n')
             else:
-                session_dict['path'] = self.get_autopath(session_dict)
+                session_dict['path'] = Path(self.get_autopath(session_dict))
 
-        # Store Hendriks additional information in the "notes" section
+        # Store Hendriks additional information in the "notes" section as a string dict
         if investigator == 'hheise':
-            session_dict['notes'] = "block=" + self.block.GetValue() + "\n" + \
-                                    "switch=" + self.switch.GetValue() + "\n" + \
-                                    "notes=" + session_dict['notes']
+            session_dict['session_notes'] = "{"+"'block':'{}', 'switch':'{}', 'notes':'{}'".format(
+                                                                                    self.block.GetValue(),
+                                                                                    self.switch.GetValue(),
+                                                                                    session_dict['session_notes'])+"}"
 
         # add entry to database
         try:
@@ -608,7 +610,7 @@ class window(wx.Frame):
             identifier = common_exp.Session().create_id(investigator_name=investigator,
                                                         mouse_id=session_dict['mouse_id'],
                                                         date=session_dict['day'],
-                                                        trial=session_dict['trial'])
+                                                        session_num=session_dict['session_num'])
             file = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier + '.yaml')
             # TODO show prompt if a backup file with this identifier already exists and ask the user to overwrite
             # if os.path.isfile(file):
@@ -619,7 +621,7 @@ class window(wx.Frame):
             # else:
 
             # Transform session path from Path to string (with universal / separator) to make it YAML-compatible
-            session_dict['path'] = str(session_dict['path']).replace("\\", "/")
+            session_dict['session_path'] = str(session_dict['session_path']).replace("\\", "/")
             with open(file, 'w') as outfile:
                 yaml.dump(session_dict, outfile, default_flow_style=False)
 
@@ -654,71 +656,71 @@ class window(wx.Frame):
         self.experimenter.SetSelection(item)
         self.notes.SetValue(entry['notes'])
 
-    def event_submit_behavior(self, event):
-        """ User clicked on button to submit the behavioral data """
-
-        # go through all behavioral files and upload if checkbox is set
-        session_key = dict( name = self.mouse_name.GetValue(),
-                            day = self.day.GetValue(),
-                            trial = int( self.trial.GetValue() ) )
-        trial = int( self.trial.GetValue() )
-    # wheel
-        if self.wheel_checkbox.GetValue():
-            # insert the main table
-            wheel_dict = dict( **session_key,
-                              wheel_type = self.wheel.GetValue())
-            self.save_insert( common_behav.Wheel(), wheel_dict)
-
-            # add job to transfer file later
-            file = default_params['behavior']['wheel_file'].format(trial)
-            raw_wheel_dict = dict( **session_key,
-                                  file_name = file)
-
-            self.job_list.append([common_behav.RawWheelFile(), raw_wheel_dict, self.behav_folder.GetValue(), file])
-    # synchronization
-        if self.sync_checkbox.GetValue():
-            sync_dict = dict(**session_key,
-                             sync_type=self.imaging_sync.GetValue())
-            self.save_insert(common_behav.Synchronization(), sync_dict)
-
-            file = default_params['behavior']['synch_file'].format(trial)
-            raw_sync_dict = dict(**session_key,
-                                 file_name=file)
-            self.job_list.append([common_behav.RawSynchronizationFile(), raw_sync_dict, self.behav_folder.GetValue(), file])
-    # video
-        if self.video_checkbox.GetValue():
-            video_dict = dict(**session_key,
-                              camera_nr=0,   # TODO: modify for multiple cameras
-                              camera_position=self.camera_pos.GetValue(),
-                              frame_rate=int(self.frame_rate.GetValue()))
-            self.save_insert(common_behav.Video(), video_dict)
-
-            file = self.video_file.GetValue().format(trial)
-            raw_video_dict = dict(**session_key,
-                                  camera_nr=0,
-                                  part=0,
-                                  file_name=file)
-            self.job_list.append([common_behav.RawVideoFile(), raw_video_dict, self.behav_folder.GetValue(), file])
-    # whisker stimulator
-        if self.whisker_checkbox.GetValue():
-            whisker_dict = dict(**session_key,
-                                stimulator_type=self.stimulator.GetValue())
-            self.save_insert(common_behav.WhiskerStimulator(), whisker_dict)
-
-            file = default_params['behavior']['whisker_file'].format(trial)
-            raw_whisker_dict = dict(**session_key,
-                                    file_name=file)
-            self.job_list.append([common_behav.RawWhiskerStimulatorFile(), raw_whisker_dict, self.behav_folder.GetValue(), file])
-    # events
-        if self.event_checkbox.GetValue():
-            event_dict = dict(**session_key,
-                              sensory_event_type = self.event_type.GetValue() )
-            self.save_insert(common_behav.SensoryEvents(), event_dict)
-
-            file = default_params['behavior']['event_file'].format(trial)
-            raw_event_dict = dict(**session_key,
-                                  file_name=file)
-            self.job_list.append([common_behav.RawSensoryEventsFile(), raw_event_dict, self.behav_folder.GetValue(), file])
+    # def event_submit_behavior(self, event):
+    #     """ User clicked on button to submit the behavioral data """
+    #
+    #     # go through all behavioral files and upload if checkbox is set
+    #     session_key = dict( name = self.mouse_name.GetValue(),
+    #                         day = self.day.GetValue(),
+    #                         trial = int( self.trial.GetValue() ) )
+    #     trial = int( self.trial.GetValue() )
+    # # wheel
+    #     if self.wheel_checkbox.GetValue():
+    #         # insert the main table
+    #         wheel_dict = dict( **session_key,
+    #                           wheel_type = self.wheel.GetValue())
+    #         self.save_insert( common_behav.Wheel(), wheel_dict)
+    #
+    #         # add job to transfer file later
+    #         file = default_params['behavior']['wheel_file'].format(trial)
+    #         raw_wheel_dict = dict( **session_key,
+    #                               file_name = file)
+    #
+    #         self.job_list.append([common_behav.RawWheelFile(), raw_wheel_dict, self.behav_folder.GetValue(), file])
+    # # synchronization
+    #     if self.sync_checkbox.GetValue():
+    #         sync_dict = dict(**session_key,
+    #                          sync_type=self.imaging_sync.GetValue())
+    #         self.save_insert(common_behav.Synchronization(), sync_dict)
+    #
+    #         file = default_params['behavior']['synch_file'].format(trial)
+    #         raw_sync_dict = dict(**session_key,
+    #                              file_name=file)
+    #         self.job_list.append([common_behav.RawSynchronizationFile(), raw_sync_dict, self.behav_folder.GetValue(), file])
+    # # video
+    #     if self.video_checkbox.GetValue():
+    #         video_dict = dict(**session_key,
+    #                           camera_nr=0,   # TODO: modify for multiple cameras
+    #                           camera_position=self.camera_pos.GetValue(),
+    #                           frame_rate=int(self.frame_rate.GetValue()))
+    #         self.save_insert(common_behav.Video(), video_dict)
+    #
+    #         file = self.video_file.GetValue().format(trial)
+    #         raw_video_dict = dict(**session_key,
+    #                               camera_nr=0,
+    #                               part=0,
+    #                               file_name=file)
+    #         self.job_list.append([common_behav.RawVideoFile(), raw_video_dict, self.behav_folder.GetValue(), file])
+    # # whisker stimulator
+    #     if self.whisker_checkbox.GetValue():
+    #         whisker_dict = dict(**session_key,
+    #                             stimulator_type=self.stimulator.GetValue())
+    #         self.save_insert(common_behav.WhiskerStimulator(), whisker_dict)
+    #
+    #         file = default_params['behavior']['whisker_file'].format(trial)
+    #         raw_whisker_dict = dict(**session_key,
+    #                                 file_name=file)
+    #         self.job_list.append([common_behav.RawWhiskerStimulatorFile(), raw_whisker_dict, self.behav_folder.GetValue(), file])
+    # # events
+    #     if self.event_checkbox.GetValue():
+    #         event_dict = dict(**session_key,
+    #                           sensory_event_type = self.event_type.GetValue() )
+    #         self.save_insert(common_behav.SensoryEvents(), event_dict)
+    #
+    #         file = default_params['behavior']['event_file'].format(trial)
+    #         raw_event_dict = dict(**session_key,
+    #                               file_name=file)
+    #         self.job_list.append([common_behav.RawSensoryEventsFile(), raw_event_dict, self.behav_folder.GetValue(), file])
 
     """ COMMENTED OUT BECAUSE WE DONT HAVE THE IMG() OR EL() SCHEMA YET
     def event_submit_img(self, event):
