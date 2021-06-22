@@ -115,7 +115,7 @@ if default_params['behavior']['default_mouse'] == 'last_mouse':
 # Check how many sessions this mouse has on the current day and adjust the trial counter accordingly
 mouse_id_filter = "mouse_id = '{}'".format(default_params['behavior']['default_mouse'])
 date_filter = "day = '{}'".format(current_day)
-all_trials = (common_exp.Session() & username_filter & mouse_id_filter & date_filter).fetch('trial')
+all_trials = (common_exp.Session() & username_filter & mouse_id_filter & date_filter).fetch('session_num')
 if len(all_trials) == 0:
     next_trial = '1'
 else:
@@ -181,7 +181,7 @@ class window(wx.Frame):
         self.day.SetValue(current_day)
 
         # Trial
-        wx.StaticText(panel,label="Trial (base 1):", pos=(S_LEFT+400,S_TOP))
+        wx.StaticText(panel,label="Session number (that day):", pos=(S_LEFT+400,S_TOP))
         self.trial = wx.TextCtrl(panel, pos=(S_LEFT+2*COL,S_TOP+20), size=(170,-1))
         self.trial.SetValue(next_trial)
 
@@ -635,7 +635,7 @@ class window(wx.Frame):
         session_dict = dict(username=investigator,
                             mouse_id=self.mouse_name.GetValue(),
                             day=self.day.GetValue(),
-                            trial=int(self.trial.GetValue()))
+                            session_num=int(self.trial.GetValue()))
         entries = (common_exp.Session() & session_dict).fetch(as_dict=True)
         # check there is only one table corresponding to this
         if len(entries) > 1:
