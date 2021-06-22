@@ -4,29 +4,61 @@ import datajoint as dj
 import login
 import pathlib
 from schema import common_mice, common_exp
+import cv2
+import numpy as np
+import tifffile as tif
 
 schema = dj.schema('mpanze_widefield', locals(), create_tables=True)
+
+
+@schema
+class LightSource(dj.Lookup):
+    definition = """ # Illumination source used for imaging
+    source_name           : varchar(20)   # short name of source
+    ---
+    source_description    : varchar(256)  # longer description of source    
+    """
+    contents = [
+        ["Blue", "470nm GCaMP stimulation LED through objective"],
+        ["UV", "405nm hemodynamics control LED through objective"],
+        ["Green", "Green LED illumination from side"],
+        ["Yellow", "Yellow LED illumination from side"],
+        ["Red", "Red LED illumination from side"]
+    ]
 
 
 @schema
 class ReferenceImage(dj.Manual):
     definition = """ # Reference image from the widefield microscope, used as a template for spatial alignment
     -> common_mice.Mouse
-    id_ref_img                  : tinyint       # id for keeping track of multiple reference images
+    -> LightSource
+    ref_date                : date          # date the image was taken (YYYY-MM-DD)
     ---
-    date_ref_img                : date          # date the image was taken (YYYY-MM-DD)
-    reference_image             : longblob      # reference image (numpy array with 512x512 dimensions)
-    reference_image_mask        : longblob      # mask with size matching the reference image (np.unint8 array)
-    light_source                : varchar(20)   # light source used to take image (e.g. blue LED)
+    ref_image               : longblob      # reference image (np.uint16 array with 512x512 dimensions)
+    ref_mask                : longblob      # mask with size matching the reference image (np.unint8 array)
+    ref_notes               : varchar(256)  # additional notes
     """
+
+
+@schema
+class ImagingMethod(dj.Lookup):
+    definition = """ # Lookup table for differentiating between different acquisition methods (e.g. alternating BLUE/UV)
+    method_name         : varchar(20)   # short name of imaging method
+    ---
+    method_description  : varchar(256)  # longer description of imaging method
+    """
+    contents = [
+        ["Single Wavelength", "Imaging at a fixed single wavelength, no alternating"],
+        ["Blue/UV", "Alternate each frame between Blue and UV sources, starting from Blue"]
+    ]
 
 
 @schema
 class RawImagingFile(dj.Manual):
     definition = """ # Paths to raw widefield imaging files in .tif format
     -> common_exp.Session
-    id_img_file                 : tinyint       # for keeping track of multiple files within a session (e.g. sensory mapping)
     ---
+    -> ImagingMethod
     filename_img                : varchar(256)  # name of the imaging file, relative to the session folder
     """
 
@@ -42,6 +74,53 @@ class RawImagingFile(dj.Manual):
             # obtain full path
             path_session = session["path"]
             path_file = session["filename_img"]
+            paths.append(pathlib.Path(path_neurophys, path_session, path_file))
+        return paths
+
+
+@schema
+class SpatialAlignmentParameters(dj.Manual):
+    definition = """ # Contains transformation matrix for spatially registering different imaging sessions
+    -> RawImagingFile
+    ---
+    TransformationMatrix        : longblob      # forward transformation matrix for aligning to reference image
+    """
+
+
+@schema
+class RawChannelFile(dj.Computed):
+    definition = """ # Contains spatially registered Raw Imaging Files, split by Channel
+    --> RawImagingFile
+    --> LightSource
+    ---
+    filename_channel            : varchar(256)  # name of the raw channel file, relative to the session folder
+    """
+
+
+    def make(self, key):
+        path_raw = (RawImagingFile & key).get_paths[0]  # get path of raw imaging file
+        # check if transformation matrix is available
+        param_query = (SpatialAlignmentParameters() & key)
+        if len(param_query) == 0:
+            raise Exception("No transformation matrix available for the following key:\n{}".format(key))
+        M = param_query.fetch1("TransformationMatrix")
+
+        # get Tiffile object
+        with tif.TiffFile(str(path_raw)) as tiffile_raw:
+            # get file info
+
+    def get_paths(self):
+        """Construct full paths to raw channel files"""
+        path_neurophys = login.get_neurophys_data_directory()  # get data directory path on local machine
+        # find sessions corresponding to current files
+        sessions = (self * common_exp.Session())
+
+        # iterate over sessions
+        paths = []
+        for session in sessions:
+            # obtain full path
+            path_session = session["path"]
+            path_file = session["filename_channel"]
             paths.append(pathlib.Path(path_neurophys, path_session, path_file))
         return paths
 
