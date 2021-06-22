@@ -23,5 +23,9 @@ If the database got shut down (e.g. if the server was turned off), it has to be 
 ## Access the MySQL database
 
 To access the MySQL database directly (for maintenance, user creation etc.), connect to the server via SSH and type: <pre>mysql -h 127.0.0.1 -u YourAccountName -p</pre> and enter your password. Then the <code>mysql></code> prompt should appear and you can start using MySQL commands to interact with the database.
-  
+
+### User management
 Consult the <a href="https://docs.datajoint.io/matlab/v3.4/admin/3-accounts.html">DataJoint Documentation</a> for creating new users and granting privileges. To create new users or change privileges, you have to use the <code>root</code> account to log into the database.
+
+### Remove old or corrupted schemas
+Sometimes things go wrong with DataJoint, and it cannot access schemas anymore. This happens e.g. if the respective python module (its creation .py file) is not accessible anymore, and can create reference and integrity problems. To drop such a corrupted schema <code>old_schema</code>, issue the SQL query <pre>mysql> DROP SCHEMA old_schema;</pre> <u><b>CAUTION:</b></u> This action deletes an ENTIRE schema with all its tables and data, without any further check, safety net or rollback possibility, and is <b><u>IRREVERSIBLE!</u></b> Please use this command with the utmost care. As with user management, you have to log in to MySQL with the <code>root</code> account to drop schemas and tables.
