@@ -515,6 +515,7 @@ class window(wx.Frame):
                                        pos=(30, L_TOP),
                                        size=(BUTTON_WIDTH, BUTTON_HEIGHT) )
         self.Bind( wx.EVT_BUTTON, self.event_transfer_data, self.transfer_button)
+        self.transfer_button.Disable()
 
         self.quit_button = wx.Button(panel,label="Quit",
                                      pos=(30, L_TOP+ROW),
@@ -646,14 +647,12 @@ class window(wx.Frame):
         self.setup.SetSelection(item)
         item = self.task.FindString(entry['task'])
         self.task.SetSelection(item)
-        self.stage.SetValue( str(entry['stage']) )
+        # self.stage.SetValue(str(entry['stage']))
         item = self.anesthesia.FindString(entry['anesthesia'])
         self.anesthesia.SetSelection(item)
         item = self.experimenter.FindString(entry['experimenter'])
         self.experimenter.SetSelection(item)
-        self.notes.SetValue( entry['notes'] )
-
-
+        self.notes.SetValue(entry['notes'])
 
     def event_submit_behavior(self, event):
         """ User clicked on button to submit the behavioral data """
@@ -920,7 +919,7 @@ class window(wx.Frame):
         exit_flag = folder_dialog.ShowModal()
         # update the folder in the text box when the user exited with ok
         if exit_flag == wx.ID_OK:
-            self.el_folder.SetValue( folder_dialog.GetPath() )
+            self.el_folder.SetValue(folder_dialog.GetPath())
 
     def event_quit_button(self, event):
         """ User pressed quit button """
@@ -929,6 +928,10 @@ class window(wx.Frame):
     def event_transfer_data(self, event):
         """ Transfer data to the neurophysiology server and add Raw...File to database """
 
+        # User_behav is the schema specific for the active user. Each user should have a "transfer_data()" function
+        # in their own schema to
+
+        """ Adrians version of a job list (transferring different behavior files separately)
         jobs = self.job_list
         print('Transfering the files for {} entries in the job list.'.format( len(jobs) ))
 
@@ -974,6 +977,7 @@ class window(wx.Frame):
             print('Copied file ' + source_path +'\n')
 
         print('Transfer ended.')
+        """
 
     def save_insert(self, table, dictionary):
         """
