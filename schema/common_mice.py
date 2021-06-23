@@ -91,8 +91,7 @@ class Weight(dj.Manual):
             super().insert((row,), **kwargs)
         except dj.errors.DuplicateError:
             # Todo: Ask user if previous weight should be overwritten?
-            print("A weight has already been recorded for this mouse and date, pre_op_weight will not be "
-                  "added to Weights table.")
+            print("A weight has already been recorded for M{} on {}.".format(row['mouse_id'], row['date_of_weight']))
 
         # Warn user if the 85% threshold of that mouse is crossed
         user_filt = "username='{}'".format(row['username'])

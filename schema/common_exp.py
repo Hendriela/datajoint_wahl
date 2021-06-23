@@ -114,7 +114,6 @@ class Session(dj.Manual):
         # combine and return the unique session id
         return first_part + '_' + date_str + '_' + trial_str
 
-
     def get_relative_path(self, abs_path):
         """Removes the Neurophysiology-Server path from an absolute path and returns the relative path
         :param abs_path: str, absolute path of a directory on the Neurophysiology-Storage1 server
@@ -134,7 +133,6 @@ class Session(dj.Manual):
                           'Make sure that the session path and the \nlocal server directory in '
                           'login.get_neurophys_data_directory() are set correctly.\n'
                           'Absolute path used for now.'.format(abs_path))
-
 
     def helper_insert1(self, new_entry_dict):
         """Simplified insert function that takes care of id and counter values
@@ -160,7 +158,9 @@ class Session(dj.Manual):
         entry = dict(**new_entry_dict, session_id=id, session_counter=counter)
 
         self.insert1(entry)
-        return 'Inserted new entry: {}'.format(entry)
+        # Only print out primary keys
+        key_dict = {your_key: entry[your_key] for your_key in ['username', 'mouse_id', 'day', 'session_num']}
+        return 'Inserted new session: {}'.format(key_dict)
 
     def get_folder(self):
         """ Return the folder on neurophys for this session on the current PC
