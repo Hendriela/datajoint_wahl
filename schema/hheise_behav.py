@@ -39,36 +39,39 @@ class VRSession(dj.Imported):
     """
 
     def make(self, key):
-        # Get current mouse
-        mouse = (mice.Mouse & key).fetch1()
 
-        # Load info from the Excel file
-        excel_path = os.path.join(login.get_neurophys_data_directory(),
-                                  (BatchData & {"batch_id": mouse['batch']}).fetch1('behav_excel'))
-        excel = pd.read_excel(excel_path, sheet_name="M{}".format(mouse['mouse_id']))
-        # Day is returned as date, has to be cast as datetime for pandas comparison
-        sess_entry = excel.loc[excel['Date'] == datetime(key['day'].year, key['day'].month, key['day'].day)]
+        # Safety check that only my sessions are processed (should be restricted during the populate() call)
+        if key['username'] == login.get_user():
+            # Get current mouse
+            mouse = (mice.Mouse & key).fetch1()
 
-        # Fill in info from Excel entry
-        key['valve_duration'] = sess_entry['Water'].values[0].split()[1][:3]
-        key['length'] = sess_entry['Track length'].values[0]
-        key['running'] = sess_entry['Running'].values[0]
-        key['licking'] = sess_entry['Licking'].values[0]
-        key['deprivation'] = sess_entry['Deprivation'].values[0]
-        key['vr_notes'] = sess_entry['Notes'].values[0]
+            # Load info from the Excel file
+            excel_path = os.path.join(login.get_neurophys_data_directory(),
+                                      (BatchData & {"batch_id": mouse['batch']}).fetch1('behav_excel'))
+            excel = pd.read_excel(excel_path, sheet_name="M{}".format(mouse['mouse_id']))
+            # Day is returned as date, has to be cast as datetime for pandas comparison
+            sess_entry = excel.loc[excel['Date'] == datetime(key['day'].year, key['day'].month, key['day'].day)]
 
-        # Enter weight if given
-        if not pd.isna(sess_entry['weight [g]'].values[0]):
-            mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
-                                   'date_of_weight': key['day'], 'weight': sess_entry['weight [g]'].values[0]})
+            # Fill in info from Excel entry
+            key['valve_duration'] = sess_entry['Water'].values[0].split()[1][:3]
+            key['length'] = sess_entry['Track length'].values[0]
+            key['running'] = sess_entry['Running'].values[0]
+            key['licking'] = sess_entry['Licking'].values[0]
+            key['deprivation'] = sess_entry['Deprivation'].values[0]
+            key['vr_notes'] = sess_entry['Notes'].values[0]
 
-        # Get block and condition switch from session_notes string
-        note_dict = ast.literal_eval((exp.Session & key).fetch1('session_notes'))
-        key['block'] = note_dict['block']
-        key['condition_switch'] = note_dict['switch']
+            # Enter weight if given
+            if not pd.isna(sess_entry['weight [g]'].values[0]):
+                mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
+                                       'date_of_weight': key['day'], 'weight': sess_entry['weight [g]'].values[0]})
 
-        # Insert final dict into the table
-        self.insert1(key)
+            # Get block and condition switch from session_notes string
+            note_dict = ast.literal_eval((exp.Session & key).fetch1('session_notes'))
+            key['block'] = note_dict['block']
+            key['condition_switch'] = note_dict['switch']
+
+            # Insert final dict into the table
+            self.insert1(key)
 
 
 
