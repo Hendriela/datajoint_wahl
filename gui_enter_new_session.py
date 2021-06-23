@@ -592,7 +592,7 @@ class window(wx.Frame):
             if auto_path is None:
                 self.status_text.write('No automatic folder method defined yet for user: ' + str(investigator) + '\n')
             else:
-                session_dict['path'] = Path(self.get_autopath(session_dict))
+                session_dict['session_path'] = Path(self.get_autopath(session_dict))
 
         # Store Hendriks additional information in the "notes" section as a string dict
         if investigator == 'hheise':

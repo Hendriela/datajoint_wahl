@@ -148,16 +148,16 @@ class Session(dj.Manual):
 
         id = self.create_id(new_entry_dict['username'], new_entry_dict['mouse_id'], new_entry_dict['day'],
                             new_entry_dict['session_num'])
-        if len(Session.fetch('counter')) == 0:
+        if len(Session.fetch('session_counter')) == 0:
             counter = 0
         else:
-            counter = max(Session.fetch('counter')) + 1
+            counter = max(Session.fetch('session_counter')) + 1
 
         # Transform absolute path from the GUI to the relative path on the Neurophys-Storage1 server
         new_entry_dict['session_path'] = self.get_relative_path(new_entry_dict['session_path'])
 
         # add automatically computed values to the dictionary
-        entry = dict(**new_entry_dict, id=id, counter=counter)
+        entry = dict(**new_entry_dict, session_id=id, session_counter=counter)
 
         self.insert1(entry)
         return 'Inserted new entry: {}'.format(entry)
