@@ -8,7 +8,7 @@ from schema import common_mice as mice
 # from .utils.common import log    # standardized logging
 # from .utils import analysis
 from datetime import datetime
-
+import ast
 import os
 import numpy as np
 import pandas as pd
@@ -38,37 +38,38 @@ class VRSession(dj.Imported):
     vr_notes            : varchar(1024)     # Notes about the session
     """
 
-    key = {'username': 'hheise', 'mouse_id': 0, 'day': datetime.strptime('1900-1-1', '%Y-%m-%d'), 'trial': 1}
-
     def make(self, key):
         # Get current mouse
         mouse = (mice.Mouse & key).fetch1()
-
-        mouse['batch'] = 7          ##### DELETE LATER
 
         # Load info from the Excel file
         excel_path = os.path.join(login.get_neurophys_data_directory(),
                                   (BatchData & {"batch_id": mouse['batch']}).fetch1('behav_excel'))
         excel = pd.read_excel(excel_path, sheet_name="M{}".format(mouse['mouse_id']))
-
-        key['day'] = datetime.strptime('2021-06-17', '%Y-%m-%d') ##### DELETE LATER
-
-        sess_entry = excel.loc[excel['Date'] == key['day']]
+        # Day is returned as date, has to be cast as datetime for pandas comparison
+        sess_entry = excel.loc[excel['Date'] == datetime(key['day'].year, key['day'].month, key['day'].day)]
 
         # Fill in info from Excel entry
-        key['valve_duration'] = sess_entry['Water'][0].split()[1][:3]
-        key['length'] = sess_entry['Track length'][0]
-        key['running'] = sess_entry['Running'][0]
-        key['licking'] = sess_entry['Licking'][0]
-        key['deprivation'] = sess_entry['Deprivation'][0]
-        key['vr_notes'] = sess_entry['Notes'][0]
+        key['valve_duration'] = sess_entry['Water'].values[0].split()[1][:3]
+        key['length'] = sess_entry['Track length'].values[0]
+        key['running'] = sess_entry['Running'].values[0]
+        key['licking'] = sess_entry['Licking'].values[0]
+        key['deprivation'] = sess_entry['Deprivation'].values[0]
+        key['vr_notes'] = sess_entry['Notes'].values[0]
 
         # Enter weight if given
-        if not pd.isna(sess_entry['weight [g]'][0]):
+        if not pd.isna(sess_entry['weight [g]'].values[0]):
             mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
-                                   'date_of_weight': key['day'], 'weight': sess_entry['weight [g]'][0]})
+                                   'date_of_weight': key['day'], 'weight': sess_entry['weight [g]'].values[0]})
 
-        # TODO: get condition_switch and block from GUI
+        # Get block and condition switch from session_notes string
+        note_dict = ast.literal_eval((exp.Session & key).fetch1('session_notes'))
+        key['block'] = note_dict['block']
+        key['condition_switch'] = note_dict['switch']
+
+        # Insert final dict into the table
+        self.insert1(key)
+
 
 
 @schema
