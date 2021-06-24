@@ -105,6 +105,8 @@ class Weight(dj.Manual):
                 print("WARNING: The weight of M{} of {} is below the 85% pre-surgery threshold of {:.1f}!".format(
                     row['mouse_id'], row['weight'], pre_op_weight*0.85))
 
+        # Todo: Warn user again if the 85% threshold has been crossed 3+ days ago without recovery
+
 
 @schema
 class Sacrificed(dj.Manual):
