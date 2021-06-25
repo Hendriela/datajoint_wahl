@@ -9,13 +9,26 @@ Utility functions for Hendriks DataJoint section
 import os
 from pathlib import Path
 from copy import deepcopy
+import re
+from glob import glob
 
 import yaml
+import numpy as np
 
 import login
 from schema import common_mice, common_exp
 
 REL_BACKUP_PATH = "Datajoint/manual_submissions"
+
+
+def numerical_sort(x):
+    """Sort a list of strings numerically"""
+    x_sort = x.copy()
+    def atoi(text):
+        return int(text) if text.isdigit() else text
+    def natural_keys(text):
+        return [atoi(c) for c in re.split('(\d+)', text)]
+    return x_sort.sort(key=natural_keys)
 
 
 def make_yaml_backup(sess_dict):
