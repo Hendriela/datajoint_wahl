@@ -156,6 +156,7 @@ class window(wx.Frame):
         wx.Frame.__init__(self, parent, id, '{} ({}): Enter mouse data into database'.format(inv_fullname, investigator),
                           size=(WINDOW_WIDTH, WINDOW_HEIGHT))
         panel = wx.Panel(self)
+        bold_font = wx.Font(9, wx.DEFAULT, wx.NORMAL, wx.BOLD)      # Create bold font for primary key labels
 
         self.job_list = list()  # save jobs in format [ [table, entry_dict, source_path, target_path], [...], ...]
         # =============================================================================
@@ -166,7 +167,8 @@ class window(wx.Frame):
         mouse_box.SetForegroundColour(BOX_TITLE_COLOR)
 
         # Mouse ID (default is highest existing mouse ID + 1)
-        wx.StaticText(panel, label="Mouse ID:", pos=(M_LEFT, M_TOP))
+        text = wx.StaticText(panel, label="Mouse ID:", pos=(M_LEFT, M_TOP))
+        text.SetFont(bold_font)
         self.mouse_id = wx.TextCtrl(panel, pos=(M_LEFT, M_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.mouse_id.SetValue(str(default_params['behavior']['default_mouse'] + 1))
 
@@ -249,7 +251,8 @@ class window(wx.Frame):
         surg_box.SetForegroundColour(BOX_TITLE_COLOR)
 
         # Surgery number (default is empty, will be filled when a mouse is loaded)
-        wx.StaticText(panel, label="Surgery number:", pos=(S_LEFT, S_TOP))
+        text = wx.StaticText(panel, label="Surgery number:", pos=(S_LEFT, S_TOP))
+        text.SetFont(bold_font)
         self.surg_num = wx.TextCtrl(panel, pos=(S_LEFT, S_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.surg_num.SetValue('')
 
@@ -303,7 +306,8 @@ class window(wx.Frame):
         inj_box.SetForegroundColour(BOX_TITLE_COLOR)
 
         # Injection number (default is empty, will be filled after mouse is loaded)
-        wx.StaticText(panel, label="Injection number:", pos=(I_LEFT, I_TOP))
+        text = wx.StaticText(panel, label="Injection number:", pos=(I_LEFT, I_TOP))
+        text.SetFont(bold_font)
         self.inj_num = wx.TextCtrl(panel, pos=(I_LEFT, I_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.inj_num.SetValue('')
 
@@ -353,7 +357,8 @@ class window(wx.Frame):
         weight_box.SetForegroundColour(BOX_TITLE_COLOR)
 
         # Date of weight (default is current day)
-        wx.StaticText(panel, label="Date (YYYY-MM-DD):", pos=(W_LEFT, W_TOP))
+        text = wx.StaticText(panel, label="Date (YYYY-MM-DD):", pos=(W_LEFT, W_TOP))
+        text.SetFont(bold_font)
         self.dow = wx.TextCtrl(panel, pos=(W_LEFT, W_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.dow.SetValue(current_day)
 
