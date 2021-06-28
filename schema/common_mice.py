@@ -2,6 +2,7 @@
 
 import datajoint as dj
 from dateutil.parser import parse
+import matplotlib.pyplot as plt
 
 schema = dj.schema('common_mice', locals(), create_tables=True)
 
@@ -86,12 +87,25 @@ class Mouse(dj.Manual):
                 print("The 85% pre-surgery weight threshold of M{} is {:.1f}g.".format(mouse['mouse_id'],
                                                                                        pre_op_weight * 0.85))
             else:
-                return pre_op_weight
+                return pre_op_weight*0.85
         else:
             if printout:
                 print("M{} does not have a recorded surgery. 85% threshold cannot be computed.".format(mouse['mouse_id']))
             else:
                 return None
+
+    def plot_weight(self):
+
+        mouse = self.fetch1()
+        dates = (Weight & mouse).fetch('date_of_weight')
+        weights = (Weight & mouse).fetch('weight')
+
+        plt.plot(dates, weights)
+        plt.axhline(self.get_weight_threshold(printout=False), color='r')
+        plt.title('M{} weight profile'.format(mouse['mouse_id']))
+        plt.xlabel('date')
+        plt.ylabel('weight [g]')
+
 @schema
 class Weight(dj.Manual):
     definition = """ # Table that stores the weights of individual mice
