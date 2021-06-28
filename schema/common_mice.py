@@ -74,9 +74,24 @@ class Mouse(dj.Manual):
       -> Licence                               # Link to project ID
       info          : varchar(1024)            # Additional information about this mouse
       """
-    #Todo: make cage number updateable, maybe in mouse GUI?
 
-
+    def get_weight_threshold(self, printout=True):
+        """Give the 85% weight threshold of a Mouse query either printed or returned."""
+        mouse = self.fetch1()
+        first_surg = Surgery() & mouse & "surgery_num=1"
+        if len(first_surg) == 1:
+            first_surg_date = first_surg.fetch1('surgery_date').strftime("%Y-%m-%d")
+            pre_op_weight = float((Weight() & mouse & "date_of_weight='{}'".format(first_surg_date)).fetch1('weight'))
+            if printout:
+                print("The 85% pre-surgery weight threshold of M{} is {:.1f}g.".format(mouse['mouse_id'],
+                                                                                       pre_op_weight * 0.85))
+            else:
+                return pre_op_weight
+        else:
+            if printout:
+                print("M{} does not have a recorded surgery. 85% threshold cannot be computed.".format(mouse['mouse_id']))
+            else:
+                return None
 @schema
 class Weight(dj.Manual):
     definition = """ # Table that stores the weights of individual mice
@@ -96,14 +111,10 @@ class Weight(dj.Manual):
         # Warn user if the 85% threshold of that mouse is crossed
         user_filt = "username='{}'".format(row['username'])
         mouse_filt = "mouse_id='{}'".format(row['mouse_id'])
-        first_surg = Surgery() & user_filt & mouse_filt & "surgery_num=1"
-        if len(first_surg) == 1:
-            first_surg_date = first_surg.fetch1('surgery_date').strftime("%Y-%m-%d")
-            pre_op_weight = float((Weight() & user_filt & mouse_filt &
-                             "date_of_weight='{}'".format(first_surg_date)).fetch1('weight'))  # Typecast from decimal to float to allow multiplication
-            if row['weight'] < pre_op_weight*0.85:
-                print("WARNING: The weight of M{} of {} is below the 85% pre-surgery threshold of {:.1f}!".format(
-                    row['mouse_id'], row['weight'], pre_op_weight*0.85))
+        weight_thresh = (Mouse() & user_filt & mouse_filt).get_weight_threshold(printout=False)
+        if (weight_thresh is not None) and (row['weight'] < weight_thresh):
+            print("WARNING: The weight of M{} of {} is below the 85% pre-surgery threshold of {:.1f}!".format(
+                row['mouse_id'], row['weight'], weight_thresh))
 
         # Todo: Warn user again if the 85% threshold has been crossed 3+ days ago without recovery
 
