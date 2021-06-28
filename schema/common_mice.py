@@ -78,10 +78,16 @@ class Mouse(dj.Manual):
       """
 
     def get_weight_threshold(self, printout=True, rel_threshold=0.85):
-        """Give the 85% weight threshold of a Mouse query either printed or returned."""
-        mouse = self.fetch1()
-        first_surg = Surgery() & mouse & "surgery_num=1"
+        """
+        Give the pre-surgery weight threshold of a single Mouse query.
+        :param printout: bool flag whether the result should be printed or returned as a float
+        :param rel_threshold: float, optional; threshold of weight (default 85%)
+        :return: rel_threshold fraction of the pre-surgery weight
+        """
+        mouse = self.fetch1()                                   # Get Mouse() entry (has to be single row)
+        first_surg = Surgery() & mouse & "surgery_num=1"        # Filter for first surgery
         if len(first_surg) == 1:
+            # Get date of first surgery and the weight from Weight() at that date
             first_surg_date = first_surg.fetch1('surgery_date').strftime("%Y-%m-%d")
             pre_op_weight = float((Weight() & mouse & "date_of_weight='{}'".format(first_surg_date)).fetch1('weight'))
             if printout:
@@ -97,23 +103,28 @@ class Mouse(dj.Manual):
                 return None
 
     def plot_weight(self, relative=False, rel_threshold=0.85):
-        """Plots the weights across time of a mouse. If relative is true, weights are given in % of pre-surgery weight"""
-        mice = self.fetch('KEY', as_dict=True)
+        """
+        Plots the weights across time of a Mouse query (one or many mice).
+        :param relative: bool flag whether weights should be plotted as % of pre-surgery weight
+        :param rel_threshold: float, optional; threshold of weight (default 85%)
+        """
+        mice = self.fetch('KEY', as_dict=True)          # Get primary keys of the current query for downstream querying
 
-        ax = plt.subplot()
+        ax = plt.subplot()                              # Initialize figure
 
         for mouse in mice:
-            dates = (Weight & mouse).fetch('date_of_weight')
+            dates = (Weight & mouse).fetch('date_of_weight')    # Get list of dates and weights for the current mouse
             weights = (Weight & mouse).fetch('weight')
+            # Get pre-surgery weight threshold of the current mouse
             thresh = float((self & mouse).get_weight_threshold(printout=False, rel_threshold=rel_threshold))
 
             if relative:
+                # If relative weights should be plotted, normalize weights against threshold
                 pre_surg = thresh / rel_threshold
                 ax.plot(dates, np.array(weights, dtype=float)/pre_surg, label='M{}'.format(mouse['mouse_id']))
                 ax.set_ylabel('weight [% of pre-surgery weight]')
             else:
                 ax.plot(dates, weights, label='M{}'.format(mouse['mouse_id']))
-
 
         if len(mice) == 1:
             if relative:
@@ -121,7 +132,7 @@ class Mouse(dj.Manual):
                 ax.axhline(1, linestyle='--', color='gray', alpha=0.5)
                 ax.set_title('M{} relative weight profile'.format(mice[0]['mouse_id']))
             else:
-                ax.axhline(thresh, color='r')
+                ax.axhline(thresh, color='r')           # If only one mouse was plotted, draw threshold lines
                 ax.set_title('M{} weight profile'.format(mice[0]['mouse_id']))
                 ax.set_ylabel('weight [g]')
         else:
@@ -134,7 +145,6 @@ class Mouse(dj.Manual):
                 ax.set_ylabel('weight [g]')
                 ax.set_title('Weight profiles')
                 ax.legend()
-
         ax.set_xlabel('date')
 
 
