@@ -3,6 +3,7 @@
 import datajoint as dj
 from dateutil.parser import parse
 import matplotlib.pyplot as plt
+import numpy as np
 
 schema = dj.schema('common_mice', locals(), create_tables=True)
 
@@ -94,17 +95,27 @@ class Mouse(dj.Manual):
             else:
                 return None
 
-    def plot_weight(self):
-
+    def plot_weight(self, relative=False):
+        """Plots the weights across time of a mouse. If relative is true, weights are given in % of pre-surgery weight"""
         mouse = self.fetch1()
         dates = (Weight & mouse).fetch('date_of_weight')
         weights = (Weight & mouse).fetch('weight')
+        thresh = float(self.get_weight_threshold(printout=False))
 
-        plt.plot(dates, weights)
-        plt.axhline(self.get_weight_threshold(printout=False), color='r')
-        plt.title('M{} weight profile'.format(mouse['mouse_id']))
-        plt.xlabel('date')
-        plt.ylabel('weight [g]')
+        if relative:
+            pre_surg = thresh / 0.85
+            plt.plot(dates, np.array(weights, dtype=float)/pre_surg)
+            plt.axhline(thresh/pre_surg, color='r')
+            plt.axhline(1, linestyle='--', color='gray', alpha=0.5)
+            plt.title('M{} relative weight profile'.format(mouse['mouse_id']))
+            plt.xlabel('date')
+            plt.ylabel('weight [% of pre-surgery weight]')
+        else:
+            plt.plot(dates, weights)
+            plt.axhline(thresh, color='r')
+            plt.title('M{} weight profile'.format(mouse['mouse_id']))
+            plt.xlabel('date')
+            plt.ylabel('weight [g]')
 
 @schema
 class Weight(dj.Manual):
