@@ -77,7 +77,7 @@ class Mouse(dj.Manual):
       info          : varchar(1024)            # Additional information about this mouse
       """
 
-    def get_weight_threshold(self, printout=True):
+    def get_weight_threshold(self, printout=True, rel_threshold=0.85):
         """Give the 85% weight threshold of a Mouse query either printed or returned."""
         mouse = self.fetch1()
         first_surg = Surgery() & mouse & "surgery_num=1"
@@ -85,37 +85,58 @@ class Mouse(dj.Manual):
             first_surg_date = first_surg.fetch1('surgery_date').strftime("%Y-%m-%d")
             pre_op_weight = float((Weight() & mouse & "date_of_weight='{}'".format(first_surg_date)).fetch1('weight'))
             if printout:
-                print("The 85% pre-surgery weight threshold of M{} is {:.1f}g.".format(mouse['mouse_id'],
-                                                                                       pre_op_weight * 0.85))
+                print("The {}% pre-surgery weight threshold of M{} is {:.1f}g.".format(rel_threshold, mouse['mouse_id'],
+                                                                                       pre_op_weight * rel_threshold))
             else:
                 return pre_op_weight*0.85
         else:
             if printout:
-                print("M{} does not have a recorded surgery. 85% threshold cannot be computed.".format(mouse['mouse_id']))
+                print("M{} does not have a recorded surgery. {}% threshold cannot "
+                      "be computed.".format(mouse['mouse_id'], rel_threshold))
             else:
                 return None
 
-    def plot_weight(self, relative=False):
+    def plot_weight(self, relative=False, rel_threshold=0.85):
         """Plots the weights across time of a mouse. If relative is true, weights are given in % of pre-surgery weight"""
-        mouse = self.fetch1()
-        dates = (Weight & mouse).fetch('date_of_weight')
-        weights = (Weight & mouse).fetch('weight')
-        thresh = float(self.get_weight_threshold(printout=False))
+        mice = self.fetch('KEY', as_dict=True)
 
-        if relative:
-            pre_surg = thresh / 0.85
-            plt.plot(dates, np.array(weights, dtype=float)/pre_surg)
-            plt.axhline(thresh/pre_surg, color='r')
-            plt.axhline(1, linestyle='--', color='gray', alpha=0.5)
-            plt.title('M{} relative weight profile'.format(mouse['mouse_id']))
-            plt.xlabel('date')
-            plt.ylabel('weight [% of pre-surgery weight]')
+        ax = plt.subplot()
+
+        for mouse in mice:
+            dates = (Weight & mouse).fetch('date_of_weight')
+            weights = (Weight & mouse).fetch('weight')
+            thresh = float((self & mouse).get_weight_threshold(printout=False, rel_threshold=rel_threshold))
+
+            if relative:
+                pre_surg = thresh / rel_threshold
+                ax.plot(dates, np.array(weights, dtype=float)/pre_surg, label='M{}'.format(mouse['mouse_id']))
+                ax.set_ylabel('weight [% of pre-surgery weight]')
+            else:
+                ax.plot(dates, weights, label='M{}'.format(mouse['mouse_id']))
+
+
+        if len(mice) == 1:
+            if relative:
+                ax.axhline(rel_threshold, color='r')
+                ax.axhline(1, linestyle='--', color='gray', alpha=0.5)
+                ax.set_title('M{} relative weight profile'.format(mice[0]['mouse_id']))
+            else:
+                ax.axhline(thresh, color='r')
+                ax.set_title('M{} weight profile'.format(mice[0]['mouse_id']))
+                ax.set_ylabel('weight [g]')
         else:
-            plt.plot(dates, weights)
-            plt.axhline(thresh, color='r')
-            plt.title('M{} weight profile'.format(mouse['mouse_id']))
-            plt.xlabel('date')
-            plt.ylabel('weight [g]')
+            if relative:
+                ax.axhline(rel_threshold, color='r')
+                ax.axhline(1, linestyle='--', color='gray', alpha=0.5)
+                ax.set_title('Relative weight profiles')
+                ax.legend()
+            else:
+                ax.set_ylabel('weight [g]')
+                ax.set_title('Weight profiles')
+                ax.legend()
+
+        ax.set_xlabel('date')
+
 
 @schema
 class Weight(dj.Manual):
