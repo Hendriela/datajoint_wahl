@@ -12,7 +12,7 @@ login.connect()
 import datajoint as dj
 from schema import common_exp as exp
 from schema import common_mice as mice
-from schema import common_img as img
+# from schema import common_img as img
 from hheise_scripts import util
 
 from datetime import datetime, timedelta
@@ -109,7 +109,8 @@ class VRSession(dj.Imported):
 
         # First, insert session information into the VRSession table
         self.insert_vr_info(key)
-        self.populate_trials(key)
+
+        # self.populate_trials(key)
 
     def insert_vr_info(self, key):
         """Fills VRSession table with basic info about the session, mainly from Excel file"""
@@ -145,11 +146,16 @@ class VRSession(dj.Imported):
         new_key['condition_switch'] = note_dict['switch']
 
         # Check if this is an imaging session (session has to be inserted into hheise_img.Scan() first)
-        if len(img.Scan & key).fetch() == 1:
-            new_key['imaging_session'] = 1
-        else:
-            new_key['imaging_session'] = 0
+        # if len(img.Scan & key).fetch() == 1:
+        #     new_key['imaging_session'] = 1
+        # else:
+        #     new_key['imaging_session'] = 0
+        new_key['imaging_session'] = 0
 
+        # Insert final dict into the table
+        self.insert1(new_key)
+
+        ### FILL VRLOG INFO
         # Get filename of this session's LOG file (path is relative to the session directory)
         log_name = glob(os.path.join(login.get_neurophys_data_directory(),
                                      (exp.Session & key).fetch1('session_path'),
@@ -161,11 +167,9 @@ class VRSession(dj.Imported):
             raise Warning('{} LOG files found for M{} session {}!'.format(len(log_name), mouse['mouse_id'], key['day']))
         else:
             # Insert the filename (without path) into the responsible table
-            VRLogFile.insert1(row=dict(key, log_filename=os.path.basename(log_name[0])))
-            VRLog.populate()                        # Load the LOG file into the other table
-
-        # Insert final dict into the table
-        self.insert1(new_key)
+            row_dict = dict(key, log_filename=os.path.basename(log_name[0]))
+            VRLogFile.insert1(row=row_dict)
+            VRLog.make(self=VRLog, key=row_dict)     # Load the LOG file into the other table
 
     def populate_trials(self, key):
         """
@@ -520,7 +524,9 @@ class VRLog(dj.Imported):
     definition = """ # Processed LOG data
     -> VRLogFile
     ---
-    log                 : longblob        # np.array of imported LOG data
+    log_time            : longblob          # np.array of time stamps (datetime64[ns])
+    log_trial           : longblob          # np.array of trial numbers (int)
+    log_event           : longblob          # np.array of event log (str)
     """
 
     def make(self, key):
@@ -537,12 +543,19 @@ class VRLog(dj.Imported):
         if log_length != tab_length:
             raise Warning('Session {}:\nTrack length {} in LOG file does not correspond to length {} in '
                           'database.'.format(key, log_length, tab_length))
-        if log_mouse != key['mouse']:
+        if log_mouse != key['mouse_id']:
             raise Warning('Session {}: Mouse ID M{} in LOG file does not correspond to ID in '
-                          'database M{}'.format(key['day'], log_mouse, key['mouse']))
+                          'database M{}'.format(key['day'], log_mouse, key['mouse_id']))
 
-        key['log'] = log
-        self.insert1(key)
+        # Remove "log_filename" keyword that is not needed for this table (from an untouched copy of 'key')
+        insert_dict = dict(key)
+        insert_dict.pop('log_filename')
+
+        # Parse fields as separate np.arrays
+        insert_dict['log_time'] = np.array(log['Date_Time'], dtype=str)  # str because DJ doesnt like datetime[ns]
+        insert_dict['log_trial'] = np.array(log['Trial'])
+        insert_dict['log_event'] = np.array(log['Event'])
+        self.insert1(insert_dict, allow_direct_insert=True)
 
 
 @schema
@@ -559,3 +572,11 @@ class Behavior(dj.Imported):
     valve               : longblob          # 1d array with valve openings (reward) sampled every 0.5 ms
     """
     #todo: Try to reduce sampling rate to reduce file sizes?
+
+@schema
+class DateTimeTest(dj.Manual):
+    definition = """ # Processed and merged TCP, TDT and Encoder data
+    bla                 : int
+    ---
+    tyme                : datetime
+    """
