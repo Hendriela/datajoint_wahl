@@ -102,11 +102,12 @@ class Mouse(dj.Manual):
             else:
                 return None
 
-    def plot_weight(self, relative=False, rel_threshold=0.85):
+    def plot_weight(self, relative=False, rel_threshold=0.85, show_surgeries=False):
         """
         Plots the weights across time of a Mouse query (one or many mice).
         :param relative: bool flag whether weights should be plotted as % of pre-surgery weight
         :param rel_threshold: float, optional; threshold of weight (default 85%)
+        :param show_surgeries: bool float whether surgeries should be shown as vertical lines
         """
         mice = self.fetch('KEY', as_dict=True)          # Get primary keys of the current query for downstream querying
 
@@ -125,6 +126,15 @@ class Mouse(dj.Manual):
                 ax.set_ylabel('weight [% of pre-surgery weight]')
             else:
                 ax.plot(dates, weights, label='M{}'.format(mouse['mouse_id']))
+
+        # Right now, only the surgeries of the last mouse will be shown, assuming that all queried mice had the same
+        # surgery dates. Maybe find a solution later to change that.
+        if show_surgeries:
+            trans = ax.get_xaxis_transform()
+            surg_date, surg_type = (Surgery & mouse).fetch('surgery_date', 'surgery_type')
+            for i in range(len(surg_date)):
+                ax.axvline(surg_date[i], color='g')
+                ax.text(surg_date[i], 0.03, surg_type[i][:11]+'...', transform=trans)
 
         if len(mice) == 1:
             if relative:
