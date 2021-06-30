@@ -112,6 +112,7 @@ class Mouse(dj.Manual):
         mice = self.fetch('KEY', as_dict=True)          # Get primary keys of the current query for downstream querying
 
         ax = plt.subplot()                              # Initialize figure
+        surg_list = []
 
         for mouse in mice:
             dates = (Weight & mouse).fetch('date_of_weight')    # Get list of dates and weights for the current mouse
@@ -127,14 +128,21 @@ class Mouse(dj.Manual):
             else:
                 ax.plot(dates, weights, label='M{}'.format(mouse['mouse_id']))
 
-        # Right now, only the surgeries of the last mouse will be shown, assuming that all queried mice had the same
-        # surgery dates. Maybe find a solution later to change that.
+            if show_surgeries:
+                # Get surgeries from the current mouse and add any new surgeries to the list
+                surg_date, surg_type = (Surgery & mouse).fetch('surgery_date', 'surgery_type')
+                for curr_date, typ in zip(surg_date, surg_type):
+                    curr_date = curr_date.date()            # remove time information to combine same-day surgeries
+                    if (curr_date, typ) not in surg_list:
+                        surg_list.append((curr_date, typ))
+
+        # All unique surgeries of the plotted mice will be shown
         if show_surgeries:
             trans = ax.get_xaxis_transform()
-            surg_date, surg_type = (Surgery & mouse).fetch('surgery_date', 'surgery_type')
-            for i in range(len(surg_date)):
-                ax.axvline(surg_date[i], color='g')
-                ax.text(surg_date[i], 0.03, surg_type[i][:11]+'...', transform=trans)
+            for curr_surg in surg_list:
+                ax.axvline(curr_surg[0], color='g')
+                ax.text(curr_surg[0], 0.99, curr_surg[1][:11]+'...', transform=trans, rotation=-90,
+                        ha='left', va='top')
 
         if len(mice) == 1:
             if relative:
