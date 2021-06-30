@@ -157,11 +157,13 @@ class Mouse(dj.Manual):
             if relative:
                 ax.axhline(rel_threshold, color='r')
                 ax.axhline(1, linestyle='--', color='gray', alpha=0.5)
-                ax.set_title('Relative weight profiles')
+                # ignore "username" restriction at index 0
+                ax.set_title('Relative weight profiles of {}'.format(self.restriction[1:]))
                 ax.legend()
             else:
                 ax.set_ylabel('weight [g]')
-                ax.set_title('Weight profiles')
+                # ignore "username" restriction at index 0
+                ax.set_title('Weight profiles of {}'.format(self.restriction[1:]))
                 ax.legend()
         ax.set_xlabel('date')
 
