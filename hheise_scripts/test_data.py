@@ -30,8 +30,9 @@ def change_dict(dic):
 
 change_dict(test_dict)
 
-mouse = (common_mice.Mouse() & 'username="hheise"' & "mouse_id=85").fetch1()
-(common_mice.Mouse() & 'username="hheise"' & "mouse_id=91").get_weight_threshold()
+mouse = (common_mice.Mouse() & 'username="hheise"' & "mouse_id=81").fetch()
+mice = (common_mice.Mouse() & 'username="hheise"' & "batch=7" & "sex='F'").fetch('KEY', as_dict=True)
+(common_mice.Mouse() & 'username="hheise"' & "batch=7").get_weight_threshold()
 
 key = {'username': 'hheise', 'mouse_id': 81, 'day': '2021-06-17', 'session_num': 1, 'log_filename': 'TDT LOG_20210617_141323.txt'}
 insert_dict = dict(key)
