@@ -11,6 +11,7 @@ Adrian 2019-08-16
 To store the password on your computer, run the command
 > keyring.set_password('datajoint_user', 'your_username', 'your_password')
 once on each machine.
+This has to be the same password you used when registering at the MySQL database!
 
 Adapted by Hendrik 2021-05-04
 """
@@ -31,6 +32,7 @@ def get_password():
     """Return password"""
     # Before using DataJoint for the first time on a computer, store your password with
     # > keyring.set_password('datajoint_user', 'your_username', 'your_password')
+    # This has to be the same password you used when registering at the MySQL database!
     return keyring.get_password('datajoint_user', get_user())
 
 def connect():
