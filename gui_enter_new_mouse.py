@@ -61,13 +61,19 @@ I_WIDTH = S_WIDTH
 # New weight box
 W_LEFT = I_LEFT
 W_TOP = M_TOP
-W_HEIGHT = 2*ROW
+W_HEIGHT = ROW + 10
 W_WIDTH = I_WIDTH
+
+# Post-OP care box
+P_LEFT = I_LEFT
+P_TOP = M_TOP + W_HEIGHT + 10
+P_HEIGHT = W_HEIGHT
+P_WIDTH = I_WIDTH
 
 # Sacrificed (euthanized) box
 E_LEFT = W_LEFT
-E_TOP = M_TOP + W_HEIGHT + 10
-E_HEIGHT = M_HEIGHT - (W_HEIGHT + 10)
+E_TOP = M_TOP + W_HEIGHT + P_HEIGHT + 20
+E_HEIGHT = M_HEIGHT - (W_HEIGHT + P_HEIGHT + 20)
 E_WIDTH = W_WIDTH
 
 # Load mouse box
@@ -142,6 +148,7 @@ licences = common_mice.Licence().fetch('licence_id')
 
 # Surgery info
 substances = common_mice.Substance().fetch('substance_name')
+care_substances = common_mice.CareSubstance().fetch('care_name')
 types = common_mice.SurgeryType().fetch('surgery_type')
 
 # =============================================================================
@@ -353,7 +360,7 @@ class window(wx.Frame):
         # Right upper box: Enter new weight (1x2 fields)
         # =============================================================================
 
-        weight_box = wx.StaticBox(panel, label='NEW WEIGHT', pos=(W_LEFT - 20, W_TOP - 30), size=(W_WIDTH, W_HEIGHT))
+        weight_box = wx.StaticBox(panel, label='NEW WEIGHT', pos=(W_LEFT - 20, W_TOP - 20), size=(W_WIDTH, W_HEIGHT))
         weight_box.SetForegroundColour(BOX_TITLE_COLOR)
 
         # Date of weight (default is current day)
@@ -374,10 +381,47 @@ class window(wx.Frame):
         self.Bind(wx.EVT_BUTTON, self.event_submit_weight, self.submit_weight_button)
 
         # =============================================================================
+        # Right upper middle box: Enter new post-op care (1x2 fields)
+        # =============================================================================
+
+        weight_box = wx.StaticBox(panel, label='NEW POST-OP CARE', pos=(P_LEFT - 20, P_TOP - 20), size=(P_WIDTH, P_HEIGHT))
+        weight_box.SetForegroundColour(BOX_TITLE_COLOR)
+
+        # Date of administration (default is current day)
+        text = wx.StaticText(panel, label="Date:", pos=(P_LEFT, P_TOP))
+        text.SetFont(bold_font)
+        self.doa = wx.TextCtrl(panel, pos=(P_LEFT, P_TOP + 20), size=(BOX_WIDTH/2, BOX_HEIGHT))
+        self.doa.SetValue(current_day)
+
+        # Type of substance
+        wx.StaticText(panel, label="Substance:", pos=(P_LEFT + 0.5* COL, P_TOP))
+        self.care_substance = wx.ComboBox(panel, choices=care_substances, style=wx.CB_READONLY,
+                                          pos=(P_LEFT + 0.5* COL, P_TOP + 20), size=(BOX_WIDTH/2 + 30, BOX_HEIGHT))
+        item = self.care_substance.FindString('Carprofen (s.c.)')
+        self.care_substance.SetSelection(item)
+
+        # Injected volume
+        wx.StaticText(panel, label="Volume [\u03BCL]:", pos=(P_LEFT + COL+30, P_TOP))
+        self.care_vol = wx.TextCtrl(panel, pos=(P_LEFT + COL+30, P_TOP + 20), size=(BOX_WIDTH/2-10, BOX_HEIGHT))
+        self.care_vol.SetValue('80')
+
+        # Frequency
+        wx.StaticText(panel, label="Inj/day:", pos=(P_LEFT + COL+120, P_TOP))
+        size = (W_LEFT + COL + BOX_WIDTH)-(P_LEFT+COL+120)
+        self.freq = wx.TextCtrl(panel, pos=(P_LEFT+COL+120, P_TOP + 20), size=(size, BOX_HEIGHT))
+        self.freq.SetValue('1')
+
+        # Submit weight button
+        self.submit_care_button = wx.Button(panel, label="Add new care",
+                                                 pos=(P_LEFT + 2 * COL, P_TOP),
+                                                 size=(BUTTON_WIDTH, BUTTON_HEIGHT-5))
+        self.Bind(wx.EVT_BUTTON, self.event_submit_care, self.submit_care_button)
+
+        # =============================================================================
         # Right middle box: Enter new sacrificed mouse (1x2 fields + notes)
         # =============================================================================
 
-        sac_box = wx.StaticBox(panel, label='MOUSE EUTHANIZED', pos=(E_LEFT - 20, E_TOP - 30), size=(E_WIDTH, E_HEIGHT))
+        sac_box = wx.StaticBox(panel, label='MOUSE EUTHANIZED', pos=(E_LEFT - 20, E_TOP - 20), size=(E_WIDTH, E_HEIGHT))
         sac_box.SetForegroundColour(BOX_TITLE_COLOR)
 
         # Date of weight (default is current day)
@@ -392,7 +436,7 @@ class window(wx.Frame):
         # Reason
         wx.StaticText(panel, label="Reason:", pos=(E_LEFT, E_TOP + ROW - 10))
         self.reason = wx.TextCtrl(panel, value="End of experiment", style=wx.TE_MULTILINE,
-                                  pos=(E_LEFT, E_TOP + ROW + 10), size=(COL + BOX_WIDTH, 50))
+                                  pos=(E_LEFT, E_TOP + ROW + 10), size=(COL + BOX_WIDTH, 30))
 
         # Submit euthanasia button
         self.submit_euthanasia_button = wx.Button(panel, label="Add euthanasia",
@@ -594,6 +638,26 @@ class window(wx.Frame):
         # Insert into database and save backup YAML
         identifier = 'weight_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), self.dow.GetValue())
         self.safe_insert(common_mice.Weight(), weight_dict, identifier, REL_BACKUP_PATH)
+
+    def event_submit_care(self, event):
+        """Enter a new care administration for the currently selected mouse"""
+
+        # Check if a mouse was loaded before submitting a weight
+        if self.curr_mouse.GetValue() == 'None':
+            self.status_text.write('Load a mouse before submitting a care administration!')
+            return
+
+        # Get data from relevant fields
+        care_dict = dict(username=investigator,
+                         mouse_id=self.curr_mouse.GetValue(),
+                         date_of_care=self.doa.GetValue(),
+                         care_name=self.care_substance.GetValue(),
+                         care_volume=int(self.care_vol.GetValue()),
+                         care_frequency=int(self.freq.GetValue()))
+
+        # Insert into database and save backup YAML
+        identifier = 'care_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), self.doa.GetValue())
+        self.safe_insert(common_mice.PainManagement(), care_dict, identifier, REL_BACKUP_PATH)
 
     def event_submit_euthanasia(self, event):
         """Move the currently selected mouse to the Sacrificed table"""

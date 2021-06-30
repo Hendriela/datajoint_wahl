@@ -186,19 +186,44 @@ class Weight(dj.Manual):
 
 
 @schema
+class CareSubstance(dj.Lookup):
+    definition = """  # Different substances administered for pain management and post-OP care
+    care_name       : varchar(128)           # Unique name of the substance
+    ---
+    role            : varchar(64)            # Type of substance
+    dosage          : tinyint                # dosage in mg/kg body weight
+    concentration   : tinyint                # concentration of injection in mg/mL
+    """
+
+    contents = [
+        ['Carprofen (s.c.)', 'analgesic', 5, 20],
+        ['Paracetamol (water)', 'analgesic', 0, 2],
+        ['Baytril (s.c.)', 'antibiotic', 10, 1],
+        ['Baytril (water)', 'antibiotic', 0, 0.1]
+    ]
+
+
+@schema
+class PainManagement(dj.Manual):
+    definition = """ # Pain management records, especially for post-OP care
+    -> Mouse
+    date_of_care        : date              # Date of care application (year-month-day)
+    ---
+    -> CareSubstance
+    care_volume = 0     : tinyint           # volume of injection in uL (0 if administered through drinking water)
+    care_frequency      : tinyint           # Number of administration per day (1 or 2)
+    """
+
+
+@schema
 class Sacrificed(dj.Manual):
     definition = """ # Table to keep track of euthanized mice
     -> Mouse
     ---
-    date_of_sacrifice   : date           # Date of sacrifice (year-month-day)
-    perfused            : tinyint        # 0 for no, 1 for yes (brain fixed and kept)
-    reason              : varchar(1024)  # Comments
+    date_of_sacrifice   : date              # Date of sacrifice (year-month-day)
+    perfused            : tinyint           # 0 for no, 1 for yes (brain fixed and kept)
+    reason              : varchar(1024)     # Comments
     """
-
-    # example content (added with insert statement)
-    # contents = [
-    #     ['Brit', '2019-06-04', 'Window was not clear anymore'],
-    # ]
 
 
 @schema
@@ -300,7 +325,7 @@ class Surgery(dj.Manual):
 
 @schema
 class Injection(dj.Manual):
-    definition = """ # Holds injection data for each surgery
+    definition = """ # Injections performed during surgery
     -> Surgery
     injection_num       : tinyint        # Injection number for this surgery, start counting from 1
     ---
