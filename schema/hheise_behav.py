@@ -24,6 +24,12 @@ import pandas as pd
 
 schema = dj.schema('hheise_behav', locals(), create_tables=True)
 
+# Hard-coded constant properties of encoder wheel
+SAMPLE_RATE = 0.008                                 # sample rate of encoder in s
+D_WHEEL = 10.5                                      # wheel diameter in cm
+N_TICKS = 1436                                      # number of ticks in a full wheel rotation
+DEG_DIST = (D_WHEEL * np.pi) / N_TICKS              # distance in cm the band moves for each encoder tick
+
 @schema
 class BatchData(dj.Manual):
     definition = """ # Filename of the unprocessed LOG file for each session
@@ -168,7 +174,7 @@ class VRSession(dj.Imported):
         else:
             # Insert the filename (without path) into the responsible table
             row_dict = dict(key, log_filename=os.path.basename(log_name[0]))
-            VRLogFile.insert1(row=row_dict)
+            VRLogFile.insert1(row=row_dict, skip_duplicates=True)
             VRLog.make(self=VRLog, key=row_dict)     # Load the LOG file into the other table
 
     def populate_trials(self, key):
@@ -230,10 +236,6 @@ class VRSession(dj.Imported):
             if pos_file is None or trig_file is None:
                 print(f'Could not find all three files for timestamp {timestamp}!')
                 return
-            # Insert name of behavior files into the database
-            RawEncFile.insert1(row=dict(key, trial_id=counter, enc_filename=os.path.basename(enc_file)))
-            RawTCPFile.insert1(row=dict(key, trial_id=counter, enc_filename=os.path.basename(pos_file)))
-            RawTDTFile.insert1(row=dict(key, trial_id=counter, enc_filename=os.path.basename(trig_file)))
 
             trial_key = dict(key, part=counter)
             frame_count = None
@@ -262,30 +264,34 @@ class VRSession(dj.Imported):
                 np.savetxt(file_path, merge, delimiter='\t',
                            fmt=['%.5f', '%.3f', '%1i', '%1i', '%1i', '%.2f', '%1i'],
                            header='Time\tVR pos\tlicks\tframe\tencoder\tcm/s\treward')
+
+                # Insert name of behavior files into the database Todo not basename, but including trial folder if imaging
+                RawEncFile.insert1(row=dict(key, trial_id=counter, enc_filename=os.path.basename(enc_file)))
+                RawTCPFile.insert1(row=dict(key, trial_id=counter, enc_filename=os.path.basename(pos_file)))
+                RawTDTFile.insert1(row=dict(key, trial_id=counter, enc_filename=os.path.basename(trig_file)))
+
                 if verbose:
                     print(f'Done! \nSaving merged file to {file_path}...\n')
 
             else:
                 print(f'Skipped trial {enc_file}, please check!')
 
+
+
             counter += 1
         print('Done!\n')
 
-    def align_behavior_files(self, trial_key, enc_path, pos_path, trig_path, imaging=False, frame_count=None,
-                             enc_unit='speed', verbose=False):
+    def align_behavior_files(self, trial_key, enc_path, pos_path, trig_path, imaging=False, frame_count=None):
         """
-        Main function that aligns behavioral data from three text files to a common master time frame provided by LabView.
-        Data are re-sampled at the rate of the data type with the highest sampling rate (TDT, 2 kHz). Missing values of data
-        with lower sampling rate are filled in based on their last available value.
+        Main function that aligns behavioral data from three text files to a common master time frame provided by
+        LabView. Data are re-sampled at the rate of the encoder (125 Hz), as the encoder is a summed data collection and
+        is difficult to resample.
         :param enc_path: str, path to the Encoder.txt file (running speed)
         :param pos_path: str, path to the TCP.txt file (VR position)
         :param trig_path: str, path to the TDT.txt file (licking and frame trigger)
         :param imaging: bool flag whether the behavioral data is accompanied by an imaging movie
         :param frame_count: int, frame count of the imaging movie (if imaging=True)
-        :param enc_unit: str, if 'speed', encoder data is translated into cm/s; otherwise raw encoder data in
-                         rotation [degrees] / sample window (8 ms) is saved
-        :param verbose: bool flag whether status updates should be printed into the console (progress bar not affected)
-        :return: merge, np.array with columns [time stamp - position - licks - frame - encoder]
+        :return: merge, np.array with columns '', 'position', 'licking', 'trigger', 'encoder', 'speed', 'water'
         """
 
         pd.options.mode.chained_assignment = None  # Disable false positive SettingWithCopyWarning
@@ -442,25 +448,33 @@ class VRSession(dj.Imported):
         datasets = ['trigger', 'licking', 'encoder', 'position']
         df_list = []
         for name, dataset in zip(datasets, fixed_times):
-            df = pd.DataFrame(dataset[:, 1], index=dataset[:, 0], columns=[name])
+            df = pd.DataFrame(dataset[:, 1], index=dataset[:, 0], columns=[name], dtype=float)
             df_list.append(df)
 
-        # Serially merge dataframes by the time stamp of the trigger (highest sampling rate)
-        merge = pd.merge_asof(df_list[0], df_list[1], left_index=True, right_index=True)
-        merge = pd.merge_asof(merge, df_list[2], left_index=True, right_index=True)
-        merge = pd.merge_asof(merge, df_list[3], left_index=True, right_index=True)
+        # Resample data to encoder sampling rate (125 Hz), as encoder data is difficult to extrapolate
+        df_list[0] = df_list[0].resample("8L").max().astype(int)             # 1 if any of grouped values are 1 avoids loosing frame
+        df_list[1] = (df_list[1].resample("8L").mean() > 0.5).astype(int)    # 1 if half of grouped values are 1
+        df_list[2] = df_list[2].resample("8L").sum()                         # sum up encoder values as it is a summed rotation value
+        df_list[3] = df_list[3].resample("8L").ffill()                       # Forward fill missing position values
 
+        # Serially merge dataframes sorted by earliest data point (usually trigger) to not miss any data
+        data_times = np.argsort(start_times)
+        merge = pd.merge_asof(df_list[data_times[0]], df_list[data_times[1]], left_index=True, right_index=True)
+        merge = pd.merge_asof(merge, df_list[data_times[2]], left_index=True, right_index=True)
+        merge = pd.merge_asof(merge, df_list[data_times[3]], left_index=True, right_index=True)
+
+        ### Get valve opening times from LOG file
         # Load LOG file TODO maybe make another boolean column with "being in reward zone"
-        log = (VRLog & trial_key).fetch1('log')
+        log = (VRLog & trial_key).get_dataframe()
         if log is not None:
             # Filter out bad lines if Datetime column could not be parsed
-            if log['Date_Time'].dtype == 'object':
-                log = log.loc[~np.isnan(log['Trial'])]
-                log['Date_Time'] = pd.to_datetime(log['Date_Time'])
+            if log['log_time'].dtype == 'object':
+                log = log.loc[~np.isnan(log['log_trial'])]
+                log['log_time'] = pd.to_datetime(log['log_time'])
             # Extract data for the current trial based on the first and last times of the trigger timestamps
-            trial_log = log.loc[(log['Date_Time'] > merge.index[0]) & (log['Date_Time'] < merge.index[-1])]
+            trial_log = log.loc[(log['log_time'] > merge.index[0]) & (log['log_time'] < merge.index[-1])]
             # Get times when the valve opened
-            water_times = trial_log.loc[trial_log['Event'].str.contains('Dev1/port0/line0-B'), 'Date_Time']
+            water_times = trial_log.loc[trial_log['log_event'].str.contains('Dev1/port0/line0-B'), 'log_time']
             # Initialize empty water column and set to '1' for every water valve opening timestamp
             merge['water'] = 0
             for water_time in water_times:
@@ -468,7 +482,7 @@ class VRSession(dj.Imported):
         else:
             merge['water'] = -1
 
-        # Delete rows before the first frame (dont delete anything if no frame trigger)
+        # Delete rows before the first frame (don't delete anything if no frame trigger)
         if merge['trigger'].sum() > 0:
             first_frame = merge.index[np.where(merge['trigger'] == 1)[0][0]]
         else:
@@ -484,16 +498,13 @@ class VRSession(dj.Imported):
         merge_filt['trigger'] = merge_filt['trigger'].astype(int)
         merge_filt['licking'] = merge_filt['licking'].astype(int)
         merge_filt['encoder'] = merge_filt['encoder'].astype(int)
+        merge_filt['water'] = merge_filt['water'].astype(int)
 
+        # TODO: How to deal with the encoder artifact of "catching up" ticks from the ITI?
         # translate encoder data into velocity [cm/s] if enc_unit = 'speed'
-        if enc_unit == 'speed':
-            sample_rate = 0.008  # sample rate of encoder in s (default 0.008 s or 8 ms)
-            d_wheel = 10.5  # wheel diameter in cm (default 10.5 cm)
-            n_ticks = 1436  # number of ticks in a full wheel rotation
-            deg_dist = (d_wheel * np.pi) / n_ticks  # distance in cm the band moves for each encoder tick
-            speed = -merge_filt.loc[:, 'encoder'] * deg_dist / sample_rate  # speed in cm/s for each sample
-            speed[speed == -0] = 0
-            merge_filt['speed'] = speed
+        speed = -merge_filt.loc[:, 'encoder'] * DEG_DIST / SAMPLE_RATE  # speed in cm/s for each sample
+        speed[speed == -0] = 0
+        merge_filt['speed'] = speed
 
         # check frame count again
         merge_trig = np.sum(merge_filt['trigger'])
@@ -502,8 +513,8 @@ class VRSession(dj.Imported):
             return None
 
         # transform back to numpy array for saving
-        time_passed = merge_filt.index - merge_filt.index[0]  # transfer timestamps to
-        seconds = np.array(time_passed.total_seconds())  # time change in seconds
+        time_passed = merge_filt.index - merge_filt.index[0]    # transfer timestamps to
+        seconds = np.array(time_passed.total_seconds())         # time change in seconds
         array_df = merge_filt[['position', 'licking', 'trigger', 'encoder', 'speed', 'water']]  # change column order
         array = np.hstack((seconds[..., np.newaxis], np.array(array_df)))  # combine both arrays
 
@@ -557,6 +568,11 @@ class VRLog(dj.Imported):
         insert_dict['log_event'] = np.array(log['Event'])
         self.insert1(insert_dict, allow_direct_insert=True)
 
+    def get_dataframe(self):
+        """Fetch LOG data of one session re-assembled as pandas DataFrame"""
+        return pd.DataFrame({'log_time': self.fetch1('log_time'),
+                             'log_trial': self.fetch1('log_trial'),
+                             'log_event': self.fetch1('log_event')})
 
 @schema
 class Behavior(dj.Imported):
@@ -572,11 +588,3 @@ class Behavior(dj.Imported):
     valve               : longblob          # 1d array with valve openings (reward) sampled every 0.5 ms
     """
     #todo: Try to reduce sampling rate to reduce file sizes?
-
-@schema
-class DateTimeTest(dj.Manual):
-    definition = """ # Processed and merged TCP, TDT and Encoder data
-    bla                 : int
-    ---
-    tyme                : datetime
-    """
