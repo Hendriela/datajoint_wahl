@@ -281,17 +281,18 @@ class SurgeryType(dj.Lookup):
 class Surgery(dj.Manual):
     definition = """ # Table to keep track of surgeries on mice
     -> Mouse
-    surgery_num         : tinyint        # Surgery number for this animal, start counting from 1
+    surgery_num                 : tinyint        # Surgery number for this animal, start counting from 1
     ---
-    surgery_date        : datetime       # Date and time of intervention (YYYY-MM-DD HH:MM:SS)
+    surgery_date                : datetime       # Date and time of intervention (YYYY-MM-DD HH:MM:SS)
     -> SurgeryType 
-    anesthesia          : varchar(2048)  # Type and dose of anesthesia used (e.g. 2 percent Isoflurane or Triple shot)
-    pre_op_weight       : decimal(3,1)   # Pre-op weight in grams
-    stroke_params       : varchar(2048)  # Stroke params such as illumination time, if applicable
-    duration            : smallint       # Approximate duration of intervention, in minutes
-    surgery_notes       : varchar(2048)  # Additional notes
+    anesthesia                  : varchar(2048)  # Type and dose of anesthesia used (e.g. 2 percent Isoflurane or Triple shot)
+    pre_op_weight               : decimal(3,1)   # Pre-op weight in grams
+    stroke_params               : varchar(2048)  # Stroke params such as illumination time, if applicable
+    duration                    : smallint       # Approximate duration of intervention, in minutes
+    surgery_notes               : varchar(2048)  # Additional notes
+    illumination_time=NULL      : tinyint        # Illumination time in minutes for photothrombotic strokes
     """
-
+    # TODO: rename stroke_params to illumination time, turn it into an integer
     def insert(self, rows, **kwargs):
         """Extend the insert method so that pre_op weights are automatically entered in Weight() table
         At the moment, only works if the rows are entered as dictionary data types

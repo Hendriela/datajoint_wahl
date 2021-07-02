@@ -281,14 +281,21 @@ class window(wx.Frame):
         self.anesthesia.SetValue(default_params['mice']['default_anesthesia'])
 
         # Pre-OP weight in grams (default is empty)
-        wx.StaticText(panel, label="Pre-OP weight (grams):", pos=(S_LEFT + COL, S_TOP + ROW))
+        wx.StaticText(panel, label="Pre-OP weight [grams]:", pos=(S_LEFT + COL, S_TOP + ROW))
         self.pre_op_weight = wx.TextCtrl(panel, pos=(S_LEFT + COL, S_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.pre_op_weight.SetValue('')
 
         # Duration
-        wx.StaticText(panel, label="Duration of surgery (min):", pos=(S_LEFT + 2 * COL, S_TOP + ROW))
-        self.duration = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL, S_TOP + ROW + 20), size=(BOX_WIDTH, BOX_HEIGHT))
+        wx.StaticText(panel, label="Duration of\nsurgery [min]:", pos=(S_LEFT + 2 * COL, S_TOP + ROW - 12))
+        self.duration = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL, S_TOP + ROW + 20), size=(BOX_WIDTH/2 - 2, BOX_HEIGHT))
         self.duration.SetValue('')
+
+        # Illumination time
+        wx.StaticText(panel, label="Stroke illumination\ntime [min]:",
+                      pos=(S_LEFT + 2 * COL + BOX_WIDTH/2 + 2, S_TOP + ROW - 12))
+        self.illumination = wx.TextCtrl(panel, pos=(S_LEFT + 2 * COL + BOX_WIDTH/2 + 2, S_TOP + ROW + 20),
+                                        size=(BOX_WIDTH/2, BOX_HEIGHT))
+        self.illumination.SetValue('')
 
         # Stroke parameters
         wx.StaticText(panel, label="Stroke parameters (if applicable):", pos=(S_LEFT, S_TOP + 2 * ROW))
@@ -326,7 +333,7 @@ class window(wx.Frame):
         self.substance.SetSelection(item)
 
         # Volume (default 0.3 uL)
-        wx.StaticText(panel, label="Injected volume (\u03BCL):", pos=(I_LEFT + 2 * COL, I_TOP))
+        wx.StaticText(panel, label="Injected volume [\u03BCL]:", pos=(I_LEFT + 2 * COL, I_TOP))
         self.volume = wx.TextCtrl(panel, pos=(I_LEFT + 2 * COL, I_TOP + 20), size=(BOX_WIDTH, BOX_HEIGHT))
         self.volume.SetValue(default_params['mice']['default_volume'])
 
@@ -586,6 +593,9 @@ class window(wx.Frame):
                          stroke_params=self.stroke_params.GetValue(),
                          duration=self.duration.GetValue(),
                          surgery_notes=self.surgery_notes.GetValue())
+        # Add illumination time only if it was provided, otherwise defaults to None
+        if len(self.illumination.GetValue()) > 0:
+            surg_dict['illumination_time'] = self.illumination.GetValue()
 
         # Todo: Ask user to overwrite if a weight on that day already exists (happens if a surgery was re-inserted)
         # Insert into database and save backup YAML
