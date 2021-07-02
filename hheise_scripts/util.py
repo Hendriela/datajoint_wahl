@@ -32,6 +32,7 @@ def numerical_sort(x):
 
 
 def make_yaml_backup(sess_dict):
+    """Create YAML backup file for Hendriks Session entries"""
     identifier = common_exp.Session().create_id(investigator_name=sess_dict['username'],
                                                 mouse_id=sess_dict['mouse_id'],
                                                 date=sess_dict['day'],
@@ -46,7 +47,6 @@ def make_yaml_backup(sess_dict):
 
 def get_autopath(info):
     """ Create automatic ABSOLUTE (with neurophys) session folder path based on the session_dict 'info'"""
-
     mouse = str(info['mouse_id'])
     batch = str((common_mice.Mouse & "username = '{}'".format(login.get_user())
                                    & "mouse_id = {}".format(mouse)).fetch1('batch'))
@@ -55,6 +55,12 @@ def get_autopath(info):
     path = os.path.join(login.get_neurophys_data_directory(),
                         "Batch" + batch, "M" + mouse, info['day'].replace('-', ''))
     return path
+
+
+def remove_session_path(key, path):
+    """Make absolute trial path relative to session directory"""
+    sess_path = os.path.join(login.get_neurophys_data_directory(), (common_exp.Session() & key).fetch1('session_path'))
+    return os.path.relpath(path, sess_path)
 
 
 def add_many_sessions(date, mice, block=None, switch=None, **attributes):
