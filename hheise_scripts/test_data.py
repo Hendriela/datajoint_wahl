@@ -44,9 +44,13 @@ hheise_behav.VRLog.insert1(insert_dict, allow_direct_insert=True)
 
 hheise_behav.VRSession() & key
 
-log = pd.read_csv(r'W:\Neurophysiology-Storage1\Wahl\Hendrik\PhD\Data\Batch7\M81\20210617\TDT LOG_20210617_141323.txt', sep='\t', parse_dates=[[0, 1]])
-time1= log['Date_Time'][0]
-hheise_behav.DateTimeTest.insert1({'bla':1, 'tyme':time1})
 
-time2 = (hheise_behav.DateTimeTest & 'bla=1').fetch1('tyme')
+enc_path = r'W:\Neurophysiology-Storage1\Wahl\Hendrik\PhD\Data\Batch7\M90\20210628\Encoder data20210628_113413.txt'
+pos_path = r'W:\Neurophysiology-Storage1\Wahl\Hendrik\PhD\Data\Batch7\M90\20210628\TCP read data20210628_113414.txt'
+trig_path = r'W:\Neurophysiology-Storage1\Wahl\Hendrik\PhD\Data\Batch7\M90\20210628\TDT TASK DIG-IN_20210628_113413.txt'
+key = dict(username='hheise', mouse_id=90, day='2021-06-28', session_num=1)
+self = (hheise_behav.VRLog & trial_key)
+log = pd.DataFrame({'log_time': self.fetch1('log_time'),
+              'log_trial': self.fetch1('log_trial'),
+               'log_event': self.fetch1('log_event')})
 

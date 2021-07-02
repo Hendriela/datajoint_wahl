@@ -602,15 +602,15 @@ class window(wx.Frame):
 
         # Get data from relevant fields
         inj_dict = dict(username=investigator,
-                         mouse_id=self.curr_mouse.GetValue(),
-                         surgery_num=int(self.surg_num.GetValue()),
-                         injection_num=int(self.inj_num.GetValue()),
-                         substance_name=self.substance.GetValue(),
-                         volume=self.volume.GetValue(),
-                         dilution=self.dilution.GetValue(),
-                         site=self.site.GetValue(),
-                         coordinates=self.coordinates.GetValue(),
-                         injection_notes=self.inj_notes.GetValue())
+                        mouse_id=self.curr_mouse.GetValue(),
+                        surgery_num=int(self.surg_num.GetValue()),
+                        injection_num=int(self.inj_num.GetValue()),
+                        substance_name=self.substance.GetValue(),
+                        volume=self.volume.GetValue(),
+                        dilution=self.dilution.GetValue(),
+                        site=self.site.GetValue(),
+                        coordinates=self.coordinates.GetValue(),
+                        injection_notes=self.inj_notes.GetValue())
 
         # Insert into database and save backup YAML
         identifier = 'injection_{}_M{:03d}_{}_{}'.format(investigator, int(self.mouse_id.GetValue()),
