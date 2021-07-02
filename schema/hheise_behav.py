@@ -24,11 +24,6 @@ import pandas as pd
 
 schema = dj.schema('hheise_behav', locals(), create_tables=True)
 
-# Hard-coded constant properties of encoder wheel
-SAMPLE_RATE = 0.008                                 # sample rate of encoder in s
-D_WHEEL = 10.5                                      # wheel diameter in cm
-N_TICKS = 1436                                      # number of ticks in a full wheel rotation
-DEG_DIST = (D_WHEEL * np.pi) / N_TICKS              # distance in cm the band moves for each encoder tick
 
 @schema
 class BatchData(dj.Manual):
@@ -37,6 +32,7 @@ class BatchData(dj.Manual):
     ---
     behav_excel         : varchar(128)      # relative filepath (from neurophys data) of the behavior_evaluation Excel
     """
+
 
 @schema
 class CorridorPattern(dj.Lookup):
@@ -53,6 +49,7 @@ class CorridorPattern(dj.Lookup):
         ['novel', [[9, 19], [34, 44], [59, 69], [84, 94]]]
     ]
 
+
 @schema
 class RawTCPFile(dj.Manual):
     definition = """ # Filename of the unprocessed TCP (VR position) file for each trial
@@ -60,6 +57,7 @@ class RawTCPFile(dj.Manual):
     ---
     tcp_filename        : varchar(128)      # filename of the TCP file
     """
+
 
 @schema
 class RawTDTFile(dj.Manual):
@@ -69,6 +67,7 @@ class RawTDTFile(dj.Manual):
     tdt_filename        : varchar(128)      # filename of the TDT file
     """
 
+
 @schema
 class RawEncFile(dj.Manual):
     definition = """ # Filename of the unprocessed Encoder (running speed) file for each trial
@@ -77,13 +76,67 @@ class RawEncFile(dj.Manual):
     enc_filename        : varchar(128)      # filename of the Enc file
     """
 
+
+@schema
+class VRLogFile(dj.Manual):
+    definition = """ # Filename of the unprocessed LOG file for each session
+    -> VRSession
+    ---
+    log_filename        : varchar(128)      # filename of the LOG file (should be inside the session directory)
+    """
+
+
+@schema
+class VRLog(dj.Imported):
+    definition = """ # Processed LOG data
+    -> VRLogFile
+    ---
+    log_time            : longblob          # np.array of time stamps (datetime64[ns])
+    log_trial           : longblob          # np.array of trial numbers (int)
+    log_event           : longblob          # np.array of event log (str)
+    """
+
+    def make(self, key):
+        # Load LOG file
+        log = pd.read_csv(os.path.join(login.get_neurophys_data_directory(),
+                                       (exp.Session & key).fetch1('session_path'), key['log_filename']),
+                          sep='\t', parse_dates=[[0, 1]])
+
+        # Validate mouse and track length info
+        line = log['Event'].loc[log['Event'].str.contains("VR Task start, Animal:")].values[0]
+        log_length = int(line.split('_')[1])
+        log_mouse = int(line.split('_')[0].split()[-1][1:])
+        tab_length = (VRSession & key).fetch1('length')
+        if log_length != tab_length:
+            raise Warning('Session {}:\nTrack length {} in LOG file does not correspond to length {} in '
+                          'database.'.format(key, log_length, tab_length))
+        if log_mouse != key['mouse_id']:
+            raise Warning('Session {}: Mouse ID M{} in LOG file does not correspond to ID in '
+                          'database M{}'.format(key['day'], log_mouse, key['mouse_id']))
+
+        # Remove "log_filename" keyword that is not needed for this table (from an untouched copy of 'key')
+        insert_dict = dict(key)
+        insert_dict.pop('log_filename')
+
+        # Parse fields as separate np.arrays
+        insert_dict['log_time'] = np.array(log['Date_Time'], dtype=str)  # str because DJ doesnt like datetime[ns]
+        insert_dict['log_trial'] = np.array(log['Trial'])
+        insert_dict['log_event'] = np.array(log['Event'])
+        self.insert1(insert_dict, allow_direct_insert=True)
+
+    def get_dataframe(self):
+        """Fetch LOG data of one session re-assembled as pandas DataFrame"""
+        return pd.DataFrame({'log_time': self.fetch1('log_time'),
+                             'log_trial': self.fetch1('log_trial'),
+                             'log_event': self.fetch1('log_event')})
+
 @schema
 class VRSession(dj.Imported):
     definition = """ # Info about the VR Session
     -> exp.Session
     ---
     imaging_session     : tinyint           # bool flag whether imaging was performed during this session
-    condition_switch    : longblob          # List of ints indicating trial numbers at which the condition switched
+    condition_switch    : longblob          # List of ints indicating the first trial(s) of the new condition
     valve_duration      : smallint          # Duration of valve opening during reward in ms
     length              : smallint          # Track length in cm
     running             : enum('none', 'very bad', 'bad', 'medium', 'okay', 'good', 'very good') 
@@ -100,12 +153,26 @@ class VRSession(dj.Imported):
         ---
         -> CorridorPattern
         tone                : tinyint           # bool flag whether the RZ tone during the trial was on (1) or off (0)
-        pos                 : longblob          # 1d array with VR position sampled every 0.5 ms
-        lick                : longblob          # 1d array with licks sampled every 0.5 ms
-        frame               : longblob          # 1d array with frame triggers sampled every 0.5 ms
-        enc                 : longblob          # 1d array with encoder data sampled every 0.5 ms
-        valve               : longblob          # 1d array with valve openings (reward) sampled every 0.5 ms
+        pos                 : longblob          # 1d array with VR position sampled every 8 ms
+        lick                : longblob          # 1d array with licks sampled every 8 ms
+        frame               : longblob          # 1d array with frame triggers sampled every 8 ms
+        enc                 : longblob          # 1d array with raw encoder ticks sampled every 8 ms
+        valve               : longblob          # 1d array with valve openings (reward) sampled every 8 ms
         """
+
+        def enc2speed(self):
+            """Transform encoder ticks to speed in cm/s"""
+            # Hard-coded constant properties of encoder wheel
+            SAMPLE_RATE = 0.008  # sample rate of encoder in s
+            D_WHEEL = 10.5  # wheel diameter in cm
+            N_TICKS = 1436  # number of ticks in a full wheel rotation
+            DEG_DIST = (D_WHEEL * np.pi) / N_TICKS  # distance in cm the band moves for each encoder tick
+
+            # TODO: How to deal with the encoder artifact of "catching up" ticks from the ITI?
+            # translate encoder data into velocity [cm/s]
+            speed = self.fetch1('enc') * DEG_DIST / SAMPLE_RATE
+            speed[speed == -0] = 0
+            return speed
 
     def make(self, key):
 
@@ -116,7 +183,7 @@ class VRSession(dj.Imported):
         # First, insert session information into the VRSession table
         self.insert_vr_info(key)
 
-        # self.populate_trials(key)
+        self.populate_trials(key)
 
     def insert_vr_info(self, key):
         """Fills VRSession table with basic info about the session, mainly from Excel file"""
@@ -149,7 +216,7 @@ class VRSession(dj.Imported):
         # Get block and condition switch from session_notes string
         note_dict = ast.literal_eval((exp.Session & key).fetch1('session_notes'))
         new_key['block'] = note_dict['block']
-        new_key['condition_switch'] = note_dict['switch']
+        new_key['condition_switch'] = eval(note_dict['switch'])  # eval turns string into list
 
         # Check if this is an imaging session (session has to be inserted into hheise_img.Scan() first)
         # if len(img.Scan & key).fetch() == 1:
@@ -184,9 +251,7 @@ class VRSession(dj.Imported):
         """
 
         def find_file(tstamp, file_list):
-            """
-            Finds a file with the same timestamp from a list of files.
-            """
+            """Finds a file with the same timestamp from a list of files."""
             time_format = '%H%M%S'
             time_stamp = datetime.strptime(str(tstamp), time_format)
             matched_file = []
@@ -204,31 +269,52 @@ class VRSession(dj.Imported):
             else:
                 return matched_file[0]
 
-        # path to the session folder (includes behavioral .txt files)
+        def get_behavior_file_paths(is_imaging):
+            """Get lists of encoder, position and trigger files of all trials in this session."""
+            if is_imaging:
+                encoder_files = glob(root + r'\\**\\Encoder*.txt')
+                position_files = glob(root + r'\\**\\TCP*.txt')
+                trigger_files = glob(root + r'\\**\\TDT TASK*.txt')
+            else:
+                encoder_files = glob(root + r'\\Encoder*.txt')
+                position_files = glob(root + r'\\TCP*.txt')
+                trigger_files = glob(root + r'\\TDT TASK*.txt')
+
+            encoder_files = util.numerical_sort(encoder_files)
+            position_files = util.numerical_sort(position_files)
+            trigger_files = util.numerical_sort(trigger_files)
+
+            if not len(encoder_files) == len(position_files) & len(encoder_files) == len(trigger_files):
+                return encoder_files, position_files, trigger_files
+            else:
+                print(f'Uneven numbers of encoder, position and trigger files in folder {root}!')
+                return
+
+        # Get complete path of the current session
         root = os.path.join(login.get_neurophys_data_directory(), (exp.Session & key).fetch1('session_path'))
+
+        # Find out if this session is an imaging session
         imaging = bool((VRSession & key).fetch1('imaging_session'))
 
-        if imaging:
-            enc_files = glob(root + r'\\**\\Encoder*.txt')
-            pos_files = glob(root + r'\\**\\TCP*.txt')
-            trig_files = glob(root + r'\\**\\TDT TASK*.txt')
+        # Get the task condition of this session
+        cond = (exp.Session & key).fetch1('task')
+        cond_switch = self.fetch1('condition_switch')
 
-        else:
-            enc_files = glob(root + r'\\Encoder*.txt')
-            pos_files = glob(root + r'\\TCP*.txt')
-            trig_files = glob(root + r'\\TDT TASK*.txt')
-
-        enc_files = util.numerical_sort(enc_files)
-        pos_files = util.numerical_sort(pos_files)
-        trig_files = util.numerical_sort(trig_files)
-
-        if not len(enc_files) == len(pos_files) & len(enc_files) == len(trig_files):
-            print(f'Uneven numbers of encoder, position and trigger files in folder {root}!')
-            return
-
+        # Get paths of all behavior files in this session and process them sequentially
+        enc_files, pos_files, trig_files = get_behavior_file_paths(imaging)
         counter = 1
-
         for enc_file in enc_files:
+
+            # Initialize relevant variables
+            trial_key = dict(key, part=counter)     # dict containing the values of all trial attributes
+            frame_count = None                      # frame count of the imaging file of that trial
+            if imaging:
+                frame_count = (img.RawImagingFile & trial_key).fetch1('frame_count')
+
+            # Find out which condition this trial was
+            trial_key['pattern'], trial_key['tone'] = self.get_condition(trial_key, cond, cond_switch)
+
+            ### ALIGN BEHAVIOR ###
             # Find the files of the same trial in the session folder
             timestamp = int(os.path.basename(enc_file).split('_')[1][:-4])  # here the 0 in front of early times is removed
             pos_file = find_file(timestamp, pos_files)
@@ -237,46 +323,24 @@ class VRSession(dj.Imported):
                 print(f'Could not find all three files for timestamp {timestamp}!')
                 return
 
-            trial_key = dict(key, part=counter)
-            frame_count = None
-            if imaging:
-                frame_count = (img.RawImagingFile & trial_key).fetch1('frame_count')
-
             merge = self.align_behavior_files(trial_key, enc_file, pos_file, trig_file,
                                               imaging=imaging, frame_count=frame_count)
 
-            if merge is not None:
-                # save file (4 decimal places for time (0.5 ms), 2 dec for position, ints for lick, trigger, encoder)
-                # TODO:
-                #   - change sampling time to 8 ms
-                #   - make "frame" and "valve" to event-times rather than continuous sampling
-                #   - decide on raw or speed encoder saves, and make function to translate from one to the other
-                trial_key['pos'] = merge[:, 1]
-                trial_key['lick'] = merge[:, 2]
-                trial_key['frame'] = merge[:, 3]
-                trial_key['enc'] = merge[:, 4]
-                trial_key['valve'] = merge[:, 6]
+            # parse columns into entry dict
+            # TODO: make "frame" and "valve" to event-times rather than continuous sampling
+            trial_key['pos'] = merge[:, 1]
+            trial_key['lick'] = merge[:, 2].astype(int)
+            trial_key['frame'] = merge[:, 3].astype(int)
+            trial_key['enc'] = -merge[:, 4].astype(int)         # encoder is installed upside down, so reverse sign
+            trial_key['valve'] = merge[:, 5].astype(int)
 
-                if imaging:
-                    file_path = os.path.join(str(Path(enc_file).parents[0]), f'merged_behavior_{str(timestamp)}.txt')
-                else:
-                    file_path = os.path.join(root, f'merged_behavior_{str(timestamp)}.txt')
-                np.savetxt(file_path, merge, delimiter='\t',
-                           fmt=['%.5f', '%.3f', '%1i', '%1i', '%1i', '%.2f', '%1i'],
-                           header='Time\tVR pos\tlicks\tframe\tencoder\tcm/s\treward')
+            # Insert final dict into the VRTrial table
+            VRSession.VRTrial.insert1(row=trial_key)
 
-                # Insert name of behavior files into the database Todo not basename, but including trial folder if imaging
-                RawEncFile.insert1(row=dict(key, trial_id=counter, enc_filename=os.path.basename(enc_file)))
-                RawTCPFile.insert1(row=dict(key, trial_id=counter, enc_filename=os.path.basename(pos_file)))
-                RawTDTFile.insert1(row=dict(key, trial_id=counter, enc_filename=os.path.basename(trig_file)))
-
-                if verbose:
-                    print(f'Done! \nSaving merged file to {file_path}...\n')
-
-            else:
-                print(f'Skipped trial {enc_file}, please check!')
-
-
+            # Insert name of behavior files into the database Todo not basename, but including trial folder if imaging
+            RawEncFile.insert1(row=dict(key, trial_id=counter, enc_filename=util.remove_session_path(key, enc_file)))
+            RawTCPFile.insert1(row=dict(key, trial_id=counter, enc_filename=util.remove_session_path(key, pos_file)))
+            RawTDTFile.insert1(row=dict(key, trial_id=counter, enc_filename=util.remove_session_path(key, trig_file)))
 
             counter += 1
         print('Done!\n')
@@ -361,9 +425,7 @@ class VRSession(dj.Imported):
 
             # check if imported frame trigger matches frame count of .tif file and try to fix it
             more_frames_in_TDT = int(np.sum(trigger[1:, 1]) - frame_count)  # pos if TDT, neg if .tif had more frames
-            if more_frames_in_TDT == 0 and verbose:
-                print('Frame count matched, no correction necessary.')
-            elif more_frames_in_TDT < 0:
+            if more_frames_in_TDT < 0:
                 # first check if TDT has been logging shorter than TCP
                 tdt_offset = position[-1, 0] - trigger[-1, 0]
                 # if all missing frames would fit in the offset (time where tdt was not logging), print out warning
@@ -401,9 +463,6 @@ class VRSession(dj.Imported):
                         print(f'Frame correction failed for {trig_path}!')
                         return None
                     trigger[idx_list, 1] = 1
-                    if verbose:
-                        print(f'Imported frame count missed {frames_to_prepend}, corrected by prepending them to the'
-                              f'start of the file in 30Hz distances.')
 
                 # if frames dont fit, and less than 30 frames missing, put them in steps of 2 equally in the start and end
                 elif frames_to_prepend < 30:
@@ -418,9 +477,6 @@ class VRSession(dj.Imported):
                                 trigger[-(i * 2), 1] = 1
                             else:
                                 trigger[-((i + 1) * 2), 1] = 1
-                    if verbose:
-                        print(f'Imported frame count missed {frames_to_prepend}, corrected by adding frames regularly'
-                              f'at start and end of file.')
                 else:
                     # correction does not work if the whole log file is not large enough to include all missing frames
                     print(f'{int(abs(more_frames_in_TDT))} too few frames imported from TDT, could not be corrected.')
@@ -494,18 +550,6 @@ class VRSession(dj.Imported):
         merge_filt['encoder'].fillna(0, inplace=True)
         merge_filt['licking'].fillna(0, inplace=True)
 
-        # Set proper data types (float for position, int for the rest)
-        merge_filt['trigger'] = merge_filt['trigger'].astype(int)
-        merge_filt['licking'] = merge_filt['licking'].astype(int)
-        merge_filt['encoder'] = merge_filt['encoder'].astype(int)
-        merge_filt['water'] = merge_filt['water'].astype(int)
-
-        # TODO: How to deal with the encoder artifact of "catching up" ticks from the ITI?
-        # translate encoder data into velocity [cm/s] if enc_unit = 'speed'
-        speed = -merge_filt.loc[:, 'encoder'] * DEG_DIST / SAMPLE_RATE  # speed in cm/s for each sample
-        speed[speed == -0] = 0
-        merge_filt['speed'] = speed
-
         # check frame count again
         merge_trig = np.sum(merge_filt['trigger'])
         if imaging and merge_trig != frame_count:
@@ -515,76 +559,66 @@ class VRSession(dj.Imported):
         # transform back to numpy array for saving
         time_passed = merge_filt.index - merge_filt.index[0]    # transfer timestamps to
         seconds = np.array(time_passed.total_seconds())         # time change in seconds
-        array_df = merge_filt[['position', 'licking', 'trigger', 'encoder', 'speed', 'water']]  # change column order
+        array_df = merge_filt[['position', 'licking', 'trigger', 'encoder', 'water']]  # change column order
         array = np.hstack((seconds[..., np.newaxis], np.array(array_df)))  # combine both arrays
 
         return array
 
+    def is_session_novel(self, sess_key):
+        """Checks whether the session of 'sess_key' is in the novel corridor (from VR zone borders)"""
+        # Get event log
+        log_events= (VRLog & sess_key).get_dataframe()['log_event']
+        # Get the rounded position of the first reward zone
+        rz_pos = int(np.round(float(log_events[log_events.str.contains('VR enter Reward Zone:')].iloc[0].split(':')[1])))
+        if rz_pos == -6:
+            return False
+        elif rz_pos == 9:
+            return True
+        else:
+            print(f'Could not determine context in session {self.key}!\n')
 
-@schema
-class VRLogFile(dj.Manual):
-    definition = """ # Filename of the unprocessed LOG file for each session
-    -> VRSession
-    ---
-    log_filename        : varchar(128)      # filename of the LOG file (should be inside the session directory)
-    """
+    def get_condition(self, key, task, condition_switch):
+        """Test which condition this trial was"""
 
+        # No condition switches in novel corridor
+        if self.is_session_novel(key):
+            return 'novel', 1
 
-@schema
-class VRLog(dj.Imported):
-    definition = """ # Processed LOG data
-    -> VRLogFile
-    ---
-    log_time            : longblob          # np.array of time stamps (datetime64[ns])
-    log_trial           : longblob          # np.array of trial numbers (int)
-    log_event           : longblob          # np.array of event log (str)
-    """
+        # No condition switch or before first switch
+        if (condition_switch == [-1]) or key['part'] < condition_switch[0]:
+            if ((task == 'Active') or (task == 'Passive')) or key['part'] < condition_switch[0]:
+                pattern = 'training'
+                tone = 1
+            else:
+                raise Exception(f'Error at {key}:\nTask is not Active or Passive, but no condition switch given.')
 
-    def make(self, key):
-        # Load LOG file
-        log = pd.read_csv(os.path.join(login.get_neurophys_data_directory(),
-                                       (exp.Session & key).fetch1('session_path'), key['log_filename']),
-                          sep='\t', parse_dates=[[0, 1]])
+        # One condition switch in this session, and the current trial is after the switch
+        elif (len(condition_switch) == 1) and key['part'] >= condition_switch[0]:
+            if task == 'No tone':
+                pattern = 'training'
+                tone = 0
+            elif task == 'No pattern':
+                pattern = 'none'
+                tone = 1
+            elif task == 'Changed distances':
+                pattern = 'training_shifted'
+                tone = 1
+            elif task == 'No reward at RZ3':
+                pattern = 'training'
+                tone = 1
+            else:
+                raise Exception('Error at {}:\n'
+                                'Task condition could not be determined for trial nb {}.'.format(key, key['part']))
 
-        # Validate mouse and track length info
-        line = log['Event'].loc[log['Event'].str.contains("VR Task start, Animal:")].values[0]
-        log_length = int(line.split('_')[1])
-        log_mouse = int(line.split('_')[0].split()[-1][1:])
-        tab_length = (VRSession & key).fetch1('length')
-        if log_length != tab_length:
-            raise Warning('Session {}:\nTrack length {} in LOG file does not correspond to length {} in '
-                          'database.'.format(key, log_length, tab_length))
-        if log_mouse != key['mouse_id']:
-            raise Warning('Session {}: Mouse ID M{} in LOG file does not correspond to ID in '
-                          'database M{}'.format(key['day'], log_mouse, key['mouse_id']))
+        # Two condition switches, and the trial is after the first but before the second, or after the second switch
+        elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (key['part'] >= condition_switch[1]):
+            pattern = 'none'
+            tone = 0
+        elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (key['part'] < condition_switch[1]):
+            pattern = 'none'
+            tone = 1
+        else:
+            raise Exception('Error at {}:\n'
+                            'Task condition could not be determined for trial nb {}.'.format(key, key['part']))
 
-        # Remove "log_filename" keyword that is not needed for this table (from an untouched copy of 'key')
-        insert_dict = dict(key)
-        insert_dict.pop('log_filename')
-
-        # Parse fields as separate np.arrays
-        insert_dict['log_time'] = np.array(log['Date_Time'], dtype=str)  # str because DJ doesnt like datetime[ns]
-        insert_dict['log_trial'] = np.array(log['Trial'])
-        insert_dict['log_event'] = np.array(log['Event'])
-        self.insert1(insert_dict, allow_direct_insert=True)
-
-    def get_dataframe(self):
-        """Fetch LOG data of one session re-assembled as pandas DataFrame"""
-        return pd.DataFrame({'log_time': self.fetch1('log_time'),
-                             'log_trial': self.fetch1('log_trial'),
-                             'log_event': self.fetch1('log_event')})
-
-@schema
-class Behavior(dj.Imported):
-    definition = """ # Processed and merged TCP, TDT and Encoder data
-    -> RawTCPFile
-    -> RawTDTFile
-    -> RawEncFile
-    ---
-    pos                 : longblob          # 1d array with VR position sampled every 0.5 ms
-    lick                : longblob          # 1d array with licks sampled every 0.5 ms
-    frame               : longblob          # 1d array with frame triggers sampled every 0.5 ms
-    enc                 : longblob          # 1d array with encoder data sampled every 0.5 ms
-    valve               : longblob          # 1d array with valve openings (reward) sampled every 0.5 ms
-    """
-    #todo: Try to reduce sampling rate to reduce file sizes?
+        return pattern, tone
