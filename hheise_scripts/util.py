@@ -114,3 +114,34 @@ def add_many_sessions(date, mice, block=None, switch=None, **attributes):
         # Save data in YAML
         make_yaml_backup(mouse_session_dict)
 
+
+def add_column(table, name, dtype, default_value=None, use_keyword_default=False, comment=None):
+    """
+    A (hacky) convenience function to add a new column into an existing table.
+
+    Args:
+        table (DataJoint table class instance): table to add new column (attribute) to
+        name (str): name of the new column
+        dtype (str): data type of the new column
+        default_value (str, optional): default value for the new column. If 'null' or None, then the attribute
+            is considered non-required. Defaults to None.
+        use_keyword_default: Set to True if you want the default_value to be treated as MySQL keyword (e.g. `CURRENT_TIMESTAMP`)
+            This is False by default.
+        comment (str, optional): comment for the new column
+    """
+    full_table_name = table.full_table_name
+    if default_value is None or default_value.strip().lower() == 'null':
+        query = 'ALTER TABLE {} ADD {} {}'.format(full_table_name, name, dtype)
+        definition = '{}=NULL: {}'.format(name, dtype)
+    else:
+        default_string = default_value if use_keyword_default else repr(default_value)
+        query = 'ALTER TABLE {} ADD {} {} NOT NULL DEFAULT {}'.format(full_table_name, name, dtype, default_string)
+        definition = '{}={}: {}'.format(name, default_string, dtype)
+
+    if comment is not None:
+        query += ' COMMENT "{}"'.format(comment)
+        definition += ' # {}'.format(comment)
+    table.connection.query(query)
+    print('Be sure to add following entry to your table definition')
+    print(definition)
+    table.__class__._heading = None
