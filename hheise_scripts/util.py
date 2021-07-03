@@ -28,7 +28,8 @@ def numerical_sort(x):
         return int(text) if text.isdigit() else text
     def natural_keys(text):
         return [atoi(c) for c in re.split('(\d+)', text)]
-    return x_sort.sort(key=natural_keys)
+    x_sort.sort(key=natural_keys)
+    return x_sort
 
 
 def make_yaml_backup(sess_dict):
