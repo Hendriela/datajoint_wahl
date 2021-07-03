@@ -10,9 +10,7 @@ Schema to store behavioral data of Hendriks VR task
 import login
 login.connect()
 import datajoint as dj
-from schema import common_exp as exp
-from schema import common_mice as mice
-# from schema import common_img as img
+from schema import common_exp, common_mice #common_img
 from hheise_scripts import util
 
 from datetime import datetime, timedelta
@@ -51,89 +49,9 @@ class CorridorPattern(dj.Lookup):
 
 
 @schema
-class RawTCPFile(dj.Manual):
-    definition = """ # Filename of the unprocessed TCP (VR position) file for each trial
-    -> VRSession.VRTrial
-    ---
-    tcp_filename        : varchar(128)      # filename of the TCP file
-    """
-
-
-@schema
-class RawTDTFile(dj.Manual):
-    definition = """ # Filename of the unprocessed TDT (licking and frame trigger) file for each trial
-    -> VRSession.VRTrial
-    ---
-    tdt_filename        : varchar(128)      # filename of the TDT file
-    """
-
-
-@schema
-class RawEncFile(dj.Manual):
-    definition = """ # Filename of the unprocessed Encoder (running speed) file for each trial
-    -> VRSession.VRTrial
-    ---
-    enc_filename        : varchar(128)      # filename of the Enc file
-    """
-
-
-@schema
-class VRLogFile(dj.Manual):
-    definition = """ # Filename of the unprocessed LOG file for each session
-    -> VRSession
-    ---
-    log_filename        : varchar(128)      # filename of the LOG file (should be inside the session directory)
-    """
-
-
-@schema
-class VRLog(dj.Imported):
-    definition = """ # Processed LOG data
-    -> VRLogFile
-    ---
-    log_time            : longblob          # np.array of time stamps (datetime64[ns])
-    log_trial           : longblob          # np.array of trial numbers (int)
-    log_event           : longblob          # np.array of event log (str)
-    """
-
-    def make(self, key):
-        # Load LOG file
-        log = pd.read_csv(os.path.join(login.get_neurophys_data_directory(),
-                                       (exp.Session & key).fetch1('session_path'), key['log_filename']),
-                          sep='\t', parse_dates=[[0, 1]])
-
-        # Validate mouse and track length info
-        line = log['Event'].loc[log['Event'].str.contains("VR Task start, Animal:")].values[0]
-        log_length = int(line.split('_')[1])
-        log_mouse = int(line.split('_')[0].split()[-1][1:])
-        tab_length = (VRSession & key).fetch1('length')
-        if log_length != tab_length:
-            raise Warning('Session {}:\nTrack length {} in LOG file does not correspond to length {} in '
-                          'database.'.format(key, log_length, tab_length))
-        if log_mouse != key['mouse_id']:
-            raise Warning('Session {}: Mouse ID M{} in LOG file does not correspond to ID in '
-                          'database M{}'.format(key['day'], log_mouse, key['mouse_id']))
-
-        # Remove "log_filename" keyword that is not needed for this table (from an untouched copy of 'key')
-        insert_dict = dict(key)
-        insert_dict.pop('log_filename')
-
-        # Parse fields as separate np.arrays
-        insert_dict['log_time'] = np.array(log['Date_Time'], dtype=str)  # str because DJ doesnt like datetime[ns]
-        insert_dict['log_trial'] = np.array(log['Trial'])
-        insert_dict['log_event'] = np.array(log['Event'])
-        self.insert1(insert_dict, allow_direct_insert=True)
-
-    def get_dataframe(self):
-        """Fetch LOG data of one session re-assembled as pandas DataFrame"""
-        return pd.DataFrame({'log_time': self.fetch1('log_time'),
-                             'log_trial': self.fetch1('log_trial'),
-                             'log_event': self.fetch1('log_event')})
-
-@schema
 class VRSession(dj.Imported):
     definition = """ # Info about the VR Session
-    -> exp.Session
+    -> common_exp.Session
     ---
     imaging_session     : tinyint           # bool flag whether imaging was performed during this session
     condition_switch    : longblob          # List of ints indicating the first trial(s) of the new condition
@@ -180,18 +98,33 @@ class VRSession(dj.Imported):
         if key['username'] != login.get_user():
             return
 
-        # First, insert session information into the VRSession table
-        self.insert_vr_info(key)
+        print(f'Start to populate key: {key}')
 
-        self.populate_trials(key)
+        # First, create entries of VRSession and VRLogFile and insert them
+        vrsession_entry = self.create_vrsession_entry(key)
+        self.insert1(vrsession_entry, allow_direct_insert=True)
 
-    def insert_vr_info(self, key):
-        """Fills VRSession table with basic info about the session, mainly from Excel file"""
+        vrlogfile_entry = self.create_vrlogfile_entry(key)
+        VRLogFile().insert1(row=vrlogfile_entry, skip_duplicates=True)
+        VRLog().helper_insert1(key=vrlogfile_entry, skip_duplicates=True)  # Load the LOG file into the other table
+
+        # Then, create entries of single trials
+        data = self.create_VRTrial_entries(key)
+        # Enter the single trial entries one by one
+        for i in range(len(data['trial'])):
+            VRSession.VRTrial().insert1(data['trial'][i])
+            RawEncFile().insert1(data['enc'][i])
+            RawTDTFile().insert1(data['trig'][i])
+            RawTCPFile().insert1(data['pos'][i])
+
+    @staticmethod
+    def create_vrsession_entry(key):
+        """Gather basic info about the session, mainly from Excel file, and return entry dict for VRSession table."""
         # Save original key
         new_key = key.copy()
 
         # Get current mouse
-        mouse = (mice.Mouse & key).fetch1()
+        mouse = (common_mice.Mouse & key).fetch1()
 
         # Load info from the Excel file
         excel_path = os.path.join(login.get_neurophys_data_directory(),
@@ -210,11 +143,11 @@ class VRSession(dj.Imported):
 
         # Enter weight if given
         if not pd.isna(sess_entry['weight [g]'].values[0]):
-            mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
+            common_mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
                                    'date_of_weight': key['day'], 'weight': sess_entry['weight [g]'].values[0]})
 
         # Get block and condition switch from session_notes string
-        note_dict = ast.literal_eval((exp.Session & key).fetch1('session_notes'))
+        note_dict = ast.literal_eval((common_exp.Session & key).fetch1('session_notes'))
         new_key['block'] = note_dict['block']
         new_key['condition_switch'] = eval(note_dict['switch'])  # eval turns string into list
 
@@ -225,29 +158,29 @@ class VRSession(dj.Imported):
         #     new_key['imaging_session'] = 0
         new_key['imaging_session'] = 0
 
-        # Insert final dict into the table
-        self.insert1(new_key)
+        return new_key
 
+    @staticmethod
+    def create_vrlogfile_entry(key):
+        """Find LOG file for a session and return entry dict for VRLogFile table."""
+        mouse_id = (common_mice.Mouse & key).fetch1('mouse_id')
         ### FILL VRLOG INFO
         # Get filename of this session's LOG file (path is relative to the session directory)
         log_name = glob(os.path.join(login.get_neurophys_data_directory(),
-                                     (exp.Session & key).fetch1('session_path'),
+                                     (common_exp.Session & key).fetch1('session_path'),
                                      'TDT LOG_*'))
 
         if len(log_name) == 0:
-            raise Warning('No LOG file found for M{} session {}!'.format(mouse['mouse_id'], key['day']))
+            raise Warning('No LOG file found for M{} session {}!'.format(mouse_id, key['day']))
         elif len(log_name) > 1:
-            raise Warning('{} LOG files found for M{} session {}!'.format(len(log_name), mouse['mouse_id'], key['day']))
+            raise Warning('{} LOG files found for M{} session {}!'.format(len(log_name), mouse_id, key['day']))
         else:
-            # Insert the filename (without path) into the responsible table
-            row_dict = dict(key, log_filename=os.path.basename(log_name[0]))
-            VRLogFile.insert1(row=row_dict, skip_duplicates=True)
-            VRLog.make(self=VRLog, key=row_dict)     # Load the LOG file into the other table
+            return dict(key, log_filename=os.path.basename(log_name[0]))
 
-    def populate_trials(self, key):
+    def create_VRTrial_entries(self, key):
         """
-        Find raw behavior files, insert filenames into respective tables, load data, align it and insert it into the
-        VRTrial table.
+        Find raw behavior files, load data, and align it. Return entry dicts for VRTrial, RawEncFile, RawTDTFile and
+        RawTCPFile in a dict, each entry corresponding to a list of trial dicts for each table.
         """
 
         def find_file(tstamp, file_list):
@@ -269,44 +202,48 @@ class VRSession(dj.Imported):
             else:
                 return matched_file[0]
 
-        def get_behavior_file_paths(is_imaging):
+        def get_behavior_file_paths(root_path, is_imaging):
             """Get lists of encoder, position and trigger files of all trials in this session."""
             if is_imaging:
-                encoder_files = glob(root + r'\\**\\Encoder*.txt')
-                position_files = glob(root + r'\\**\\TCP*.txt')
-                trigger_files = glob(root + r'\\**\\TDT TASK*.txt')
+                encoder_files = glob(root_path + r'\\**\\Encoder*.txt')
+                position_files = glob(root_path + r'\\**\\TCP*.txt')
+                trigger_files = glob(root_path + r'\\**\\TDT TASK*.txt')
             else:
-                encoder_files = glob(root + r'\\Encoder*.txt')
-                position_files = glob(root + r'\\TCP*.txt')
-                trigger_files = glob(root + r'\\TDT TASK*.txt')
+                encoder_files = glob(root_path + r'\\Encoder*.txt')
+                position_files = glob(root_path + r'\\TCP*.txt')
+                trigger_files = glob(root_path + r'\\TDT TASK*.txt')
 
             encoder_files = util.numerical_sort(encoder_files)
             position_files = util.numerical_sort(position_files)
             trigger_files = util.numerical_sort(trigger_files)
 
-            if not len(encoder_files) == len(position_files) & len(encoder_files) == len(trigger_files):
+            if (len(encoder_files) == len(position_files)) & (len(encoder_files) == len(trigger_files)):
                 return encoder_files, position_files, trigger_files
             else:
-                print(f'Uneven numbers of encoder, position and trigger files in folder {root}!')
+                print(f'Uneven numbers of encoder, position and trigger files in folder {root_path}!')
                 return
 
         # Get complete path of the current session
-        root = os.path.join(login.get_neurophys_data_directory(), (exp.Session & key).fetch1('session_path'))
+        root = os.path.join(login.get_neurophys_data_directory(), (common_exp.Session & key).fetch1('session_path'))
 
         # Find out if this session is an imaging session
-        imaging = bool((VRSession & key).fetch1('imaging_session'))
+        imaging = bool((self & key).fetch1('imaging_session'))
 
         # Get the task condition of this session
-        cond = (exp.Session & key).fetch1('task')
-        cond_switch = self.fetch1('condition_switch')
+        cond = (common_exp.Session & key).fetch1('task')
+        cond_switch = (self & key).fetch1('condition_switch')
 
         # Get paths of all behavior files in this session and process them sequentially
-        enc_files, pos_files, trig_files = get_behavior_file_paths(imaging)
+        enc_files, pos_files, trig_files = get_behavior_file_paths(root, imaging)
         counter = 1
+
+        # Initialize dict that holds all entries
+        data = {'trial': [], 'enc': [], 'pos': [], 'trig': []}
+
         for enc_file in enc_files:
 
             # Initialize relevant variables
-            trial_key = dict(key, part=counter)     # dict containing the values of all trial attributes
+            trial_key = dict(key, trial_id=counter)     # dict containing the values of all trial attributes
             frame_count = None                      # frame count of the imaging file of that trial
             if imaging:
                 frame_count = (img.RawImagingFile & trial_key).fetch1('frame_count')
@@ -321,7 +258,7 @@ class VRSession(dj.Imported):
             trig_file = find_file(timestamp, trig_files)
             if pos_file is None or trig_file is None:
                 print(f'Could not find all three files for timestamp {timestamp}!')
-                return
+                # return
 
             merge = self.align_behavior_files(trial_key, enc_file, pos_file, trig_file,
                                               imaging=imaging, frame_count=frame_count)
@@ -334,16 +271,15 @@ class VRSession(dj.Imported):
             trial_key['enc'] = -merge[:, 4].astype(int)         # encoder is installed upside down, so reverse sign
             trial_key['valve'] = merge[:, 5].astype(int)
 
-            # Insert final dict into the VRTrial table
-            VRSession.VRTrial.insert1(row=trial_key)
-
-            # Insert name of behavior files into the database Todo not basename, but including trial folder if imaging
-            RawEncFile.insert1(row=dict(key, trial_id=counter, enc_filename=util.remove_session_path(key, enc_file)))
-            RawTCPFile.insert1(row=dict(key, trial_id=counter, enc_filename=util.remove_session_path(key, pos_file)))
-            RawTDTFile.insert1(row=dict(key, trial_id=counter, enc_filename=util.remove_session_path(key, trig_file)))
+            # Collect data of the current trial
+            data['trial'].append(trial_key)
+            data['enc'].append(dict(key, trial_id=counter, enc_filename=util.remove_session_path(key, enc_file)))
+            data['pos'].append(dict(key, trial_id=counter, tcp_filename=util.remove_session_path(key, pos_file)))
+            data['trig'].append(dict(key, trial_id=counter, tdt_filename=util.remove_session_path(key, trig_file)))
 
             counter += 1
-        print('Done!\n')
+
+        return data
 
     def align_behavior_files(self, trial_key, enc_path, pos_path, trig_path, imaging=False, frame_count=None):
         """
@@ -585,15 +521,15 @@ class VRSession(dj.Imported):
             return 'novel', 1
 
         # No condition switch or before first switch
-        if (condition_switch == [-1]) or key['part'] < condition_switch[0]:
-            if ((task == 'Active') or (task == 'Passive')) or key['part'] < condition_switch[0]:
+        if (condition_switch == [-1]) or key['trial_id'] < condition_switch[0]:
+            if ((task == 'Active') or (task == 'Passive')) or key['trial_id'] < condition_switch[0]:
                 pattern = 'training'
                 tone = 1
             else:
                 raise Exception(f'Error at {key}:\nTask is not Active or Passive, but no condition switch given.')
 
         # One condition switch in this session, and the current trial is after the switch
-        elif (len(condition_switch) == 1) and key['part'] >= condition_switch[0]:
+        elif (len(condition_switch) == 1) and key['trial_id'] >= condition_switch[0]:
             if task == 'No tone':
                 pattern = 'training'
                 tone = 0
@@ -608,17 +544,102 @@ class VRSession(dj.Imported):
                 tone = 1
             else:
                 raise Exception('Error at {}:\n'
-                                'Task condition could not be determined for trial nb {}.'.format(key, key['part']))
+                                'Task condition could not be determined for trial nb {}.'.format(key, key['trial_id']))
 
         # Two condition switches, and the trial is after the first but before the second, or after the second switch
-        elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (key['part'] >= condition_switch[1]):
+        elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (key['trial_id'] >= condition_switch[1]):
             pattern = 'none'
             tone = 0
-        elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (key['part'] < condition_switch[1]):
+        elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (key['trial_id'] < condition_switch[1]):
             pattern = 'none'
             tone = 1
         else:
             raise Exception('Error at {}:\n'
-                            'Task condition could not be determined for trial nb {}.'.format(key, key['part']))
+                            'Task condition could not be determined for trial nb {}.'.format(key, key['trial_id']))
 
         return pattern, tone
+
+
+@schema
+class RawTCPFile(dj.Manual):
+    definition = """ # Filename of the unprocessed TCP (VR position) file for each trial
+    -> VRSession.VRTrial
+    ---
+    tcp_filename        : varchar(128)      # filename of the TCP file
+    """
+
+
+@schema
+class RawTDTFile(dj.Manual):
+    definition = """ # Filename of the unprocessed TDT (licking and frame trigger) file for each trial
+    -> VRSession.VRTrial
+    ---
+    tdt_filename        : varchar(128)      # filename of the TDT file
+    """
+
+
+@schema
+class RawEncFile(dj.Manual):
+    definition = """ # Filename of the unprocessed Encoder (running speed) file for each trial
+    -> VRSession.VRTrial
+    ---
+    enc_filename        : varchar(128)      # filename of the Enc file
+    """
+
+
+@schema
+class VRLogFile(dj.Manual):
+    definition = """ # Filename of the unprocessed LOG file for each session
+    -> VRSession
+    ---
+    log_filename        : varchar(128)      # filename of the LOG file (should be inside the session directory)
+    """
+
+
+@schema
+class VRLog(dj.Imported):
+    definition = """ # Processed LOG data
+    -> VRLogFile
+    ---
+    log_time            : longblob          # np.array of time stamps (datetime64[ns])
+    log_trial           : longblob          # np.array of trial numbers (int)
+    log_event           : longblob          # np.array of event log (str)
+    """
+
+    def make(self, key):
+        self.helper_insert1(key)
+
+    def helper_insert1(self, key, skip_duplicates):
+        # Load LOG file
+        log = pd.read_csv(os.path.join(login.get_neurophys_data_directory(),
+                                       (common_exp.Session & key).fetch1('session_path'), key['log_filename']),
+                          sep='\t', parse_dates=[[0, 1]])
+
+        # Validate mouse and track length info
+        line = log['Event'].loc[log['Event'].str.contains("VR Task start, Animal:")].values[0]
+        log_length = int(line.split('_')[1])
+        log_mouse = int(line.split('_')[0].split()[-1][1:])
+        tab_length = (VRSession & key).fetch1('length')
+        if log_length != tab_length:
+            raise Warning('Session {}:\nTrack length {} in LOG file does not correspond to length {} in '
+                          'database.'.format(key, log_length, tab_length))
+        if log_mouse != key['mouse_id']:
+            raise Warning('Session {}: Mouse ID M{} in LOG file does not correspond to ID in '
+                          'database M{}'.format(key['day'], log_mouse, key['mouse_id']))
+
+        # Remove "log_filename" keyword that is not needed for this table (from an untouched copy of 'key')
+        insert_dict = dict(key)
+        insert_dict.pop('log_filename')
+
+        # Parse fields as separate np.arrays
+        insert_dict['log_time'] = np.array(log['Date_Time'], dtype=str)  # str because DJ doesnt like datetime[ns]
+        insert_dict['log_trial'] = np.array(log['Trial'])
+        insert_dict['log_event'] = np.array(log['Event'])
+        self.insert1(insert_dict, allow_direct_insert=True, skip_duplicates=skip_duplicates)
+
+    def get_dataframe(self):
+        """Fetch LOG data of one session re-assembled as pandas DataFrame"""
+        return pd.DataFrame({'log_time': self.fetch1('log_time'),
+                             'log_trial': self.fetch1('log_trial'),
+                             'log_event': self.fetch1('log_event')})
+
