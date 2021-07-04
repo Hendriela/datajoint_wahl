@@ -654,3 +654,196 @@ class VRLog(dj.Imported):
                              'log_trial': self.fetch1('log_trial'),
                              'log_event': self.fetch1('log_event')})
 
+
+@schema
+class PerformanceParameters(dj.Lookup):
+    definition = """ # Different parameters for VR performance analysis
+    perf_param_id       : tinyint       # ID of parameter sets
+    ---
+    vrzone_buffer       : tinyint       # number of position bins around the RZ that are still counted as RZ for licking
+    valve_for_passed    : tinyint       # 0 or 1 whether valve openings should be used to compute number of passed RZs. 
+                                        # More sensitive for well performing mice, but vulnerable against manual valve 
+                                        # openings and useless for autoreward trials.
+    bin_size            : tinyint       # size of position bins (in VR coordinates) for binned licking computation
+    stop_time           : smallint      # time in ms of stationary encoder above which it the period counts as a "stop"
+    """
+    contents = [
+        [0, 2, 0, 1, 100]
+    ]
+
+
+@schema
+class VRPerformance(dj.Computed):
+    definition = """ # Performance analysis data of VR behavior, one list per attribute/session with individ. trial data
+    -> VRSession
+    -> PerformanceParameters
+    ---
+    binned_lick_ratio           : longblob          # np.array of binned lick performance (how many positions bins, 
+                                                    # where the mouse licked, were in a RZ, preferred metric)
+    lick_count_ratio            : longblob          # np.array of lick count performance (how many individual licks were
+                                                    # in a RZ, old metric)
+    stop_ratio                  : longblob          # np.array of stops in RZs divided by total number of stops
+    mean_speed                  : longblob          # np.array of mean velocity (in cm/s), basically track length/time
+    mean_running_speed          : longblob          # np.array of mean running velocity (in cm/s), w/o non-moving times
+    trial_duration              : longblob          # np.array of trial durations
+    performance_trend           : float             # slope of regression line through trial performances (indicates if
+                                                    # a mouse performed better/worse at the end vs start of a session)
+    """
+
+    def make(self, key):
+        """
+        Extracts behavior data from one merged_behavior.txt file (acquired through behavior_import.py).
+        :param data: pd.DataFrame of the merged_behavior*.txt file
+        :param novel: bool, flag whether file was performed in novel corridor (changes reward zone location)
+        :param buffer: int, position bins around the RZ that are still counted as RZ for licking
+        :param valid: bool, flag whether trial was a RZ position validation trial (training corridor with shifted RZs)
+        :param bin_size: int, bin size in VR units for binned licking performance analysis (divisible by zone borders)
+        :param use_reward: bool flag whether to use valve openings to calculate number of passed reward zones. More
+                         sensitive for well performing mice, but vulnerable against manual valve openings and
+                         useless for autoreward trials.
+        :returns lick_ratio: float, ratio between individual licking bouts that occurred in reward zones div. by all licks
+        :returns stop_ratio: float, ratio between stops in reward zones divided by total number of stops
+        """
+
+        # Get current set of parameters
+        params = (PerformanceParameters & key).fetch1()
+
+        # Process every trial (start with 1 because trial_id is 1-based
+        for trial_id in range(1, len(VRSession.VRTrial & key)+1):
+
+            # Store query of current trial
+            curr_trial = (VRSession.VRTrial & key & 'trial_id={}'.format(trial_id))
+
+            # Compute lick and stop performances
+            binned_lick_ratio, lick_count_ratio, stop_ratio = self.compute_performances(curr_trial, params)
+
+            # Compute time metrics
+
+        return
+
+    @staticmethod
+    def compute_performances(curr_trial, params):
+        """
+        Computes lick, binned lick and stop performance of a single trial. Called during VRPerformance.populate().
+        :param curr_trial: query of the current trial from VRSession.VRTrial()
+        :param params: dict of current entry of PerformanceParameters()
+        :return: binned_lick_ratio, lick_count_ratio, stop_ratio
+        """
+        # Get reward zone borders for the current trial and add the buffer
+        zone_borders = curr_trial.get_zone_borders()
+        zone_borders[:, 0] -= params['buffer']
+        zone_borders[:, 1] += params['buffer']
+
+        # Get relevant behavioral data of the current trial
+        lick, pos, enc, valve = curr_trial.fetch1('lick', 'pos', 'enc', 'valve')
+
+        # Find out which reward zones were passed (reward given) if parameter is set (default no)
+        reward_from_merged = False
+        if params['valve_for_passed']:
+            rz_passed = np.zeros(len(zone_borders))
+            for idx, zone in enumerate(zone_borders):
+                # Get the reward entries at indices where the mouse is in the current RZ
+                rz_data = valve[np.where(np.logical_and(pos >= zone[0], pos <= zone[1]))]
+                # Cap reward at 1 per reward zone (ignore possible manual water rewards given)
+                if rz_data.sum() >= 1:
+                    rz_passed[idx] = 1
+                else:
+                    rz_passed[idx] = 0
+
+            passed_rz = rz_passed.sum() / len(zone_borders)
+            reward_from_merged = True
+
+        # Get indices of proper columns and transform DataFrame to numpy array for easier processing
+        time = np.arange(start=0, stop=len(lick) * SAMPLE, step=SAMPLE)
+        data = np.vstack((time, lick, pos, enc)).T
+
+        ### GET LICKING DATA ###
+        # select only time point where the mouse licked
+        lick_only = data[np.where(data[:, 1] == 1)]
+
+        if lick_only.shape[0] == 0:
+            lick_count_ratio = np.nan  # set nan, if there was no licking during the trial
+            if not reward_from_merged:
+                passed_rz = 0
+        else:
+            # remove continuous licks that were longer than 5 seconds
+            diff = np.round(np.diff(lick_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
+            licks = np.split(lick_only, np.where(diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample rate
+            licks = [i for i in licks if i.shape[0] <= int(5 / SAMPLE)]  # only keep licks shorter than 5 seconds
+            if len(licks) > 0:
+                licks = np.vstack(licks)  # put list of arrays together to one array
+                # out of these, select only time points where the mouse was in a reward zone
+                lick_zone_only = []
+                for zone in zone_borders:
+                    lick_zone_only.append(licks[(zone[0] <= licks[:, 2]) & (licks[:, 2] <= zone[1])])
+                zone_licks = np.vstack(lick_zone_only)
+                # the length of the zone-only licks divided by the all-licks is the zone-lick ratio
+                lick_count_ratio = zone_licks.shape[0] / lick_only.shape[0]
+
+                # correct by fraction of reward zones where the mouse actually licked
+                if not reward_from_merged:
+                    passed_rz = len([x for x in lick_zone_only if len(x) > 0]) / len(zone_borders)
+                lick_count_ratio = lick_count_ratio * passed_rz
+
+                # # correct by the fraction of time the mouse spent in reward zones vs outside
+                # rz_idx = 0
+                # for zone in zone_borders:
+                #     rz_idx += len(np.where((zone[0] <= data[:, 1]) & (data[:, 1] <= zone[1]))[0])
+                # rz_occupancy = rz_idx/len(data)
+                # lick_ratio = lick_ratio/rz_occupancy
+
+            else:
+                lick_count_ratio = np.nan
+                if not reward_from_merged:
+                    passed_rz = 0
+
+        ### GET BINNED LICKING PERFORMANCE
+        licked_rz_bins = 0
+        licked_nonrz_bins = 0
+        bins = np.arange(start=-10, stop=111, step=1)  # create bin borders for position bins (2 steps/6cm per bin)
+        zone_bins = []
+        for zone in zone_borders:
+            zone_bins.extend(np.arange(start=zone[0], stop=zone[1] + 1, step=params['bin_size']))
+        bin_idx = np.digitize(data[:, 2], bins)
+        # Go through all position bins
+        for curr_bin in np.unique(bin_idx):
+            # Check if there was any licking at the current bin
+            if sum(data[np.where(bin_idx == curr_bin)[0], 1]) >= 1:
+                # If yes, check if the bin is part of a reward zone
+                if bins[curr_bin - 1] in zone_bins:
+                    licked_rz_bins += 1  # if yes, the current bin was RZ and thus correctly licked in
+                else:
+                    licked_nonrz_bins += 1  # if no, the current bin was not RZ and thus incorrectly licked in
+        try:
+            # Ratio of RZ bins that were licked vs total number of licked bins, normalized by factor of passed RZs
+            binned_lick_ratio = (licked_rz_bins / (licked_rz_bins + licked_nonrz_bins)) * passed_rz
+        except ZeroDivisionError:
+            binned_lick_ratio = 0
+
+        ### GET STOPPING DATA ###
+        # select only time points where the mouse was not running (encoder between -2 and 2)
+        stop_only = data[(-2 <= data[:, 3]) & (data[:, 3] <= 2)]
+        # split into discrete stops
+        diff = np.round(np.diff(stop_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
+        stops = np.split(stop_only, np.where(diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample gap
+        # select only stops that were longer than the specified stop time
+        stops = [i for i in stops if i.shape[0] >= params['stop_time'] / SAMPLE * 1000]
+        # select only stops that were inside a reward zone (min or max position was inside a zone border)
+        zone_stop_only = []
+        for zone in zone_borders:
+            zone_stop_only.append([i for i in stops if zone[0] <= np.max(i[:, 1]) <= zone[1] or
+                                   zone[0] <= np.min(i[:, 1]) <= zone[1]])
+        # the number of the zone-only stops divided by the number of the total stops is the zone-stop ratio
+        zone_stops = np.sum([len(i) for i in zone_stop_only])
+        stop_ratio = zone_stops / len(stops)
+
+        return binned_lick_ratio, lick_count_ratio, stop_ratio
+
+    def get_mean(self, attribute):
+        """Get the mean of given attribute of the queried session(s)"""
+        sess = self.fetch(attribute)
+        means = [np.mean(x) for x in sess]
+        if len(means) == 1:
+            return means[0]
+        else:
+            return means
