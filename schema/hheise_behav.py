@@ -19,9 +19,12 @@ import os
 from glob import glob
 import numpy as np
 import pandas as pd
+import logging
 
 schema = dj.schema('hheise_behav', locals(), create_tables=True)
+# logging.basicConfig(filename='example.log', encoding='utf-8', level=logging.DEBUG)
 
+SAMPLE = 0.008      # hardcoded sample rate of merged behavioral data in milliseconds
 
 @schema
 class BatchData(dj.Manual):
@@ -37,14 +40,14 @@ class CorridorPattern(dj.Lookup):
     definition = """ # Different types of VR corridor patterns and RZ locations
     pattern             : varchar(128)      # Description of pattern
     ---
-    positions           : longblob          # Start and end of RZs in VR coordinates
+    positions           : longblob          # 2D np.array of start and end of RZs in VR coordinates
     """
     contents = [
-        ['none', [[-6, 4], [26, 36], [58, 68], [90, 100]]],
-        ['none_shifted', [[-6, 4], [34, 44], [66, 76], [90, 100]]],
-        ['training', [[-6, 4], [26, 36], [58, 68], [90, 100]]],
-        ['training_shifted', [[-6, 4], [34, 44], [66, 76], [90, 100]]],
-        ['novel', [[9, 19], [34, 44], [59, 69], [84, 94]]]
+        ['none', np.array([[-6, 4], [26, 36], [58, 68], [90, 100]])],
+        ['none_shifted', np.array([[-6, 4], [34, 44], [66, 76], [90, 100]])],
+        ['training', np.array([[-6, 4], [26, 36], [58, 68], [90, 100]])],
+        ['training_shifted', np.array([[-6, 4], [34, 44], [66, 76], [90, 100]])],
+        ['novel', np.array([[9, 19], [34, 44], [59, 69], [84, 94]])]
     ]
 
 
@@ -92,13 +95,16 @@ class VRSession(dj.Imported):
             speed[speed == -0] = 0
             return speed
 
+        def get_zone_borders(self):
+            return (self * CorridorPattern).fetch1('positions')
+
     def make(self, key):
 
         # Safety check that only my sessions are processed (should be restricted during the populate() call)
         if key['username'] != login.get_user():
             return
 
-        print(f'Start to populate key: {key}')
+        # print(f'Start to populate key: {key}')
 
         # First, create entries of VRSession and VRLogFile and insert them
         vrsession_entry = self.create_vrsession_entry(key)
@@ -263,21 +269,22 @@ class VRSession(dj.Imported):
             merge = self.align_behavior_files(trial_key, enc_file, pos_file, trig_file,
                                               imaging=imaging, frame_count=frame_count)
 
-            # parse columns into entry dict
-            # TODO: make "frame" and "valve" to event-times rather than continuous sampling
-            trial_key['pos'] = merge[:, 1]
-            trial_key['lick'] = merge[:, 2].astype(int)
-            trial_key['frame'] = merge[:, 3].astype(int)
-            trial_key['enc'] = -merge[:, 4].astype(int)         # encoder is installed upside down, so reverse sign
-            trial_key['valve'] = merge[:, 5].astype(int)
+            if merge is not None:
+                # parse columns into entry dict
+                # TODO: make "frame" and "valve" to event-times rather than continuous sampling
+                trial_key['pos'] = merge[:, 1]
+                trial_key['lick'] = merge[:, 2].astype(int)
+                trial_key['frame'] = merge[:, 3].astype(int)
+                trial_key['enc'] = -merge[:, 4].astype(int)         # encoder is installed upside down, so reverse sign
+                trial_key['valve'] = merge[:, 5].astype(int)
 
-            # Collect data of the current trial
-            data['trial'].append(trial_key)
-            data['enc'].append(dict(key, trial_id=counter, enc_filename=util.remove_session_path(key, enc_file)))
-            data['pos'].append(dict(key, trial_id=counter, tcp_filename=util.remove_session_path(key, pos_file)))
-            data['trig'].append(dict(key, trial_id=counter, tdt_filename=util.remove_session_path(key, trig_file)))
+                # Collect data of the current trial
+                data['trial'].append(trial_key)
+                data['enc'].append(dict(key, trial_id=counter, enc_filename=util.remove_session_path(key, enc_file)))
+                data['pos'].append(dict(key, trial_id=counter, tcp_filename=util.remove_session_path(key, pos_file)))
+                data['trig'].append(dict(key, trial_id=counter, tdt_filename=util.remove_session_path(key, trig_file)))
 
-            counter += 1
+                counter += 1
 
         return data
 
@@ -321,7 +328,7 @@ class VRSession(dj.Imported):
 
         # check if the trial might be incomplete (VR not run until the end or TDT file incomplete)
         if max(position[:, 1]) < 110 or abs(position[-1, 0] - trigger[-1, 0]) > 2:
-            print('Trial incomplete, please remove file!')
+            print(f'Trial {trig_path} incomplete, please remove file!')
             with open(r'W:\Neurophysiology-Storage1\Wahl\Hendrik\PhD\Data\Batch2\bad_trials.txt', 'a') as bad_file:
                 out = bad_file.write(f'{trig_path}\n')
             return None
@@ -443,11 +450,15 @@ class VRSession(dj.Imported):
             df = pd.DataFrame(dataset[:, 1], index=dataset[:, 0], columns=[name], dtype=float)
             df_list.append(df)
 
-        # Resample data to encoder sampling rate (125 Hz), as encoder data is difficult to extrapolate
-        df_list[0] = df_list[0].resample("8L").max().astype(int)             # 1 if any of grouped values are 1 avoids loosing frame
-        df_list[1] = (df_list[1].resample("8L").mean() > 0.5).astype(int)    # 1 if half of grouped values are 1
-        df_list[2] = df_list[2].resample("8L").sum()                         # sum up encoder values as it is a summed rotation value
-        df_list[3] = df_list[3].resample("8L").ffill()                       # Forward fill missing position values
+        ### Resample data to encoder sampling rate (125 Hz), as encoder data is difficult to extrapolate
+
+        # 1 if any of grouped values are 1 avoids loosing frame. Sometimes, even downsampling can create NaNs.
+        # They are forward filled for now, which will fail (create an unwanted frame trigger) if the timepoint before
+        # the NaN happens to be a frame trigger. Lets hope that never happens.
+        df_list[0] = df_list[0].resample("8L").max().fillna(method='pad').astype(int)
+        df_list[1] = (df_list[1].resample("8L").mean() > 0.5).astype(int)       # 1 if half of grouped values are 1
+        df_list[2] = df_list[2].resample("8L").sum()                            # sum encoder, a summed rotation value
+        df_list[3] = df_list[3].resample("8L").ffill()                          # Forward fill missing position values
 
         # Serially merge dataframes sorted by earliest data point (usually trigger) to not miss any data
         data_times = np.argsort(start_times)
