@@ -9,7 +9,8 @@ with open(r'W:\Neurophysiology-Storage1\Wahl\Datajoint\manual_submissions\sessio
 common_exp.Session.insert1(data)
 
 # manual key
-key = {'username': 'hheise', 'mouse_id': 92, 'session_num': 1, 'day': '2021-06-22'}
+key = {'username': 'hheise', 'mouse_id': 81, 'session_num': 1, 'day': datetime.strptime('2021-06-25', '%Y-%m-%d')}
+hheise_behav.VRSession().make(key)
 
 # Matteos session that should be ignored by populate()
 common_exp.Session.insert1({"username": "mpanze", "mouse_id": 1, "day": '1900-01-01', "session_num": 1, "session_id": 'hheise_M001_1900-01-01_00',
@@ -42,7 +43,7 @@ insert_dict['log_trial'] = np.array(log['Trial'])
 insert_dict['log_event'] = np.array(log['Event'])
 hheise_behav.VRLog.insert1(insert_dict, allow_direct_insert=True)
 
-hheise_behav.VRSession() & key
+
 
 
 enc_path = r'W:\Neurophysiology-Storage1\Wahl\Hendrik\PhD\Data\Batch7\M90\20210628\Encoder data20210628_113413.txt'
