@@ -827,7 +827,7 @@ class VRPerformance(dj.Computed):
         diff = np.round(np.diff(stop_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
         stops = np.split(stop_only, np.where(diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample gap
         # select only stops that were longer than the specified stop time
-        stops = [i for i in stops if i.shape[0] >= params['stop_time'] / SAMPLE * 1000]
+        stops = [i for i in stops if i.shape[0] >= params['stop_time'] / (SAMPLE * 1000)]
         # select only stops that were inside a reward zone (min or max position was inside a zone border)
         zone_stop_only = []
         for zone in zone_borders:
