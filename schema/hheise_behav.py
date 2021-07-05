@@ -20,6 +20,7 @@ from glob import glob
 import numpy as np
 import pandas as pd
 import logging
+from copy import deepcopy
 
 schema = dj.schema('hheise_behav', locals(), create_tables=True)
 # logging.basicConfig(filename='example.log', encoding='utf-8', level=logging.DEBUG)
@@ -96,7 +97,7 @@ class VRSession(dj.Imported):
             return speed
 
         def get_zone_borders(self):
-            return (self * CorridorPattern).fetch1('positions')
+            return deepcopy((self * CorridorPattern).fetch1('positions'))
 
     def make(self, key):
 
@@ -731,8 +732,8 @@ class VRPerformance(dj.Computed):
         """
         # Get reward zone borders for the current trial and add the buffer
         zone_borders = curr_trial.get_zone_borders()
-        zone_borders[:, 0] -= params['buffer']
-        zone_borders[:, 1] += params['buffer']
+        zone_borders[:, 0] -= params['vrzone_buffer']
+        zone_borders[:, 1] += params['vrzone_buffer']
 
         # Get relevant behavioral data of the current trial
         lick, pos, enc, valve = curr_trial.fetch1('lick', 'pos', 'enc', 'valve')
