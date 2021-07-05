@@ -715,18 +715,25 @@ class VRPerformance(dj.Computed):
             # Store query of current trial
             curr_trial = (VRSession.VRTrial & key & 'trial_id={}'.format(trial_id))
 
+            # Fetch behavioral data of the current trial, add time scale and merge into np.array
+            lick, pos, enc = curr_trial.fetch1('lick', 'pos', 'enc')
+            time = np.arange(start=0, stop=len(lick) * SAMPLE, step=SAMPLE)
+            data = np.vstack((time, lick, pos, enc)).T
+
             # Compute lick and stop performances
-            binned_lick_ratio, lick_count_ratio, stop_ratio = self.compute_performances(curr_trial, params)
+            binned_lick_ratio, lick_count_ratio, stop_ratio = self.compute_performances(curr_trial, data, params)
 
             # Compute time metrics
+
 
         return
 
     @staticmethod
-    def compute_performances(curr_trial, params):
+    def compute_performances(curr_trial, data, params):
         """
         Computes lick, binned lick and stop performance of a single trial. Called during VRPerformance.populate().
         :param curr_trial: query of the current trial from VRSession.VRTrial()
+        :param data: np.array holding behavioral data of this trial (time - lick - position - encoder)
         :param params: dict of current entry of PerformanceParameters()
         :return: binned_lick_ratio, lick_count_ratio, stop_ratio
         """
@@ -735,16 +742,14 @@ class VRPerformance(dj.Computed):
         zone_borders[:, 0] -= params['vrzone_buffer']
         zone_borders[:, 1] += params['vrzone_buffer']
 
-        # Get relevant behavioral data of the current trial
-        lick, pos, enc, valve = curr_trial.fetch1('lick', 'pos', 'enc', 'valve')
-
         # Find out which reward zones were passed (reward given) if parameter is set (default no)
         reward_from_merged = False
         if params['valve_for_passed']:
             rz_passed = np.zeros(len(zone_borders))
             for idx, zone in enumerate(zone_borders):
                 # Get the reward entries at indices where the mouse is in the current RZ
-                rz_data = valve[np.where(np.logical_and(pos >= zone[0], pos <= zone[1]))]
+                valve = curr_trial.fetch1('valve')
+                rz_data = valve[np.where(np.logical_and(data[:,2] >= zone[0], data[:,2] <= zone[1]))]
                 # Cap reward at 1 per reward zone (ignore possible manual water rewards given)
                 if rz_data.sum() >= 1:
                     rz_passed[idx] = 1
@@ -753,10 +758,6 @@ class VRPerformance(dj.Computed):
 
             passed_rz = rz_passed.sum() / len(zone_borders)
             reward_from_merged = True
-
-        # Get indices of proper columns and transform DataFrame to numpy array for easier processing
-        time = np.arange(start=0, stop=len(lick) * SAMPLE, step=SAMPLE)
-        data = np.vstack((time, lick, pos, enc)).T
 
         ### GET LICKING DATA ###
         # select only time point where the mouse licked
@@ -839,6 +840,8 @@ class VRPerformance(dj.Computed):
         stop_ratio = zone_stops / len(stops)
 
         return binned_lick_ratio, lick_count_ratio, stop_ratio
+
+    def compute_time_metrics():
 
     def get_mean(self, attribute):
         """Get the mean of given attribute of the queried session(s)"""
