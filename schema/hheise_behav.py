@@ -21,6 +21,8 @@ import numpy as np
 import pandas as pd
 import logging
 from copy import deepcopy
+from scipy import stats
+import statsmodels.api as sm
 
 schema = dj.schema('hheise_behav', locals(), create_tables=True)
 # logging.basicConfig(filename='example.log', encoding='utf-8', level=logging.DEBUG)
@@ -876,3 +878,50 @@ class VRPerformance(dj.Computed):
             return means[0]
         else:
             return means
+
+@schema
+class PerformanceTrend(dj.Computed):
+    definition = """ # Trend analysis metrics of performance across trials of a session. LinReg via statsmodels.OLS()
+    -> VRPerformance
+    ---
+    p_normality         : float             # p-value of stats.normaltest (D'Agostino + Pearson's omnibus test)
+                                            # (can only be reliably determined for >20 trials, otherwise p=1).
+    perf_corr           : float             # Correlation coefficient, through Pearson or Spearman (dep. on p_normality)
+    p_perf_corr = 1     : float             # p-value of correlation coefficient (strongly depends on sample size)
+    perf_r2             : float             # R-squared value of the OLS model (how much is y explained by x?)
+    prob_lin_reg = 1    : float             # Probability of F-statistic (likeliness that x's effect on y is 0)
+    perf_intercept      : float             # Intercept of the modelled linear regression
+    perf_slope          : float             # Slope of the fitted line (neg = worse, pos = better performance over time)
+    perf_ols_x          : longblob          # X (trial numbers) used to fit OLS (X is the SECOND argument in sm.OLS!)
+    perf_ols_y          : longblob          # Y (performance data) used to fit OLS (y is the FIRST argument in sm.OLS!)
+    """
+
+    def make(self, key):
+        """ Compute trends of a VRPerformance entry. """
+        # Get parameter set
+        params = (PerformanceParameters & key).fetch1()
+
+        # Get the appropriate performance dataset
+        perf = (VRPerformance & key).fetch1(params['metric_for_trend'])
+
+        # If there are at least 20 trials in the session, test for normality, otherwise assume non-normality
+        normality = 1
+        if len(perf) >= 20:
+            k2, normality = stats.normaltest(perf)
+
+        # Create x axis out of trial IDs
+        x_vals = np.arange(len(perf))
+
+        # If normal, perform Pearson correlation, otherwise Spearman
+        if normality < 0.05:
+            corr, p = stats.pearsonr(x=x_vals, y=perf)
+        else:
+            corr, p = stats.spearmanr(a=x_vals, b=perf)
+
+        # Perform linear regression with ordinary least squares (OLS) from statsmodels
+        x_fit = sm.add_constant(x_vals)
+        ols = sm.OLS(perf, x_fit).fit()
+        # Insert entry into the table
+        self.insert1(dict(key, p_normality=normality, perf_corr=corr, p_perf_corr=p, perf_r2=ols.rsquared,
+                          prob_lin_reg=ols.f_pvalue, perf_intercept=ols.params[0], perf_slope=ols.params[1],
+                          perf_ols_x=x_fit, perf_ols_y=perf))
