@@ -666,10 +666,12 @@ class PerformanceParameters(dj.Lookup):
                                         # More sensitive for well performing mice, but vulnerable against manual valve 
                                         # openings and useless for autoreward trials.
     bin_size            : tinyint       # size of position bins (in VR coordinates) for binned licking computation
-    stop_time           : smallint      # time in ms of stationary encoder above which it the period counts as a "stop"
+    velocity_thresh     : tinyint       # speed in cm/s below which mouse counts as "stationary"
+    stop_time           : smallint      # time in ms above which the period counts as a "stop" for stopping performance
+    metric_for_trend    : varchar(64)   # name of the performance metric that is used to compute performance trend
     """
     contents = [
-        [0, 2, 0, 1, 100]
+        [0, 2, 0, 1, 5, 100, 'binned_lick_ratio']
     ]
 
 
@@ -686,45 +688,46 @@ class VRPerformance(dj.Computed):
     stop_ratio                  : longblob          # np.array of stops in RZs divided by total number of stops
     mean_speed                  : longblob          # np.array of mean velocity (in cm/s), basically track length/time
     mean_running_speed          : longblob          # np.array of mean running velocity (in cm/s), w/o non-moving times
-    trial_duration              : longblob          # np.array of trial durations
-    performance_trend           : float             # slope of regression line through trial performances (indicates if
-                                                    # a mouse performed better/worse at the end vs start of a session)
+    trial_duration              : longblob          # np.array of trial durations (in s)
     """
 
     def make(self, key):
-        """
-        Extracts behavior data from one merged_behavior.txt file (acquired through behavior_import.py).
-        :param data: pd.DataFrame of the merged_behavior*.txt file
-        :param novel: bool, flag whether file was performed in novel corridor (changes reward zone location)
-        :param buffer: int, position bins around the RZ that are still counted as RZ for licking
-        :param valid: bool, flag whether trial was a RZ position validation trial (training corridor with shifted RZs)
-        :param bin_size: int, bin size in VR units for binned licking performance analysis (divisible by zone borders)
-        :param use_reward: bool flag whether to use valve openings to calculate number of passed reward zones. More
-                         sensitive for well performing mice, but vulnerable against manual valve openings and
-                         useless for autoreward trials.
-        :returns lick_ratio: float, ratio between individual licking bouts that occurred in reward zones div. by all licks
-        :returns stop_ratio: float, ratio between stops in reward zones divided by total number of stops
-        """
+        """ Computes general performance metrics from individual trials of a session. """
 
         # Get current set of parameters
         params = (PerformanceParameters & key).fetch1()
+
+        # Initialize dict that will hold single-trial lists (one per (non-primary) attribute)
+        trial_data = {key: [] for key in self.heading if key not in self.primary_key}
 
         # Process every trial (start with 1 because trial_id is 1-based
         for trial_id in range(1, len(VRSession.VRTrial & key)+1):
 
             # Store query of current trial
-            curr_trial = (VRSession.VRTrial & key & 'trial_id={}'.format(trial_id))
+            trial = (VRSession.VRTrial & key & 'trial_id={}'.format(trial_id))
 
             # Fetch behavioral data of the current trial, add time scale and merge into np.array
-            lick, pos, enc = curr_trial.fetch1('lick', 'pos', 'enc')
-            time = np.arange(start=0, stop=len(lick) * SAMPLE, step=SAMPLE)
+            lick, pos, enc = trial.fetch1('lick', 'pos', 'enc')
+            # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
+            time = np.array(range(0, len(lick) * int(SAMPLE*1000), int(SAMPLE*1000)))/1000
             data = np.vstack((time, lick, pos, enc)).T
 
             # Compute lick and stop performances
-            binned_lick_ratio, lick_count_ratio, stop_ratio = self.compute_performances(curr_trial, data, params)
+            binned_lick_ratio, lick_count_ratio, stop_ratio = self.compute_performances(trial, data, params)
 
             # Compute time metrics
+            mean_speed, mean_running_speed, trial_duration = self.compute_time_metrics(trial, params, data[:, 0])
 
+            # Add trial metrics to data dict
+            trial_data['binned_lick_ratio'].append(binned_lick_ratio)
+            trial_data['lick_count_ratio'].append(lick_count_ratio)
+            trial_data['stop_ratio'].append(stop_ratio)
+            trial_data['mean_speed'].append(mean_speed)
+            trial_data['mean_running_speed'].append(mean_running_speed)
+            trial_data['trial_duration'].append(trial_duration)
+
+        # Combine primary dict "key" with attributes "trial_data" and insert entry
+        self.insert1({**key, **trial_data})
 
         return
 
@@ -823,8 +826,9 @@ class VRPerformance(dj.Computed):
             binned_lick_ratio = 0
 
         ### GET STOPPING DATA ###
-        # select only time points where the mouse was not running (encoder between -2 and 2)
-        stop_only = data[(-2 <= data[:, 3]) & (data[:, 3] <= 2)]
+        # select only time points where the mouse was not running (from params (in cm/s) divided by encoder factor)
+        stop_only = data[(-params['velocity_thresh']/2.87 <= data[:, 3]) &
+                         (data[:, 3] <= params['velocity_thresh']/2.87)]
         # split into discrete stops
         diff = np.round(np.diff(stop_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
         stops = np.split(stop_only, np.where(diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample gap
@@ -841,7 +845,28 @@ class VRPerformance(dj.Computed):
 
         return binned_lick_ratio, lick_count_ratio, stop_ratio
 
-    def compute_time_metrics():
+    @staticmethod
+    def compute_time_metrics(curr_trial, params, timestamps):
+        """
+        Compute mean speed, running speed and trial duration.
+        :param curr_trial: query of the current trial from VRSession.VRTrial()
+        :param params: dict of current entry of PerformanceParameters()
+        :param timestamps: np.array of behavior data point time stamps
+        :return: mean_speed, mean_running_speed, trial_duration
+        """
+
+        # Get mean speed by taking track length / max time stamp. Slighty more accurate than mean(vel) because ITI
+        # running is ignored, but included in vel
+        time = max(timestamps)
+        length = (VRSession & curr_trial.restriction[0]).fetch1('length')
+        mean_speed = length/time
+
+        # Get mean running speed by filtering out time steps where mouse is stationary
+        vel = curr_trial.enc2speed()    # Get velocity in cm/s
+        running_vel = vel[vel >= params['velocity_thresh']]
+        mean_running_speed = np.mean(running_vel)
+
+        return mean_speed, mean_running_speed, time
 
     def get_mean(self, attribute):
         """Get the mean of given attribute of the queried session(s)"""
