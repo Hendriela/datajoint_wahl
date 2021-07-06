@@ -679,6 +679,15 @@ class PerformanceParameters(dj.Lookup):
 
 
 @schema
+class ManuallyValidatedSessions(dj.Manual):
+    definition = """ # Holds sessions that have been manually validated. Only these sessions will be analysed further.
+    -> VRSession
+    ---
+    date_of_validation          : date              # date at which the validation occurred
+    """
+
+
+@schema
 class VRPerformance(dj.Computed):
     definition = """ # Performance analysis data of VR behavior, one list per attribute/session with individ. trial data
     -> VRSession
@@ -882,6 +891,24 @@ class VRPerformance(dj.Computed):
             return means[0]
         else:
             return means
+
+    def plot_performance(self, attr='binned_lick_ratio'):
+        """ Plots performance across time for the queried sessions """
+        mouse_id, day, behav = self.fetch('mouse_id', 'day', attr)
+        df = pd.DataFrame(dict(mouse_id=mouse_id, day=day, behav=behav))
+        df_new=df.explode('behav')
+
+        df_new['behav'] = df_new['behav'].astype(float)
+        df_new['day'] = pd.to_datetime(df_new['day'])
+
+        grid = sns.FacetGrid(df_new, col='mouse_id', col_wrap=3, height=3, aspect=2)
+        grid.map(sns.lineplot, 'day', 'behav')
+
+        for ax in grid.axes.ravel():
+            ax.axhline(0.75, linestyle='--', color='r', alpha=0.5)
+            ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+            ax.set_ylabel(attr)
+
 
 @schema
 class PerformanceTrend(dj.Computed):
