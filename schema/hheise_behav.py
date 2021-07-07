@@ -102,6 +102,17 @@ class VRSession(dj.Imported):
         def get_zone_borders(self):
             return deepcopy((self * CorridorPattern).fetch1('positions'))
 
+        def get_array(self, attr=None):
+            """ Combine individual attribute data with reconstructed time stamp to a common array for processing. """
+            if attr is None:
+                attr = ['pos', 'lick', 'frame', 'enc', 'valve']
+
+            # Fetch behavioral data of the trial, add time scale and merge into np.array
+            data = self.fetch1(*attr)
+            # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
+            time = np.array(range(0, len(data[0]) * int(SAMPLE*1000), int(SAMPLE*1000)))/1000
+            return np.vstack((time, *data)).T
+
     def make(self, key):
 
         # Safety check that only my sessions are processed (should be restricted during the populate() call)
@@ -274,7 +285,7 @@ class VRSession(dj.Imported):
                                               imaging=imaging, frame_count=frame_count)
 
             if merge is not None:
-                # parse columns into entry dict
+                # parse columns into entry dict and typecast to int to save disk space
                 # TODO: make "frame" and "valve" to event-times rather than continuous sampling
                 trial_key['pos'] = merge[:, 1]
                 trial_key['lick'] = merge[:, 2].astype(int)
@@ -454,15 +465,19 @@ class VRSession(dj.Imported):
             df = pd.DataFrame(dataset[:, 1], index=dataset[:, 0], columns=[name], dtype=float)
             df_list.append(df)
 
-        ### Resample data to encoder sampling rate (125 Hz), as encoder data is difficult to extrapolate
+        ### Resample data to encoder sampling rate (125 Hz, every 8 ms), as encoder data is difficult to extrapolate
 
         # 1 if any of grouped values are 1 avoids loosing frame. Sometimes, even downsampling can create NaNs.
         # They are forward filled for now, which will fail (create an unwanted frame trigger) if the timepoint before
         # the NaN happens to be a frame trigger. Lets hope that never happens.
         df_list[0] = df_list[0].resample("8L").max().fillna(method='pad').astype(int)
         df_list[1] = (df_list[1].resample("8L").mean() > 0.5).astype(int)       # 1 if half of grouped values are 1
-        df_list[2] = df_list[2].resample("8L").sum()                            # sum encoder, a summed rotation value
+        df_list[2] = df_list[2].resample("8L").sum().astype(int)                # sum encoder, a summed rotation value
         df_list[3] = df_list[3].resample("8L").ffill()                          # Forward fill missing position values
+
+        # Sometimes pos is shifted during resampling and creates a NaN. In that case shift it back.
+        if df_list[3].iloc[0].isna():
+            df_list[3] = df_list[3].shift(periods=-1, fill_value=110)
 
         # Serially merge dataframes sorted by earliest data point (usually trigger) to not miss any data
         data_times = np.argsort(start_times)
