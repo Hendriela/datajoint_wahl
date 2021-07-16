@@ -2,6 +2,8 @@
 
 import datajoint as dj
 from dateutil.parser import parse
+import login
+login.connect()
 
 schema = dj.schema('common_mice', locals(), create_tables=True)
 
