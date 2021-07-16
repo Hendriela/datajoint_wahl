@@ -25,7 +25,15 @@ from pathlib import Path
 
 # connect to datajoint database
 login.connect()
-from schema import common_mice, common_exp, common_behav  # , common_img, common_el
+from schema import common_mice, common_exp #, common_behav
+
+# import user-specific schema
+if login.get_user() == "hheise":
+    from schema import hheise_behav as user_behav
+elif login.get_user() == "mpanze":
+    from schema import mpanze_behav as user_behav
+elif login.get_user() == "jnambi":
+    from schema import jnambi_behav as user_behav
 
 # =============================================================================
 # HARDCODED PARAMETER FOR GUI
@@ -45,6 +53,13 @@ S_TOP = 20+30
 ROW = 70
 COL = 200
 S_HEIGHT = 330   # height of session box
+S_WIDTH = WINDOW_WIDTH_L-2*S_LEFT
+
+# User-specific information
+U_TOP = S_TOP + 20
+U_LEFT = S_LEFT + 4*COL + 40
+U_HEIGHT = S_HEIGHT
+U_WIDTH = 2*COL+50
 
 # behavior
 B_LEFT = S_LEFT
@@ -100,7 +115,7 @@ if default_params['behavior']['default_mouse'] == 'last_mouse':
 # Check how many sessions this mouse has on the current day and adjust the trial counter accordingly
 mouse_id_filter = "mouse_id = '{}'".format(default_params['behavior']['default_mouse'])
 date_filter = "day = '{}'".format(current_day)
-all_trials = (common_exp.Session() & username_filter & mouse_id_filter & date_filter).fetch('trial')
+all_trials = (common_exp.Session() & username_filter & mouse_id_filter & date_filter).fetch('session_num')
 if len(all_trials) == 0:
     next_trial = '1'
 else:
@@ -118,11 +133,11 @@ tasks = (common_exp.Task() & "username = '{}'".format(investigator)).fetch('task
 anesthesias = common_exp.Anesthesia().fetch('anesthesia')
 experimenters = common_mice.Investigator().fetch('username')
 
-wheels = common_behav.WheelType().fetch('wheel_type')
-signals = common_behav.SynchronizationType().fetch('sync_type')
-camera_pos = common_behav.CameraPosition().fetch('camera_position')
-stimulators = common_behav.StimulatorType().fetch('stimulator_type')
-event_types = common_behav.SensoryEventType().fetch('sensory_event_type')
+# wheels = common_behav.WheelType().fetch('wheel_type')
+# signals = common_behav.SynchronizationType().fetch('sync_type')
+# camera_pos = common_behav.CameraPosition().fetch('camera_position')
+# stimulators = common_behav.StimulatorType().fetch('stimulator_type')
+# event_types = common_behav.SensoryEventType().fetch('sensory_event_type')
 
 # microscopes = img.Microscope().fetch('microscope')
 # lasers = img.Laser().fetch('laser')
@@ -147,17 +162,17 @@ class window(wx.Frame):
 
         self.job_list = list()    # save jobs in format [ [table, entry_dict, source_path, target_path], [...], ...]
 # =============================================================================
-# Upper box: Add new session
+# Upper left box: Add new session
 # =============================================================================
         wx.StaticBox(panel, label='SESSION INFORMATION',
-                     pos=(S_LEFT-20, S_TOP-30), size=(WINDOW_WIDTH_L-2*S_LEFT, S_HEIGHT))
+                     pos=(S_LEFT-20, S_TOP-30), size=(S_WIDTH, S_HEIGHT))
 
         # Mouse name
         wx.StaticText(panel,label="Mouse ID:", pos=(S_LEFT, S_TOP))
-        self.mouse_name = wx.ComboBox(panel, choices=mouse_ids, style=wx.CB_READONLY,
+        self.mouse_name = wx.ComboBox(panel, choices=np.array(mouse_ids, dtype=str), style=wx.CB_READONLY,
                                       pos=(S_LEFT, S_TOP+20), size=(170, -1))
         self.mouse_name.Bind(wx.EVT_COMBOBOX, self.event_mouse_selected)
-        item = self.mouse_name.FindString(default_params['behavior']['default_mouse'])
+        item = self.mouse_name.FindString(str(default_params['behavior']['default_mouse']))
         self.mouse_name.SetSelection(item)
 
         # Day of experiment
@@ -166,7 +181,7 @@ class window(wx.Frame):
         self.day.SetValue(current_day)
 
         # Trial
-        wx.StaticText(panel,label="Trial (base 1):", pos=(S_LEFT+400,S_TOP))
+        wx.StaticText(panel,label="Session number (that day):", pos=(S_LEFT+400,S_TOP))
         self.trial = wx.TextCtrl(panel, pos=(S_LEFT+2*COL,S_TOP+20), size=(170,-1))
         self.trial.SetValue(next_trial)
 
@@ -178,21 +193,25 @@ class window(wx.Frame):
 
         # Button to select new folder
         self.select_session_folder = wx.Button(panel, label="Select folder",
-                                       pos=(S_LEFT + 2 * COL, S_TOP + ROW + 20),
-                                       size=(100, 25))
+                                       pos=(S_LEFT + 2 * COL, S_TOP + ROW + 20), size=(100, 25))
         self.Bind(wx.EVT_BUTTON, self.event_select_session_folder, self.select_session_folder)
 
+        # Checkbox if session folder should be created automatically
+        # wx.StaticText(panel, label="Find session folder automatically?", pos=(S_LEFT + 2 * COL, S_TOP + ROW))
+        self.autopath = wx.CheckBox(panel, label="Find session folder automatically?",
+                                    pos=(S_LEFT + 2 * COL + 120, S_TOP + ROW + 23), size=(200, 20))
+
         # Setup
-        wx.StaticText(panel,label="Setup:", pos=(S_LEFT,S_TOP+2*ROW))
-        self.setup = wx.ComboBox(panel, choices = setups, style=wx.CB_READONLY,
-                                      pos=(S_LEFT,S_TOP+2*ROW+20), size=(170,-1) )
+        wx.StaticText(panel,label="Setup:", pos=(S_LEFT, S_TOP+2*ROW))
+        self.setup = wx.ComboBox(panel, choices=setups, style=wx.CB_READONLY,
+                                 pos=(S_LEFT, S_TOP+2*ROW+20), size=(170, -1))
         item = self.setup.FindString(default_params['behavior']['default_setup'])
         self.setup.SetSelection(item)
 
         # Task
-        wx.StaticText(panel,label="Task:", pos=(S_LEFT+COL,S_TOP+2*ROW))
-        self.task = wx.ComboBox(panel, choices = tasks, style=wx.CB_READONLY,
-                                      pos=(S_LEFT+COL,S_TOP+2*ROW+20), size=(170,-1) )
+        wx.StaticText(panel, label="Task:", pos=(S_LEFT+COL, S_TOP+2*ROW))
+        self.task = wx.ComboBox(panel, choices=tasks, style=wx.CB_READONLY,
+                                pos=(S_LEFT+COL, S_TOP+2*ROW+20), size=(170, -1))
         item = self.task.FindString(default_params['behavior']['default_task'])
         self.task.SetSelection(item)
 
@@ -229,9 +248,30 @@ class window(wx.Frame):
                                        size=(150, 50) )
         self.Bind( wx.EVT_BUTTON, self.event_submit_session, self.submit_session_button)
 
+        # =============================================================================
+        # Upper left box: Add new session
+        # =============================================================================
+        wx.StaticBox(panel, label='USER-SPECIFIC INFORMATION',
+                     pos=(U_LEFT-40, U_TOP - 50), size=(U_WIDTH, U_HEIGHT))
+
+        # Hendriks parameters
+        wx.StaticBox(panel, label='Hendrik', pos=(U_LEFT-20, U_TOP - 20), size=(2*COL, ROW))
+
+        # Block
+        wx.StaticText(panel, label="Session block:", pos=(U_LEFT, U_TOP))
+        self.block = wx.TextCtrl(panel, pos=(U_LEFT, U_TOP+20), size=(170, -1))
+        self.block.SetValue('0')
+
+        # Condition switch
+        wx.StaticText(panel, label="Trial of condition switch(es):", pos=(U_LEFT + COL, U_TOP))
+        self.switch = wx.TextCtrl(panel, pos=(U_LEFT + COL, U_TOP+20), size=(170, -1))
+        self.switch.SetValue('[-1]')
+
+
 # =============================================================================
 # Enter behavioral data from wheel, video, ...
 # =============================================================================
+        """
         if default_params['imaging']['show_ephys'] == False:
             wx.StaticBox(panel, label='BEHAVIOR RECORDINGS',
                         pos=(B_LEFT-20, B_TOP-30), size=(WINDOW_WIDTH_L-2*S_LEFT, 500))
@@ -321,7 +361,7 @@ class window(wx.Frame):
                                            pos=(B_LEFT+3*COL, B_TOP+5*ROW),
                                            size=(150, 50) )
             self.Bind( wx.EVT_BUTTON, self.event_submit_behavior, self.submit_behav_button)
-
+        """
 # =============================================================================
 # Enter E-phys data
 # =============================================================================
@@ -475,6 +515,7 @@ class window(wx.Frame):
                                        pos=(30, L_TOP),
                                        size=(BUTTON_WIDTH, BUTTON_HEIGHT) )
         self.Bind( wx.EVT_BUTTON, self.event_transfer_data, self.transfer_button)
+        self.transfer_button.Disable()
 
         self.quit_button = wx.Button(panel,label="Quit",
                                      pos=(30, L_TOP+ROW),
@@ -492,6 +533,28 @@ class window(wx.Frame):
 # Events for menus and button presses
 # =============================================================================
 
+    def get_autopath(self, info):
+        """ Create automatic ABSOLUTE (with neurophys) session folder path based on the session_dict 'info'"""
+        # Hendriks logic
+        if info['username'] == 'hheise':
+            mouse = str(info['mouse_id'])
+            batch = str((common_mice.Mouse & username_filter & "mouse_id = {}".format(mouse)).fetch1('batch'))
+            if batch == 0:
+                self.status_text.write('Mouse {} has no batch (batch 0). Cannot create session path.\n'.format(mouse))
+                raise Exception
+            path = os.path.join(login.get_neurophys_data_directory(),
+                                "Batch"+batch, "M"+mouse, info['day'].replace('-', ''))
+            return path
+
+        # Matteos logic
+        elif info['username'] == 'mpanze':
+            # FILL IN
+            return None
+        else:
+            return None
+
+
+
     def event_mouse_selected(self, event):
         """ The user selected a mouse name in the dropdown menu """
         print('New mouse selected')
@@ -499,30 +562,44 @@ class window(wx.Frame):
     def event_submit_session(self, event):
         """ The user clicked on the button to submit a session """
 
-
         # create session dictionary that can be entered into datajoint pipeline
         session_dict = dict(username=investigator,
                             mouse_id=self.mouse_name.GetValue(),
                             day=self.day.GetValue(),
-                            trial=int(self.trial.GetValue()),
-                            path=Path(self.session_folder.GetValue()),
+                            session_num=int(self.trial.GetValue()),
+                            session_path=Path(self.session_folder.GetValue()),
                             anesthesia=self.anesthesia.GetValue(),
                             setup=self.setup.GetValue(),
                             task=self.task.GetValue(),
                             experimenter=self.experimenter.GetValue(),
-                            notes=self.notes.GetValue()
+                            session_notes=self.notes.GetValue()
                             )
 
         # check if the session is already in the database (most common error)
         key = dict(username=investigator,
                    mouse_id=self.mouse_name.GetValue(),
                    day=self.day.GetValue(),
-                   trial=int(self.trial.GetValue()))
-        if len( common_exp.Session() & key) > 0:
+                   session_num=int(self.trial.GetValue()))
+        if len(common_exp.Session() & key) > 0:
             message = 'The session you wanted to enter into the database already exists.\n' + \
                       'Therefore, nothing was entered into the database.'
             wx.MessageBox(message, caption="Session already in database", style=wx.OK | wx.ICON_INFORMATION)
             return
+
+        # find path automatically if box was ticked
+        if int(self.autopath.GetValue()) == 1:
+            auto_path = self.get_autopath(session_dict)
+            if auto_path is None:
+                self.status_text.write('No automatic folder method defined yet for user: ' + str(investigator) + '\n')
+            else:
+                session_dict['session_path'] = Path(self.get_autopath(session_dict))
+
+        # Store Hendriks additional information in the "notes" section as a string dict
+        if investigator == 'hheise':
+            session_dict['session_notes'] = "{"+"'block':'{}', 'switch':'{}', 'notes':'{}'".format(
+                                                                                    self.block.GetValue(),
+                                                                                    self.switch.GetValue(),
+                                                                                    session_dict['session_notes'])+"}"
 
         # add entry to database
         try:
@@ -533,7 +610,7 @@ class window(wx.Frame):
             identifier = common_exp.Session().create_id(investigator_name=investigator,
                                                         mouse_id=session_dict['mouse_id'],
                                                         date=session_dict['day'],
-                                                        trial=session_dict['trial'])
+                                                        session_num=session_dict['session_num'])
             file = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier + '.yaml')
             # TODO show prompt if a backup file with this identifier already exists and ask the user to overwrite
             # if os.path.isfile(file):
@@ -544,7 +621,7 @@ class window(wx.Frame):
             # else:
 
             # Transform session path from Path to string (with universal / separator) to make it YAML-compatible
-            session_dict['path'] = str(session_dict['path']).replace("\\", "/")
+            session_dict['session_path'] = str(session_dict['session_path']).replace("\\", "/")
             with open(file, 'w') as outfile:
                 yaml.dump(session_dict, outfile, default_flow_style=False)
 
@@ -558,7 +635,7 @@ class window(wx.Frame):
         session_dict = dict(username=investigator,
                             mouse_id=self.mouse_name.GetValue(),
                             day=self.day.GetValue(),
-                            trial=int(self.trial.GetValue()))
+                            session_num=int(self.trial.GetValue()))
         entries = (common_exp.Session() & session_dict).fetch(as_dict=True)
         # check there is only one table corresponding to this
         if len(entries) > 1:
@@ -572,80 +649,78 @@ class window(wx.Frame):
         self.setup.SetSelection(item)
         item = self.task.FindString(entry['task'])
         self.task.SetSelection(item)
-        self.stage.SetValue( str(entry['stage']) )
+        # self.stage.SetValue(str(entry['stage']))
         item = self.anesthesia.FindString(entry['anesthesia'])
         self.anesthesia.SetSelection(item)
         item = self.experimenter.FindString(entry['experimenter'])
         self.experimenter.SetSelection(item)
-        self.notes.SetValue( entry['notes'] )
+        self.notes.SetValue(entry['notes'])
 
-
-
-    def event_submit_behavior(self, event):
-        """ User clicked on button to submit the behavioral data """
-
-        # go through all behavioral files and upload if checkbox is set
-        session_key = dict( name = self.mouse_name.GetValue(),
-                            day = self.day.GetValue(),
-                            trial = int( self.trial.GetValue() ) )
-        trial = int( self.trial.GetValue() )
-    # wheel
-        if self.wheel_checkbox.GetValue():
-            # insert the main table
-            wheel_dict = dict( **session_key,
-                              wheel_type = self.wheel.GetValue())
-            self.save_insert( common_behav.Wheel(), wheel_dict)
-
-            # add job to transfer file later
-            file = default_params['behavior']['wheel_file'].format(trial)
-            raw_wheel_dict = dict( **session_key,
-                                  file_name = file)
-
-            self.job_list.append([common_behav.RawWheelFile(), raw_wheel_dict, self.behav_folder.GetValue(), file])
-    # synchronization
-        if self.sync_checkbox.GetValue():
-            sync_dict = dict(**session_key,
-                             sync_type=self.imaging_sync.GetValue())
-            self.save_insert(common_behav.Synchronization(), sync_dict)
-
-            file = default_params['behavior']['synch_file'].format(trial)
-            raw_sync_dict = dict(**session_key,
-                                 file_name=file)
-            self.job_list.append([common_behav.RawSynchronizationFile(), raw_sync_dict, self.behav_folder.GetValue(), file])
-    # video
-        if self.video_checkbox.GetValue():
-            video_dict = dict(**session_key,
-                              camera_nr=0,   # TODO: modify for multiple cameras
-                              camera_position=self.camera_pos.GetValue(),
-                              frame_rate=int(self.frame_rate.GetValue()))
-            self.save_insert(common_behav.Video(), video_dict)
-
-            file = self.video_file.GetValue().format(trial)
-            raw_video_dict = dict(**session_key,
-                                  camera_nr=0,
-                                  part=0,
-                                  file_name=file)
-            self.job_list.append([common_behav.RawVideoFile(), raw_video_dict, self.behav_folder.GetValue(), file])
-    # whisker stimulator
-        if self.whisker_checkbox.GetValue():
-            whisker_dict = dict(**session_key,
-                                stimulator_type=self.stimulator.GetValue())
-            self.save_insert(common_behav.WhiskerStimulator(), whisker_dict)
-
-            file = default_params['behavior']['whisker_file'].format(trial)
-            raw_whisker_dict = dict(**session_key,
-                                    file_name=file)
-            self.job_list.append([common_behav.RawWhiskerStimulatorFile(), raw_whisker_dict, self.behav_folder.GetValue(), file])
-    # events
-        if self.event_checkbox.GetValue():
-            event_dict = dict(**session_key,
-                              sensory_event_type = self.event_type.GetValue() )
-            self.save_insert(common_behav.SensoryEvents(), event_dict)
-
-            file = default_params['behavior']['event_file'].format(trial)
-            raw_event_dict = dict(**session_key,
-                                  file_name=file)
-            self.job_list.append([common_behav.RawSensoryEventsFile(), raw_event_dict, self.behav_folder.GetValue(), file])
+    # def event_submit_behavior(self, event):
+    #     """ User clicked on button to submit the behavioral data """
+    #
+    #     # go through all behavioral files and upload if checkbox is set
+    #     session_key = dict( name = self.mouse_name.GetValue(),
+    #                         day = self.day.GetValue(),
+    #                         trial = int( self.trial.GetValue() ) )
+    #     trial = int( self.trial.GetValue() )
+    # # wheel
+    #     if self.wheel_checkbox.GetValue():
+    #         # insert the main table
+    #         wheel_dict = dict( **session_key,
+    #                           wheel_type = self.wheel.GetValue())
+    #         self.save_insert( common_behav.Wheel(), wheel_dict)
+    #
+    #         # add job to transfer file later
+    #         file = default_params['behavior']['wheel_file'].format(trial)
+    #         raw_wheel_dict = dict( **session_key,
+    #                               file_name = file)
+    #
+    #         self.job_list.append([common_behav.RawWheelFile(), raw_wheel_dict, self.behav_folder.GetValue(), file])
+    # # synchronization
+    #     if self.sync_checkbox.GetValue():
+    #         sync_dict = dict(**session_key,
+    #                          sync_type=self.imaging_sync.GetValue())
+    #         self.save_insert(common_behav.Synchronization(), sync_dict)
+    #
+    #         file = default_params['behavior']['synch_file'].format(trial)
+    #         raw_sync_dict = dict(**session_key,
+    #                              file_name=file)
+    #         self.job_list.append([common_behav.RawSynchronizationFile(), raw_sync_dict, self.behav_folder.GetValue(), file])
+    # # video
+    #     if self.video_checkbox.GetValue():
+    #         video_dict = dict(**session_key,
+    #                           camera_nr=0,   # TODO: modify for multiple cameras
+    #                           camera_position=self.camera_pos.GetValue(),
+    #                           frame_rate=int(self.frame_rate.GetValue()))
+    #         self.save_insert(common_behav.Video(), video_dict)
+    #
+    #         file = self.video_file.GetValue().format(trial)
+    #         raw_video_dict = dict(**session_key,
+    #                               camera_nr=0,
+    #                               part=0,
+    #                               file_name=file)
+    #         self.job_list.append([common_behav.RawVideoFile(), raw_video_dict, self.behav_folder.GetValue(), file])
+    # # whisker stimulator
+    #     if self.whisker_checkbox.GetValue():
+    #         whisker_dict = dict(**session_key,
+    #                             stimulator_type=self.stimulator.GetValue())
+    #         self.save_insert(common_behav.WhiskerStimulator(), whisker_dict)
+    #
+    #         file = default_params['behavior']['whisker_file'].format(trial)
+    #         raw_whisker_dict = dict(**session_key,
+    #                                 file_name=file)
+    #         self.job_list.append([common_behav.RawWhiskerStimulatorFile(), raw_whisker_dict, self.behav_folder.GetValue(), file])
+    # # events
+    #     if self.event_checkbox.GetValue():
+    #         event_dict = dict(**session_key,
+    #                           sensory_event_type = self.event_type.GetValue() )
+    #         self.save_insert(common_behav.SensoryEvents(), event_dict)
+    #
+    #         file = default_params['behavior']['event_file'].format(trial)
+    #         raw_event_dict = dict(**session_key,
+    #                               file_name=file)
+    #         self.job_list.append([common_behav.RawSensoryEventsFile(), raw_event_dict, self.behav_folder.GetValue(), file])
 
     """ COMMENTED OUT BECAUSE WE DONT HAVE THE IMG() OR EL() SCHEMA YET
     def event_submit_img(self, event):
@@ -846,7 +921,7 @@ class window(wx.Frame):
         exit_flag = folder_dialog.ShowModal()
         # update the folder in the text box when the user exited with ok
         if exit_flag == wx.ID_OK:
-            self.el_folder.SetValue( folder_dialog.GetPath() )
+            self.el_folder.SetValue(folder_dialog.GetPath())
 
     def event_quit_button(self, event):
         """ User pressed quit button """
@@ -855,6 +930,10 @@ class window(wx.Frame):
     def event_transfer_data(self, event):
         """ Transfer data to the neurophysiology server and add Raw...File to database """
 
+        # User_behav is the schema specific for the active user. Each user should have a "transfer_data()" function
+        # in their own schema to
+
+        """ Adrians version of a job list (transferring different behavior files separately)
         jobs = self.job_list
         print('Transfering the files for {} entries in the job list.'.format( len(jobs) ))
 
@@ -900,7 +979,7 @@ class window(wx.Frame):
             print('Copied file ' + source_path +'\n')
 
         print('Transfer ended.')
-
+        """
 
     def save_insert(self, table, dictionary):
         """

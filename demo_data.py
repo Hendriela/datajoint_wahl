@@ -4,6 +4,8 @@ import datajoint as dj
 import login
 login.connect()
 
+from schema import common_mice
+
 mouse_schema = dj.schema('common_mice')
 exp_schema = dj.schema('common_exp')
 
@@ -11,15 +13,15 @@ mouse_schema.spawn_missing_classes()
 exp_schema.spawn_missing_classes()
 
 # Add mice
-Mouse().insert1({"username": "hheise", "mouse_id": 0, "dob": "1900-07-28", "sex": "U", "batch": 0,
+common_mice.Mouse().insert1({"username": "hheise", "mouse_id": 0, "dob": "1900-07-28", "sex": "U", "batch": 0,
                  "strain": "WT", "genotype": "n.d.", "irats_id": "BJ1234", "cage_num": 1100589, "ear_mark": "RLL",
                  "licence_id": "241/2018-B", "info": "This is a dummy test mouse."})
 
-common_mice.Mouse().insert1({"username": "hheise", "mouse_id": 1, "dob": "2021-01-24", "sex": "M", "batch": 1,
+common_mice.Mouse().insert1({"username": "hheise", "mouse_id": 81, "dob": "2021-01-24", "sex": "M", "batch": 1,
                  "strain": "Snap25-GCaMP6f", "genotype": "+/+", "irats_id": "BJ1235", "cage_num": 1100589, "ear_mark": "RRLL",
                  "licence_id": "241/2018-A", "info": "This is a second dummy test mouse."})
 
-Mouse().insert1({"username": "mpanze", "mouse_id": 0, "dob": "2021-01-01", "sex": "M", "batch": 1,
+Mouse().insert1({"username": "hheise", "mouse_id": 0, "dob": "2021-01-01", "sex": "M", "batch": 1,
                  "strain": "L2/3-TIGRE2.0-GCaMP6f", "genotype": "+/+", "irats_id": "BJ1111", "cage_num": 11002312, "ear_mark": "L",
                  "licence_id": "241/2018-A", "info": "Third dummy test mouse"})
 
@@ -49,7 +51,7 @@ Injection.insert1({"username": "hheise", "mouse_id": 1, "surgery_num": 2, "injec
                    "coordinates": "-1mm A/P, -1mm M/L, 0.5 mm D/V","injection_notes":"second mock injection"})
 
 # Add session
-common_exp.Session.insert1({"username": "hheise", "mouse_id": 2, "day": '1900-01-01', "trial": 1, "id": 'hheise_M001_1900-01-01_00',
+common_exp.Session.insert1({"username": "hheise", "mouse_id": 0, "day": '1900-01-01', "trial": 1, "id": 'hheise_M001_1900-01-01_00',
                  "path": '\\test_path\\hheise_M001_1900-01-01_00', "counter": 1, "anesthesia": "Awake", "setup": "VR",
                  "task": "Passive", "experimenter": "mpanze", "notes": "A test session"})
 

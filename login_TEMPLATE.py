@@ -8,8 +8,15 @@ The return values of these functions have to be adjusted for each machine and th
 should not be synched across devices.
 Adrian 2019-08-16
 
+To store the password on your computer, run the command
+> keyring.set_password('datajoint_user', 'your_username', 'your_password')
+once on each machine.
+This has to be the same password you used when registering at the MySQL database!
+
 Adapted by Hendrik 2021-05-04
 """
+import keyring
+import datajoint as dj
 
 def get_ip():
     """Return ip address of the server"""
@@ -17,17 +24,19 @@ def get_ip():
 
 def get_user():
     """Return user name"""
-    return 'root'           # default username of the DJ database
+    # Remove this line after setting a username
+    raise Exception('Define a username before connecting to the database.')
+    return  # Put your shortname here
 
 def get_password():
     """Return password"""
-    return 'simple'         # default username of the DJ database
+    # Before using DataJoint for the first time on a computer, store your password with
+    # > keyring.set_password('datajoint_user', 'your_username', 'your_password')
+    # This has to be the same password you used when registering at the MySQL database!
+    return keyring.get_password('datajoint_user', get_user())
 
 def connect():
     """ Connects to the database using the credentials in the login.py file"""
-
-    import datajoint as dj
-
     dj.config['database.host'] = get_ip()
     dj.config['database.user'] = get_user()
     dj.config['database.password'] = get_password()

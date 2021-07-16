@@ -10,7 +10,7 @@ import login
 import os
 import numpy as np
 
-schema = dj.schema('behav', locals(), create_tables = True)
+schema = dj.schema('common_behav', locals(), create_tables = True)
 
 
 # =============================================================================
