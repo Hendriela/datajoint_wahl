@@ -12,7 +12,8 @@ If the database got shut down (e.g. if the server was turned off), it has to be 
   <li>Navigate to the docker directory:
         <pre>cd ../../db/mysql-docker</pre></li>
   <li>Start the container:
-        <pre>sudo docker-compose up -d</pre></li>
+        <pre>sudo docker-compose up -d</pre>
+      The computer might potentially ask you for the admin password again.</li>
   <li>Now you should see <code>Starting mysql-docker_db_1 ... done</code> and the server should be running. Disconnect from the machine:
         <pre>logout</pre></li>        
 </ol>
