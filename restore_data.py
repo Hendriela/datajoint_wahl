@@ -8,6 +8,7 @@ Created on Wed Jun 2 17:33:21 2021
 
 import login
 import os
+import sys
 import glob
 import yaml
 from glob import glob
@@ -40,6 +41,7 @@ def restore_data(tables=None, adjust_funcs=None, verbose=False):
     else:
         successful = 0
         skipped = 0
+        attempted = 0
         if not verbose:
             block_print()
         for file in yaml_list:
@@ -52,7 +54,8 @@ def restore_data(tables=None, adjust_funcs=None, verbose=False):
                 else:
                     success = restore_data_from_yaml(file, verbose=verbose)
 
-                # Keep track of successful and unsuccessful inserts
+                # Keep track of attempted, successful and unsuccessful inserts
+                attempted += 1
                 if success:
                     successful += 1
                 else:
@@ -62,7 +65,7 @@ def restore_data(tables=None, adjust_funcs=None, verbose=False):
         if not verbose:
             enable_print()
         print('Successfully inserted {}/{} entries into the database, and skipped {} files.'.format(successful,
-                                                                                                    len(yaml_list),
+                                                                                                    attempted,
                                                                                                     skipped))
 
 
@@ -86,6 +89,8 @@ def restore_data_from_yaml(path, adjust_func=None, verbose=False):
         table = common_mice.Surgery
     elif table_name == 'injection':
         table = common_mice.Injection
+    elif table_name == 'care':
+        table = common_mice.PainManagement
     elif table_name == 'session':
         table = common_exp.Session
     else:
@@ -97,9 +102,10 @@ def restore_data_from_yaml(path, adjust_func=None, verbose=False):
 
     # If necessary, adjust the content to adapt to DB structure changes and save the new YAML
     if adjust_func is not None:
-        data = adjust_func(data)
-        with open(path, 'w') as outfile:
+        data, new_path = adjust_func(data, path)        
+        with open(new_path, 'w') as outfile:
             yaml.dump(data, outfile, default_flow_style=False)
+        os.remove(path)         # Remove the old YAML
 
     # Try to enter it into the database
     try:
