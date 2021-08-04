@@ -598,6 +598,7 @@ class window(wx.Frame):
             surg_dict['illumination_time'] = self.illumination.GetValue()
 
         # Todo: Ask user to overwrite if a weight on that day already exists (happens if a surgery was re-inserted)
+        #  - Dont overwrite YAML file if a second weight has been added
         # Insert into database and save backup YAML
         identifier = 'surgery_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), self.surg_num.GetValue())
         self.safe_insert(common_mice.Surgery(), surg_dict, identifier, REL_BACKUP_PATH)
@@ -776,10 +777,13 @@ class window(wx.Frame):
     def safe_insert(self, table, dictionary, identifier, backup):
         """ Enter a dict into a table. If successful, returns True and the dict is saved in a backup YAML file."""
         try:
-            table.insert1(dictionary)
+            id = table.insert1(dictionary)       # some inserts (e.g. care) return an ID that is added to the identifier
             self.status_text.write('Sucessfully entered new entry in table "{}": \n\t'.format(table.table_name) +
                                    str(dictionary) + '\n')
-
+            
+            if id is not None:
+                identifier += "_{}".format(id)
+            
             # save dictionary in a backup YAML file for faster re-population
             filename = os.path.join(login.get_neurophys_wahl_directory(), backup, identifier + '.yaml')
             with open(filename, 'w') as outfile:

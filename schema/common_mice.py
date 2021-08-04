@@ -85,11 +85,12 @@ class Mouse(dj.Manual):
         :return: rel_threshold fraction of the pre-surgery weight
         """
         mouse = self.fetch1()                                   # Get Mouse() entry (has to be single row)
-        first_surg = Surgery() & mouse & "surgery_num=1"        # Filter for first surgery
-        if len(first_surg) == 1:
+        surg = Surgery() & mouse                                # Filter for most recent surgery
+        last_surg = surg & 'surgery_num={}'.format(max(surg.fetch('surgery_num')))
+        if len(last_surg) == 1:
             # Get date of first surgery and the weight from Weight() at that date
-            first_surg_date = first_surg.fetch1('surgery_date').strftime("%Y-%m-%d")
-            pre_op_weight = float((Weight() & mouse & "date_of_weight='{}'".format(first_surg_date)).fetch1('weight'))
+            last_surg_date = last_surg.fetch1('surgery_date').strftime("%Y-%m-%d")
+            pre_op_weight = float((Weight() & mouse & "date_of_weight='{}'".format(last_surg_date)).fetch1('weight'))
             if printout:
                 print("The {}% pre-surgery weight threshold of M{} is {:.1f}g.".format(rel_threshold, mouse['mouse_id'],
                                                                                        pre_op_weight * rel_threshold))
@@ -189,11 +190,11 @@ class Weight(dj.Manual):
         user_filt = "username='{}'".format(row['username'])
         mouse_filt = "mouse_id='{}'".format(row['mouse_id'])
         weight_thresh = (Mouse() & user_filt & mouse_filt).get_weight_threshold(printout=False)
-        if (weight_thresh is not None) and (row['weight'] < weight_thresh):
+        if (weight_thresh is not None) and (float(row['weight']) < weight_thresh):
             print("WARNING: The weight of M{} of {} is below the 85% pre-surgery threshold of {:.1f}!".format(
                 row['mouse_id'], row['weight'], weight_thresh))
 
-        # Todo: Warn user again if the 85% threshold has been crossed 3+ days ago without recovery
+        # Todo: Warn user again if the 85% threshold has been crossed 3+ days ago without recovery?
 
 
 @schema
@@ -203,14 +204,16 @@ class CareSubstance(dj.Lookup):
     ---
     role            : varchar(64)            # Type of substance
     dosage          : tinyint                # dosage in mg/kg body weight
-    concentration   : tinyint                # concentration of injection in mg/mL
+    concentration   : smallint               # concentration of injection in mg/mL
     """
 
     contents = [
         ['Carprofen (s.c.)', 'analgesic', 5, 20],
         ['Paracetamol (water)', 'analgesic', 0, 2],
         ['Baytril (s.c.)', 'antibiotic', 10, 1],
-        ['Baytril (water)', 'antibiotic', 0, 0.1]
+        ['Baytril (water)', 'antibiotic', 0, 0.1],
+        ['Glucose (s.c.)', 'nutrient support', 833, 50],
+        ['NaCl (s.c.)', 'nutrient support', 0, 9]
     ]
 
 
@@ -219,11 +222,19 @@ class PainManagement(dj.Manual):
     definition = """ # Pain management records, especially for post-OP care
     -> Mouse
     date_of_care        : date              # Date of care application (year-month-day)
+    care_num            : tinyint           # iterator of unique injections per day
     ---
     -> CareSubstance
-    care_volume = 0     : tinyint           # volume of injection in uL (0 if administered through drinking water)
+    care_volume = 0     : smallint          # volume of injection in uL (0 if administered through drinking water)
     care_frequency      : tinyint           # Number of administration per day (1 or 2)
     """
+
+    def insert1(self, row, **kwargs):
+        """ Extended insert1 function that creates and returns an incrementally increased care_num counter."""        
+        if 'care_num' not in row:
+            row['care_num'] = len(self & row)
+        super().insert((row,), **kwargs)
+        return row['care_num']
 
 
 @schema
