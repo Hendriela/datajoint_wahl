@@ -5,6 +5,10 @@ from dateutil.parser import parse
 import matplotlib.pyplot as plt
 import numpy as np
 
+import login
+login.connect()
+
+
 schema = dj.schema('common_mice', locals(), create_tables=True)
 
 
