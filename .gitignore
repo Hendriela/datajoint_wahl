@@ -4,3 +4,4 @@
 schema/__pycache__/
 .ipynb_checkpoints/
 /dj_local_conf.json
+/docs/
