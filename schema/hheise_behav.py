@@ -14,6 +14,7 @@ from schema import common_exp, common_mice #common_img
 from hheise_scripts import util
 
 from datetime import datetime, timedelta
+from typing import Iterable, List, Optional, Tuple, Union
 import ast
 import os
 from glob import glob
@@ -60,7 +61,7 @@ class VRSession(dj.Imported):
     definition = """ # Info about the VR Session
     -> common_exp.Session
     ---
-    imaging_session     : tinyint           # bool flag whether imaging was performed during this session
+    imaging_session     : bool              # bool flag whether imaging was performed during this session
     condition_switch    : longblob          # List of ints indicating the first trial(s) of the new condition
     valve_duration      : smallint          # Duration of valve opening during reward in ms
     length              : smallint          # Track length in cm
@@ -77,7 +78,7 @@ class VRSession(dj.Imported):
         trial_id            : tinyint           # Counter of the trial in 
         ---
         -> CorridorPattern
-        tone                : tinyint           # bool flag whether the RZ tone during the trial was on (1) or off (0)
+        tone                : bool              # bool flag whether the RZ tone during the trial was on or off
         pos                 : longblob          # 1d array with VR position sampled every 8 ms
         lick                : longblob          # 1d array with licks sampled every 8 ms
         frame               : longblob          # 1d array with frame triggers sampled every 8 ms
@@ -85,25 +86,46 @@ class VRSession(dj.Imported):
         valve               : longblob          # 1d array with valve openings (reward) sampled every 8 ms
         """
 
-        def enc2speed(self):
-            """Transform encoder ticks to speed in cm/s"""
+        def enc2speed(self) -> np.ndarray:
+            """
+            Transform encoder ticks of the queried SINGLE trial to speed in cm/s.
+
+            Returns:
+                1D numpy array of encoder data transformed to cm/s
+            """
             # Hard-coded constant properties of encoder wheel
-            SAMPLE_RATE = 0.008  # sample rate of encoder in s
-            D_WHEEL = 10.5  # wheel diameter in cm
-            N_TICKS = 1436  # number of ticks in a full wheel rotation
-            DEG_DIST = (D_WHEEL * np.pi) / N_TICKS  # distance in cm the band moves for each encoder tick
+            SAMPLE_RATE = 0.008                         # sample rate of encoder in s
+            D_WHEEL = 10.5                              # wheel diameter in cm
+            N_TICKS = 1436                              # number of ticks in a full wheel rotation
+            DEG_DIST = (D_WHEEL * np.pi) / N_TICKS      # distance in cm the band moves for each encoder tick
 
             # TODO: How to deal with the encoder artifact of "catching up" ticks from the ITI?
-            # translate encoder data into velocity [cm/s]
+            # Query encoder data from queried trial and translate encoder data into velocity [cm/s]
             speed = self.fetch1('enc') * DEG_DIST / SAMPLE_RATE
             speed[speed == -0] = 0
             return speed
 
-        def get_zone_borders(self):
+        def get_zone_borders(self) -> np.ndarray:
+            """
+            Return a deepcopy of the queried SINGLE trial's reward zone borders. The deepcopy is necessary to edit the
+            zone borders without changing the data in the database.
+
+            Returns:
+                A numpy array with dimensions (2, 4), start and end position of all four RZs
+            """
             return deepcopy((self * CorridorPattern).fetch1('positions'))
 
-        def get_array(self, attr=None):
-            """ Combine individual attribute data with reconstructed time stamp to a common array for processing. """
+        def get_array(self, attr: Iterable[str] = None) -> np.ndarray:
+            """
+            Combine individual attribute data with reconstructed time stamp to a common array for processing.
+
+            Args:
+                attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
+
+            Returns:
+                A numpy array (# samples, # attributes + 1) with single attributes as columns, the common
+                time stamp as first column.
+            """
             if attr is None:
                 attr = ['pos', 'lick', 'frame', 'enc', 'valve']
 
@@ -113,8 +135,13 @@ class VRSession(dj.Imported):
             time = np.array(range(0, len(data[0]) * int(SAMPLE*1000), int(SAMPLE*1000)))/1000
             return np.vstack((time, *data)).T
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """
+        Populates VRSession() for every entry of common_exp.Session().
 
+        Args:
+            key: Primary keys to query each entry of common_exp.Session() to be populated
+        """
         # Safety check that only my sessions are processed (should be restricted during the populate() call)
         if key['username'] != login.get_user():
             return
@@ -130,7 +157,10 @@ class VRSession(dj.Imported):
         VRLog().helper_insert1(key=vrlogfile_entry, skip_duplicates=True)  # Load the LOG file into the other table
 
         # Then, create entries of single trials
-        data = self.create_VRTrial_entries(key)
+        data = self.create_vrtrial_entries(key)
+
+        # TODO Manually curate session (show it to the user to select possible bad trials) before entering it in the DB
+
         # Enter the single trial entries one by one
         for i in range(len(data['trial'])):
             VRSession.VRTrial().insert1(data['trial'][i])
@@ -139,8 +169,18 @@ class VRSession(dj.Imported):
             RawTCPFile().insert1(data['pos'][i])
 
     @staticmethod
-    def create_vrsession_entry(key):
-        """Gather basic info about the session, mainly from Excel file, and return entry dict for VRSession table."""
+    def create_vrsession_entry(key: dict) -> dict:
+        """
+        Gather basic info about the session, mainly from Excel file, and return entry dict for VRSession table.
+        The entry dict has to be returned instead of inserted here because DJ only lets you insert entries into Imported
+        or Computed tables inside the make() function call.
+
+        Args:
+            key: Primary keys to query each entry of common_exp.Session() to be populated
+
+        Returns:
+            Complete entry for VRSession with primary keys as well as data about the session
+        """
         # Save original key
         new_key = key.copy()
 
@@ -182,10 +222,21 @@ class VRSession(dj.Imported):
         return new_key
 
     @staticmethod
-    def create_vrlogfile_entry(key):
-        """Find LOG file for a session and return entry dict for VRLogFile table."""
+    def create_vrlogfile_entry(key: dict) -> dict:
+        """
+        Find LOG file for a session and return entry dict for VRLogFile() table.
+        
+        The entry dict has to be returned instead of inserted here because DJ only lets you insert entries into Imported
+        or Computed tables inside the make() function call.
+
+        Args:
+            key: Primary keys to query each entry of VRSession() to be populated
+
+        Returns:
+            Complete entry for VRLogFile() with primary keys as well as the LOG file path
+        """
         mouse_id = (common_mice.Mouse & key).fetch1('mouse_id')
-        ### FILL VRLOG INFO
+
         # Get filename of this session's LOG file (path is relative to the session directory)
         log_name = glob(os.path.join(login.get_neurophys_data_directory(),
                                      (common_exp.Session & key).fetch1('session_path'),
@@ -198,21 +249,41 @@ class VRSession(dj.Imported):
         else:
             return dict(key, log_filename=os.path.basename(log_name[0]))
 
-    def create_VRTrial_entries(self, key):
+    def create_vrtrial_entries(self, key: dict) -> dict:
         """
-        Find raw behavior files, load data, and align it. Return entry dicts for VRTrial, RawEncFile, RawTDTFile and
-        RawTCPFile in a dict, each entry corresponding to a list of trial dicts for each table.
+        Find raw behavior files, load data, and align it. Return entry dicts for VRTrial(), RawEncFile(), RawTDTFile()
+        and RawTCPFile() in a dict, each entry corresponding to a list of trial dicts for each table.
+
+        The entry dict has to be returned instead of inserted here because DJ only lets you insert entries into Imported
+        or Computed tables inside the make() function call.
+
+        Args:
+            key: Primary keys to query each entry of VRSession() to be populated
+
+        Returns:
+            Each key ('trial', 'enc', 'pos' and 'trig') holds one list, which contains entry dicts for every trial of
+            the current session for tables VRTrial(), RawEncFile(), RawTCPFile(), and RawTDTFile() respectively.
         """
 
-        def find_file(tstamp, file_list):
-            """Finds a file with the same timestamp from a list of files."""
+        def find_file(tstamp: str, file_list: List[str], tolerance: int = 3) -> Optional[str]:
+            """
+            Finds a file with the same time stamp from a list of file names.
+
+            Args:
+                tstamp:      Sought time stamp string in format '%H%M%S'
+                file_list:   Search space of all file names
+                tolerance:   Max difference between sought and found time stamp in seconds. Defaults to 3.
+
+            Returns:
+                Path of the file name with the sought time stamp
+            """
             time_format = '%H%M%S'
             time_stamp = datetime.strptime(str(tstamp), time_format)
             matched_file = []
             for filename in file_list:
                 curr_stamp = datetime.strptime(filename.split('_')[-1][:-4], time_format)
                 diff = time_stamp - curr_stamp
-                if abs(diff.total_seconds()) < 3:
+                if abs(diff.total_seconds()) < tolerance:
                     matched_file.append(filename)
             if len(matched_file) == 0:
                 print(f'No files with timestamp {tstamp} found in {root}!')
@@ -223,16 +294,28 @@ class VRSession(dj.Imported):
             else:
                 return matched_file[0]
 
-        def get_behavior_file_paths(root_path, is_imaging):
-            """Get lists of encoder, position and trigger files of all trials in this session."""
+        def get_behavior_file_paths(root_path: str, is_imaging: bool) -> Optional[Tuple[List[str], List[str], List[str]]]:
+            """
+            Get lists of encoder, position and trigger file paths of all trials in this session.
+
+            Args:
+                root_path:      Path of the session
+                is_imaging:     Flag whether it's an imaging session (files in subdirectory) or not (files in root_path)
+
+            Returns:
+                Three lists containing file paths of encoder, position and trigger files
+            """
+
+            # Todo: change this for new folder structure, probably without trial subfolders. But backwards compatibility
+            #  should probably be preserved, or old sessions have to be changed to the new structure...
             if is_imaging:
-                encoder_files = glob(root_path + r'\\**\\Encoder*.txt')
-                position_files = glob(root_path + r'\\**\\TCP*.txt')
-                trigger_files = glob(root_path + r'\\**\\TDT TASK*.txt')
+                prefix = r"\\**\\"
             else:
-                encoder_files = glob(root_path + r'\\Encoder*.txt')
-                position_files = glob(root_path + r'\\TCP*.txt')
-                trigger_files = glob(root_path + r'\\TDT TASK*.txt')
+                prefix = r"\\"
+
+            encoder_files = glob(root_path + prefix + 'Encoder*.txt')
+            position_files = glob(root_path + prefix + 'TCP*.txt')
+            trigger_files = glob(root_path + prefix + 'TDT TASK*.txt')
 
             encoder_files = util.numerical_sort(encoder_files)
             position_files = util.numerical_sort(position_files)
@@ -286,7 +369,7 @@ class VRSession(dj.Imported):
 
             if merge is not None:
                 # parse columns into entry dict and typecast to int to save disk space
-                # TODO: make "frame" and "valve" to event-times rather than continuous sampling
+                # TODO: make "frame" and "valve" to event-times rather than continuous sampling?
                 trial_key['pos'] = merge[:, 1]
                 trial_key['lick'] = merge[:, 2].astype(int)
                 trial_key['frame'] = merge[:, 3].astype(int)
@@ -303,17 +386,23 @@ class VRSession(dj.Imported):
 
         return data
 
-    def align_behavior_files(self, trial_key, enc_path, pos_path, trig_path, imaging=False, frame_count=None):
+    def align_behavior_files(self, trial_key: dict, enc_path: str, pos_path: str, trig_path: str, imaging: bool = False,
+                             frame_count: Optional[int] = None) -> np.ndarray:
         """
-        Main function that aligns behavioral data from three text files to a common master time frame provided by
-        LabView. Data are re-sampled at the rate of the encoder (125 Hz), as the encoder is a summed data collection and
-        is difficult to resample.
-        :param enc_path: str, path to the Encoder.txt file (running speed)
-        :param pos_path: str, path to the TCP.txt file (VR position)
-        :param trig_path: str, path to the TDT.txt file (licking and frame trigger)
-        :param imaging: bool flag whether the behavioral data is accompanied by an imaging movie
-        :param frame_count: int, frame count of the imaging movie (if imaging=True)
-        :return: merge, np.array with columns '', 'position', 'licking', 'trigger', 'encoder', 'speed', 'water'
+        Align behavioral data from three text files to a common master time frame provided by LabView. Data are
+        re-sampled at the rate of the encoder (125 Hz), as the encoder is a summed data collection and is difficult to
+        resample.
+
+        Args:
+            trial_key:      Dict with primary keys for current trial to query LOG file from VRLog()
+            enc_path:       Path to the Encoder.txt file (running speed)
+            pos_path:       Path to the TCP.txt file (VR position)
+            trig_path:      Path to the TDT.txt file (licking and frame trigger)
+            imaging:        Bool flag whether the behavioral data is accompanied by an imaging movie (defaults to False)
+            frame_count:    Frame count of the imaging movie (only needed if imaging=True)
+
+        Returns:
+            Aligned data in np.array with columns 'time', 'position', 'licking', 'trigger', 'encoder', 'speed', 'water'
         """
 
         pd.options.mode.chained_assignment = None  # Disable false positive SettingWithCopyWarning
@@ -530,8 +619,15 @@ class VRSession(dj.Imported):
 
         return array
 
-    def is_session_novel(self, sess_key):
-        """Checks whether the session of 'sess_key' is in the novel corridor (from VR zone borders)"""
+    def is_session_novel(self, sess_key: dict) -> bool:
+        """
+        Checks whether the session of 'sess_key' is in the novel corridor (from VR zone borders)
+        Args:
+            sess_key: Primary keys to query entry of VRLog()
+
+        Returns:
+            Boolean flag whether the queried session is in the novel (True) or training (False) corridor
+        """
         # Get event log
         log_events= (VRLog & sess_key).get_dataframe()['log_event']
         # Get the rounded position of the first reward zone
@@ -543,8 +639,17 @@ class VRSession(dj.Imported):
         else:
             print(f'Could not determine context in session {self.key}!\n')
 
-    def get_condition(self, key, task, condition_switch):
-        """Test which condition this trial was"""
+    def get_condition(self, key: dict, task: str, condition_switch: Iterable[int]) -> Tuple[str, int]:
+        """
+        Returns condition (RZ position, corridor pattern, tone) of a single trial.
+        Args:
+            key: Primary keys of the queried trial
+            task: Type of task, manually entered in common_exp.Session
+            condition_switch: Trial ID(s) at which the new condition in this session appears. [-1] for no change.
+
+        Returns:
+            Corridor pattern at that trial (corresponds to CorridorPattern()), and if the tone was on (1) or off (0).
+        """
 
         # No condition switches in novel corridor
         if self.is_session_novel(key):
@@ -636,10 +741,23 @@ class VRLog(dj.Imported):
     log_event           : longblob          # np.array of event log (str)
     """
 
-    def make(self, key):
+    def make(self, key: dict) -> None:
+        """
+        Populates VRLog for every entry of VRLogFile() with processed log data.
+
+        Args:
+            key: Primary keys of the current VRLogFile() entry.
+        """
         self.helper_insert1(key)
 
-    def helper_insert1(self, key, skip_duplicates):
+    def helper_insert1(self, key: dict, skip_duplicates: bool) -> None:
+        """
+        Extract data from a LOG file and insert it column-wise into VRLog().
+
+        Args:
+            key: Primary keys of the current VRLogFile() entry.
+            skip_duplicates: Flag whether entries that already exist in VRLog() should be skipped or raise an error.
+        """
         # Load LOG file
         log = pd.read_csv(os.path.join(login.get_neurophys_data_directory(),
                                        (common_exp.Session & key).fetch1('session_path'), key['log_filename']),
@@ -667,8 +785,13 @@ class VRLog(dj.Imported):
         insert_dict['log_event'] = np.array(log['Event'])
         self.insert1(insert_dict, allow_direct_insert=True, skip_duplicates=skip_duplicates)
 
-    def get_dataframe(self):
-        """Fetch LOG data of one session re-assembled as pandas DataFrame"""
+    def get_dataframe(self) -> pd.DataFrame:
+        """
+        Fetch LOG data of the queried SINGLE session re-assembled as pandas DataFrame.
+
+        Returns:
+            DataFrame with time stamp, trial number and event of the queried LOG file.
+        """
         return pd.DataFrame({'log_time': self.fetch1('log_time'),
                              'log_trial': self.fetch1('log_trial'),
                              'log_event': self.fetch1('log_event')})
@@ -718,8 +841,12 @@ class VRPerformance(dj.Computed):
     trial_duration              : longblob          # np.array of trial durations (in s)
     """
 
-    def make(self, key):
-        """ Computes general performance metrics from individual trials of a session. """
+    def make(self, key: dict) -> None:
+        """
+        Computes general performance metrics from individual trials of a session with a certain set of parameters.
+        Args:
+            key: Primary keys of the union of the current VRSession and PerformanceParameters entry.
+        """
 
         # Get current set of parameters
         params = (PerformanceParameters & key).fetch1()
@@ -756,18 +883,22 @@ class VRPerformance(dj.Computed):
         # Combine primary dict "key" with attributes "trial_data" and insert entry
         self.insert1({**key, **trial_data})
 
-        return
-
     @staticmethod
-    def compute_performances(curr_trial, data, params):
+    def compute_performances(curr_trial: VRSession.VRTrial, data: np.ndarray, params: dict) \
+            -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Computes lick, binned lick and stop performance of a single trial. Called during VRPerformance.populate().
-        :param curr_trial: query of the current trial from VRSession.VRTrial()
-        :param data: np.array holding behavioral data of this trial (time - lick - position - encoder)
-        :param params: dict of current entry of PerformanceParameters()
-        :return: binned_lick_ratio, lick_count_ratio, stop_ratio
+
+        Args:
+            curr_trial: Query of the current trial from VRSession.VRTrial()
+            data: Behavioral data of this trial (time - lick - position - encoder)
+            params: Current entry of PerformanceParameters()
+
+        Returns:
+            Three 1D arrays with different performance metrics: Binned lick ratio, lick count ratio, stop ratio
         """
         # TODO: Alternative approaches to calculate performances
+        #  - only count the ONSET of licks per bin, not if a lick went over a bin border (especially impactful if a mouse is running fast while licking)
         #  - if one bin of a RZ is licked, count it for all bins of that RZ
         #  - check for mean distance of licked bins to the next RZ
         # Get reward zone borders for the current trial and add the buffer
@@ -876,13 +1007,18 @@ class VRPerformance(dj.Computed):
         return binned_lick_ratio, lick_count_ratio, stop_ratio
 
     @staticmethod
-    def compute_time_metrics(curr_trial, params, timestamps):
+    def compute_time_metrics(curr_trial: VRSession.VRTrial, params: dict, timestamps: np.ndarray)\
+            -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
-        Compute mean speed, running speed and trial duration.
-        :param curr_trial: query of the current trial from VRSession.VRTrial()
-        :param params: dict of current entry of PerformanceParameters()
-        :param timestamps: np.array of behavior data point time stamps
-        :return: mean_speed, mean_running_speed, trial_duration
+        Compute mean speed, running speed and trial duration of a single trial.
+        
+        Args:
+            curr_trial: Query of the current trial from VRSession.VRTrial()
+            params: Current entry of PerformanceParameters()
+            timestamps: Time stamps of behavioral data points
+
+        Returns:
+            Three 1D arrays with different time metrics: mean speed, mean running speed and trial duration
         """
 
         # Get mean speed by taking track length / max time stamp. Slighty more accurate than mean(vel) because ITI
@@ -898,17 +1034,26 @@ class VRPerformance(dj.Computed):
 
         return mean_speed, mean_running_speed, time
 
-    def get_mean(self, attribute):
-        """ Get the mean of given attribute of the queried session(s) """
-        sess = self.fetch(attribute)
-        means = [np.mean(x) for x in sess]
-        if len(means) == 1:
-            return means[0]
-        else:
-            return means
+    def get_mean(self, attr: str) -> List[float]:
+        """
+        Get a list of the mean of a given performance attribute of the queried sessions.
+        
+        Args:
+            attr: Performance metric, must be attribute of VRPerformance()
 
-    def plot_performance(self, attr='binned_lick_ratio'):
-        """ Plots performance across time for the queried sessions """
+        Returns:
+            Means of a performance attribute of the queried sessions
+        """
+        sess = self.fetch(attr)
+        return [np.mean(x) for x in sess]
+    
+    def plot_performance(self, attr: str='binned_lick_ratio') -> None:
+        """
+        Plots performance across time for the queried sessions.
+        
+        Args:
+            attr: Performance metric, must be attribute of VRPerformance()
+        """
         mouse_id, day, behav = self.fetch('mouse_id', 'day', attr)
         df = pd.DataFrame(dict(mouse_id=mouse_id, day=day, behav=behav))
         df_new=df.explode('behav')
@@ -942,8 +1087,13 @@ class PerformanceTrend(dj.Computed):
     perf_ols_y = NULL     : longblob        # Y (performance data) used to fit OLS (y is the FIRST argument in sm.OLS!)
     """
 
-    def make(self, key):
-        """ Compute trends of a VRPerformance entry. """
+    def make(self, key: dict) -> None:
+        """
+        Compute time-dependent trends across trials of a VRPerformance() session entry and populate PerformanceTrend().
+        
+        Args:
+            key: Primary keys of the queried VRPerformance() entry.
+        """
         # Get parameter set
         params = (PerformanceParameters & key).fetch1()
 
