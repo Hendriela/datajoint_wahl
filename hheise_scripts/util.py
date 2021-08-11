@@ -15,8 +15,8 @@ from glob import glob
 import yaml
 import numpy as np
 
-import login
 from schema import common_mice, common_exp
+import login
 
 REL_BACKUP_PATH = "Datajoint/manual_submissions"
 
