@@ -648,7 +648,7 @@ class window(wx.Frame):
 
         # Insert into database and save backup YAML
         identifier = 'weight_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), self.dow.GetValue())
-        self.safe_insert(common_mice.Weight(), weight_dict, identifier, REL_BACKUP_PATH)
+        self.safe_insert(common_mice.Weight(), weight_dict, identifier, REL_BACKUP_PATH, helper=True)
 
     def event_submit_care(self, event):
         """Enter a new care administration for the currently selected mouse"""
@@ -668,7 +668,7 @@ class window(wx.Frame):
 
         # Insert into database and save backup YAML
         identifier = 'care_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), self.doa.GetValue())
-        self.safe_insert(common_mice.PainManagement(), care_dict, identifier, REL_BACKUP_PATH)
+        self.safe_insert(common_mice.PainManagement(), care_dict, identifier, REL_BACKUP_PATH, helper=True)
 
     def event_submit_euthanasia(self, event):
         """Move the currently selected mouse to the Sacrificed table"""
@@ -774,10 +774,13 @@ class window(wx.Frame):
         """ User pressed quit button """
         self.Close(True)
 
-    def safe_insert(self, table, dictionary, identifier, backup):
+    def safe_insert(self, table, dictionary, identifier, backup, helper=False):
         """ Enter a dict into a table. If successful, returns True and the dict is saved in a backup YAML file."""
         try:
-            id = table.insert1(dictionary)       # some inserts (e.g. care) return an ID that is added to the identifier
+            if helper:
+                id = table.helper_insert1(dictionary)
+            else:
+                id = table.insert1(dictionary)   # some inserts (e.g. care) return an ID that is added to the identifier
             self.status_text.write('Sucessfully entered new entry in table "{}": \n\t'.format(table.table_name) +
                                    str(dictionary) + '\n')
             

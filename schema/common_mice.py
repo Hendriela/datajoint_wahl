@@ -190,9 +190,18 @@ class Weight(dj.Manual):
     weight              : decimal(3,1)   # Weight in grams
     """
 
-    def insert1(self, row, **kwargs):
+    def helper_insert1(self, row: dict, **kwargs) -> None:
+        """
+        Extended insert function that checks the animal's weight threshold upon insert and warns user if the mouse is
+        under the threshold.
+
+        Args:
+            row:        An iterable (a numpy recarray, a dict-like object, a pandas.DataFrame, a
+                            sequence, or a query expression) with the same heading as Weight().
+            **kwargs:   Optional keyword arguments.
+        """
         try:
-            super().insert((row,), **kwargs)
+            self.insert((row,), **kwargs)
         except dj.errors.DuplicateError:
             return
             # Todo: Ask user if previous weight should be overwritten?
@@ -241,11 +250,30 @@ class PainManagement(dj.Manual):
     care_frequency      : tinyint           # Number of administration per day (1 or 2)
     """
 
-    def insert1(self, row, **kwargs):
-        """ Extended insert1 function that creates and returns an incrementally increased care_num counter."""        
+    def helper_insert1(self, row: dict, **kwargs) -> Optional[int]:
+        """
+        Extended insert1 function that creates and returns an incrementally increased care_num counter as primary key,
+        which allows for several care administrations per day.
+
+        Args:
+            row:        An iterable (a numpy recarray, a dict-like object, a pandas.DataFrame, a sequence, or a query
+                            expression) with the same heading as PainManagement(). Holds data of the new entry, except
+                            "care_num" primary key.
+
+            **kwargs:   Optional keyword arguments.
+
+        Returns:
+            Care_num iterator, the number of unique applications on this day
+        """
+
         if 'care_num' not in row:
-            row['care_num'] = len(self & row)
-        super().insert((row,), **kwargs)
+            try:
+                row['care_num'] = len(self & row)
+            except TypeError:
+                # Todo: implement code that works for types which do not support item assignment
+                raise TypeError(f"Type '{type(row)}' is unsupported for insertion in PainManagement(). "
+                                f"Use dict to insert.")
+        self.insert1((row,), **kwargs)
         return row['care_num']
 
 
@@ -356,8 +384,8 @@ class Surgery(dj.Manual):
             with connection.transaction:
                 if weight != 0:
                     #insert row into Weight table
-                    Weight().insert1({"username": experimenter, "mouse_id": mouse_id, "date_of_weight": date_str,
-                                      "weight": weight})
+                    Weight().helper_insert1({"username": experimenter, "mouse_id": mouse_id, "date_of_weight": date_str,
+                                             "weight": weight})
 
                 # add row to Surgery table
                 super().insert((row,), **kwargs)
