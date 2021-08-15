@@ -5,6 +5,7 @@ import login
 from schema import common_mice
 from pathlib import Path
 import os
+from datetime import datetime
 
 schema = dj.schema('common_exp', locals(), create_tables=True)
 
@@ -84,8 +85,9 @@ class Session(dj.Manual):
     session_notes   : varchar(2048)  # description of important things that happened
     """
 
-    def create_id(self, investigator_name, mouse_id, date, session_num):
-        """Create unique session id with the format inv_MXXX_YYYY-MM-DD_ZZ:
+    def create_id(self, investigator_name: str, mouse_id: int, date: datetime, session_num: int) -> str:
+        """
+        Create unique session id with the format inv_MXXX_YYYY-MM-DD_ZZ:
         inv: investigator shortname (called 'experimenter' in Adrians GUI)
         MXXX: investigator-specific mouse number (M + 0-padded three-digit number, e.g. M018)
         YYYY-MM-DD: date of session
@@ -94,11 +96,16 @@ class Session(dj.Manual):
         Adrian 2019-08-12
         Adapted by Hendrik 2021-05-04
         ------------------------------------------------------------------------------------
-        :param investigator_name: str, shortname of the investigator for this session (from common_mice.Investigator)
-        :param mouse_id: int, investigator-specific mouse ID (from common_mice.Mice)
-        :param date: datetime, date of the session in format YYYY-MM-DD
-        :param session_num: int, iterator for number of sessions on that day
-        :return: unique string ID for this session
+
+        Args:
+            investigator_name:  Shortname of the investigator for this session (from common_mice.Investigator)
+            mouse_id:           Investigator-specific mouse ID (from common_mice.Mice)
+            date:               Date of the session in format YYYY-MM-DD
+            session_num:        Iterator for number of sessions on that day
+
+        Returns:
+            Unique string ID for this session
+
         """
 
         # first part: mouse identifier
@@ -114,10 +121,15 @@ class Session(dj.Manual):
         # combine and return the unique session id
         return first_part + '_' + date_str + '_' + trial_str
 
-    def get_relative_path(self, abs_path):
-        """Removes the Neurophysiology-Server path from an absolute path and returns the relative path
-        :param abs_path: str, absolute path of a directory on the Neurophysiology-Storage1 server
-        :return: relative path with the machine-specific Neurophysiology-Path removed
+    def get_relative_path(self, abs_path: str) -> str:
+        """
+        Removes the Neurophysiology-Server path from an absolute path and returns the relative path
+
+        Args:
+            abs_path: Absolute path of a directory on the Neurophysiology-Storage1 server
+
+        Returns:
+            Relative path with the machine-specific Neurophysiology-Path removed
         """
 
         dir = Path(login.get_neurophys_data_directory())   # get machine-specific path from local login file
@@ -134,14 +146,18 @@ class Session(dj.Manual):
                           'login.get_neurophys_data_directory() are set correctly.\n'
                           'Absolute path used for now.'.format(abs_path))
 
-    def helper_insert1(self, new_entry_dict):
-        """Simplified insert function that takes care of id and counter values
-        Parameters
-        ---------
-        new_entry_dict : dict
-            Dictionary containing all key, value pairs for the session except for
-            the id and counter
+    def helper_insert1(self, new_entry_dict: dict) -> str:
+        """
+        Simplified insert function that takes care of id and counter values.
         Adrian 2019-08-19
+
+        Args:
+            new_entry_dict: Dictionary containing all key, value pairs for the session except for
+                                the id and counter
+
+        Returns:
+            Status update string confirming successful insertion.
+
         """
 
         id = self.create_id(new_entry_dict['username'], new_entry_dict['mouse_id'], new_entry_dict['day'],
@@ -162,9 +178,14 @@ class Session(dj.Manual):
         key_dict = {your_key: entry[your_key] for your_key in ['username', 'mouse_id', 'day', 'session_num']}
         return 'Inserted new session: {}'.format(key_dict)
 
-    def get_folder(self):
-        """ Return the folder on neurophys for this session on the current PC
-        Adrian 2020-12-07 """
+    def get_folder(self) -> str:
+        """
+        Return the folder on the current user's Neurophys data directory for this session on the current PC
+        Adrian 2020-12-07
+
+        Returns:
+            Absolute path on the Neurophys data directory of the current 'session_path'.
+        """
 
         # In the current version we save the relative path (excluding base directory) which the user saves in the GUI,
         # including the leading directory separator ('\\') so the absolute path can be recovered by adding both strings
@@ -199,6 +220,14 @@ class Session(dj.Manual):
     #         keys.extend((Session() & (shared.GroupAssignment() & {'group': name})).fetch(dj.key))
     #     return keys
 
-    def get_key(self, counter):
-        """Return key that corresponds to counter of sessions """
-        return (self & {'counter': counter}).fetch1('KEY')
+    def get_key(self, counter: int) -> dict:
+        """
+        Return uniquely identifying primary keys that corresponds to global counter of sessions.
+
+        Args:
+            counter: Overall counter of all sessions across mice (base 0).
+
+        Returns:
+            Primary keys of the session with the provided counter.
+        """
+        return (self & {'session_counter': counter}).fetch1('KEY')
