@@ -4,6 +4,7 @@ import datajoint as dj
 from dateutil.parser import parse
 import matplotlib.pyplot as plt
 import numpy as np
+from typing import Optional, Iterable
 
 import login
 login.connect()
@@ -81,12 +82,17 @@ class Mouse(dj.Manual):
       info          : varchar(1024)            # Additional information about this mouse
       """
 
-    def get_weight_threshold(self, printout=True, rel_threshold=0.85):
+    def get_weight_threshold(self, printout: bool = True, rel_threshold: float = 0.85) -> Optional[float]:
         """
-        Give the pre-surgery weight threshold of a single Mouse query.
-        :param printout: bool flag whether the result should be printed or returned as a float
-        :param rel_threshold: float, optional; threshold of weight (default 85%)
-        :return: rel_threshold fraction of the pre-surgery weight
+        Returns the pre-surgery weight threshold of a single Mouse query.
+
+        Args:
+            printout: Flag whether the result should be printed or returned as a float
+            rel_threshold: Threshold of weight (default 85%)
+
+        Returns:
+            Fraction "rel_threshold" of the pre-surgery weight, or print it out and return None if printout = True.
+
         """
         mouse = self.fetch1()                                   # Get Mouse() entry (has to be single row)
         surg = Surgery() & mouse                                # Filter for most recent surgery
@@ -107,12 +113,14 @@ class Mouse(dj.Manual):
             else:
                 return None
 
-    def plot_weight(self, relative=False, rel_threshold=0.85, show_surgeries=False):
+    def plot_weight(self, relative: bool = False, rel_threshold: float = 0.85, show_surgeries: bool = False) -> None:
         """
         Plots the weights across time of a Mouse query (one or many mice).
-        :param relative: bool flag whether weights should be plotted as % of pre-surgery weight
-        :param rel_threshold: float, optional; threshold of weight (default 85%)
-        :param show_surgeries: bool float whether surgeries should be shown as vertical lines
+
+        Args:
+            relative: Flag whether weights should be plotted as % of pre-surgery weight
+            rel_threshold: Threshold of weight (default 85%)
+            show_surgeries: Flag whether surgeries should be shown as vertical lines
         """
         mice = self.fetch('KEY', as_dict=True)          # Get primary keys of the current query for downstream querying
 
@@ -226,7 +234,7 @@ class PainManagement(dj.Manual):
     definition = """ # Pain management records, especially for post-OP care
     -> Mouse
     date_of_care        : date              # Date of care application (year-month-day)
-    care_num            : tinyint           # iterator of unique injections per day
+    care_num            : tinyint           # iterator of unique applications per day
     ---
     -> CareSubstance
     care_volume = 0     : smallint          # volume of injection in uL (0 if administered through drinking water)
@@ -309,14 +317,19 @@ class Surgery(dj.Manual):
     illumination_time=NULL      : tinyint        # Illumination time in minutes for photothrombotic strokes
     """
     # TODO: rename stroke_params to illumination time, turn it into an integer
-    def insert(self, rows, **kwargs):
-        """Extend the insert method so that pre_op weights are automatically entered in Weight() table
-        At the moment, only works if the rows are entered as dictionary data types
-        This also covers usage of the insert1() function
+    def insert(self, rows: dict, **kwargs) -> None:
+        """
+        Extend the insert method so that pre_op weights are automatically entered in Weight() table.
+        At the moment, only works if the rows are entered as dictionary data types.
+        This also covers usage of the insert1() function.
         Matteo 2021-05-18
         ----------------------------------------------
-        :param rows:  An iterable where an element is a numpy record, a dict-like object, a pandas.DataFrame, a sequence,
-            or a query expression with the same heading as table self
+
+        Args:
+            rows:       An iterable where an element is a numpy record, a dict-like object, a pandas.DataFrame, a
+                            sequence, or a query expression with the same heading as Surgery(). If not dict, the entry
+                            is inserted without tracking the weight.
+            **kwargs:   Optional keyword arguments.
         """
         # insert rows one by one
         for row in rows:
