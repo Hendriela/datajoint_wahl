@@ -4,9 +4,6 @@
 Created on Sat May 15 22:54:12 2021
 
 @author: hheise
-Installation of wxpython in Ubuntu 18.04 (pip install did not work):
-conda install -c anaconda wxpython
-pip install datajoint
 """
 
 import sys
@@ -18,17 +15,16 @@ import login
 import datajoint as dj
 from datetime import datetime
 import os
-import glob
 import numpy as np
 import yaml
-from pathlib import Path
+from typing import Optional
 
 # connect to datajoint database
 login.connect()
-from schema import common_mice, common_exp  #, common_behav, common_img, common_el
+from schema import common_mice
 
 # =============================================================================
-# HARDCODED PARAMETER FOR GUI
+# HARDCODED PARAMETERS FOR GUI
 # =============================================================================
 
 BOX_WIDTH = 170
@@ -90,6 +86,7 @@ WINDOW_HEIGHT = 1100
 B_TOP = L_TOP
 
 # relative path to manual_submission backup folder inside the Neurophysiology Wahl directory (common for all users)
+# TODO: remove hard-coding of folder location
 REL_BACKUP_PATH = "Datajoint/manual_submissions"
 
 # =============================================================================
@@ -158,7 +155,13 @@ types = common_mice.SurgeryType().fetch('surgery_type')
 
 class window(wx.Frame):
 
-    def __init__(self, parent, id):
+    def __init__(self, parent: Optional[wx.Window], id: int) -> None:
+        """
+        Builds the GUI window with text, boxes and buttons. Layout of the GUI is described in global position constants.
+        Args:
+            parent: The window parent, None for standalone window.
+            id:     Unique window identifier, -1 for default value.
+        """
 
         wx.Frame.__init__(self, parent, id, '{} ({}): Enter mouse data into database'.format(inv_fullname, investigator),
                           size=(WINDOW_WIDTH, WINDOW_HEIGHT))
@@ -510,8 +513,14 @@ class window(wx.Frame):
     # Events for menus and button presses
     # =============================================================================
 
-    def event_submit_mouse(self, event):
-        """Insert new mouse to Mouse()"""
+    def event_submit_mouse(self, event: wx.Event) -> None:
+        """
+        Collects data from GUI fields, constructs entry dict and inserts new mouse to Mouse(). Called when button
+        "Submit mouse" is clicked.
+
+        Args:
+            event: Event trigger for "Submit mouse" button click.
+        """
 
         # create database entry
         mouse_dict = dict(username=investigator,
@@ -547,8 +556,15 @@ class window(wx.Frame):
             # Set the new mouse as "loaded" so that surgeries can directly be added to it
             self.curr_mouse.SetValue(new_mouse_id)
 
-    def event_update_mouse(self, event):
-        """Update info for an existing mouse"""
+    def event_update_mouse(self, event: wx.Event) -> None:
+        """
+        Collects data from GUI fields, constructs entry dict and updates an already existing mouse in Mouse(). Entry
+        dict is saved in a backup YAML file.
+        Called when button "Update mouse" is clicked.
+
+        Args:
+            event: Event trigger for "Update mouse" button click.
+        """
 
         # Get info from fields
         mouse_dict = dict(username=investigator,
@@ -574,8 +590,15 @@ class window(wx.Frame):
             yaml.dump(mouse_dict, outfile, default_flow_style=False)
         self.status_text.write('Updated backup file at %s' % filename + '\n')
 
-    def event_submit_surgery(self, event):
-        """Enter surgery data as new entry into the Surgery table"""
+    def event_submit_surgery(self, event: wx.Event) -> None:
+        """
+        Collects data from GUI fields, constructs entry dict and inserts new surgery in Surgery(). Entry dict is saved
+        in a backup YAML file.
+        Called when button "Submit surgery" is clicked.
+
+        Args:
+            event: Event trigger for "Submit surgery" button click.
+        """
 
         # Check if a mouse was loaded before submitting a surgery
         if self.curr_mouse.GetValue() == 'None':
@@ -603,8 +626,15 @@ class window(wx.Frame):
         identifier = 'surgery_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), self.surg_num.GetValue())
         self.safe_insert(common_mice.Surgery(), surg_dict, identifier, REL_BACKUP_PATH)
 
-    def event_submit_injection(self, event):
-        """Enter new injection for the currently selected surgery"""
+    def event_submit_injection(self, event: wx.Event) -> None:
+        """
+        Collects data from GUI fields, constructs entry dict and inserts new injection in Injection() for the currently
+        displayed surgery. Entry dict is saved in a backup YAML file.
+        Called when button "Submit injection" is clicked.
+
+        Args:
+            event: Event trigger for "Submit injection" button click.
+        """
 
         # Check if a mouse was loaded before submitting an injection
         if self.curr_mouse.GetValue() == 'None':
@@ -632,8 +662,15 @@ class window(wx.Frame):
             # Increase the injection_num counter by 1
             self.inj_num.SetValue(str(inj_dict['injection_num']+1))
 
-    def event_submit_weight(self, event):
-        """Enter a new weight for the currently selected mouse"""
+    def event_submit_weight(self, event: wx.Event) -> None:
+        """
+        Collects data from GUI fields, constructs entry dict and inserts new weight in Weight() for the currently
+        selected mouse. Entry dict is saved in a backup YAML file.
+        Called when button "Submit weight" is clicked.
+
+        Args:
+            event: Event trigger for "Submit weight" button click.
+        """
 
         # Check if a mouse was loaded before submitting a weight
         if self.curr_mouse.GetValue() == 'None':
@@ -650,8 +687,15 @@ class window(wx.Frame):
         identifier = 'weight_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), self.dow.GetValue())
         self.safe_insert(common_mice.Weight(), weight_dict, identifier, REL_BACKUP_PATH, helper=True)
 
-    def event_submit_care(self, event):
-        """Enter a new care administration for the currently selected mouse"""
+    def event_submit_care(self, event: wx.Event) -> None:
+        """
+        Collects data from GUI fields, constructs entry dict and inserts new care administration in PainManagement()
+        for the currently selected mouse. Entry dict is saved in a backup YAML file.
+        Called when button "Submit weight" is clicked.
+
+        Args:
+            event: Event trigger for "Submit weight" button click.
+        """
 
         # Check if a mouse was loaded before submitting a weight
         if self.curr_mouse.GetValue() == 'None':
@@ -670,8 +714,15 @@ class window(wx.Frame):
         identifier = 'care_{}_M{:03d}_{}'.format(investigator, int(self.mouse_id.GetValue()), self.doa.GetValue())
         self.safe_insert(common_mice.PainManagement(), care_dict, identifier, REL_BACKUP_PATH, helper=True)
 
-    def event_submit_euthanasia(self, event):
-        """Move the currently selected mouse to the Sacrificed table"""
+    def event_submit_euthanasia(self, event: wx.Event) -> None:
+        """
+        Enter the currently selected mouse to the Sacrificed() table, which removes it from the GUI and prevents 
+        entering new data for a dead mouse. Entry dict is saved in a backup YAML file.
+        Called when button "Submit euthanasia" is clicked.
+
+        Args:
+            event: Event trigger for "Submit euthanasia" button click.
+        """
 
         # Check if a mouse was loaded before submitting a euthanasia
         if self.curr_mouse.GetValue() == 'None':
@@ -689,8 +740,9 @@ class window(wx.Frame):
         identifier = 'sacrificed_{}_M{:03d}'.format(investigator, int(self.mouse_id.GetValue()))
         self.safe_insert(common_mice.Sacrificed(), weight_dict, identifier, REL_BACKUP_PATH)
 
-    def load_mouse(self):
-        """ Load data of an already existing mouse to add surgeries/weights/euthanasia """
+    def load_mouse(self) -> None:
+        """ Load data of an already existing mouse and update GUI fields to add surgeries/weights/euthanasia. """
+
         mouse_dict = dict(username=investigator,
                           mouse_id=self.new_mouse.GetValue())
         entries = (common_mice.Mouse() & mouse_dict).fetch(as_dict=True)
@@ -736,8 +788,13 @@ class window(wx.Frame):
         self.status_text.write(
             '\nSuccessfully loaded mouse {}. You can now add new or update existing data.'.format(mouse_dict) + '\n')
 
-    def change_mouse(self, change):
-        """ Change the current mouse ID by the given value and load the new mouse data """
+    def change_mouse(self, change: int) -> None:
+        """
+        Change the current mouse ID by the given value and load the data for the mouse with the new ID.
+
+        Args:
+            change: Value by which the currently loaded ID should be changed.
+        """
         curr_id = int(self.new_mouse.GetValue())
 
         # Do not change mouse_id if the next ID would be out of range of existing IDs
@@ -758,24 +815,59 @@ class window(wx.Frame):
         self.new_mouse.SetSelection(item)
         self.load_mouse()
 
-    def event_load_mouse(self, event):
-        """Load data of an already existing mouse to add surgeries/weights/euthanasia"""
+    def event_load_mouse(self, event: wx.Event) -> None:
+        """
+        Event handler that is triggered by the "Load mouse" button press and calls the load_mouse() function.
+
+        Args:
+            event: Event trigger for "Load mouse" button click.
+        """
         self.load_mouse()
 
-    def event_next_mouse(self, event):
-        """ Select and load the mouse with the next higher ID """
+    def event_next_mouse(self, event: wx.Event) -> None:
+        """
+        Select and load the mouse with the next higher ID. Triggered by pressing the "UP-ARROW" button.
+
+        Args:
+            event: Event trigger for "UP-ARROW" button click.
+        """
         self.change_mouse(1)
 
-    def event_prev_mouse(self, event):
-        """ Select and load the mouse with the next lower ID """
+    def event_prev_mouse(self, event: wx.Event) -> None:
+        """
+        Select and load the mouse with the next lower ID. Triggered by pressing the "DOWN-ARROW" button.
+
+        Args:
+            event: Event trigger for "DOWN-ARROW" button click.
+        """
         self.change_mouse(-1)
 
-    def event_quit_button(self, event):
-        """ User pressed quit button """
+    def event_quit_button(self, event: wx.Event) -> None:
+        """
+        Close the window after "Quit" button click.
+
+        Args:
+            event: Event trigger for "Quit" button click.
+        """
         self.Close(True)
 
-    def safe_insert(self, table, dictionary, identifier, backup, helper=False):
-        """ Enter a dict into a table. If successful, returns True and the dict is saved in a backup YAML file."""
+    def safe_insert(self, table: dj.Table, dictionary: dict, identifier: str, backup: str, helper: bool=False) -> bool:
+        """
+        General purpose function that enters a dict into a table. If successful, returns True and the dict is saved in a
+        backup YAML file. Exceptions are not raised, but caught and printed out in the GUI status field.
+
+        Args:
+            table:          Any DataJoint table where the entry dict should be added as an entry.
+            dictionary:     Holds entry data. Has to have the same keys as the table heading.
+            identifier:     Unique identifying string of the current entry, usually a combination of its primary key
+                                values. Used as a file name for the backup YAML file.
+            backup:         Directory where backup YAML files should be saved.
+            helper:         Flag whether the table's default insert1() function or modified helper_insert1() function
+                                should be called for entry.
+
+        Returns:
+            Bool flag whether the insert was successful or not.
+        """
         try:
             if helper:
                 id = table.helper_insert1(dictionary)
@@ -800,7 +892,15 @@ class window(wx.Frame):
             return False
 
 
-def get_backup_path():
+def get_backup_path() -> str:
+    """
+    Convenience function to get the location of the YAML backup files relative to the Neurophys Wahl folder, which is
+    hardcoded in this script.
+
+    Returns:
+        Relative directory path of the YAML backup files.
+    """
+    #TODO: change hardcoding of the backup path, maybe use variable in login or gui_params?
     return REL_BACKUP_PATH
 
 
