@@ -317,9 +317,9 @@ class VRSession(dj.Imported):
             position_files = glob(root_path + prefix + 'TCP*.txt')
             trigger_files = glob(root_path + prefix + 'TDT TASK*.txt')
 
-            encoder_files = util.numerical_sort(encoder_files)
-            position_files = util.numerical_sort(position_files)
-            trigger_files = util.numerical_sort(trigger_files)
+            encoder_files = util.alphanumerical_sort(encoder_files)
+            position_files = util.alphanumerical_sort(position_files)
+            trigger_files = util.alphanumerical_sort(trigger_files)
 
             if (len(encoder_files) == len(position_files)) & (len(encoder_files) == len(trigger_files)):
                 return encoder_files, position_files, trigger_files
@@ -755,8 +755,8 @@ class VRLog(dj.Imported):
         Extract data from a LOG file and insert it column-wise into VRLog().
 
         Args:
-            key: Primary keys of the current VRLogFile() entry.
-            skip_duplicates: Flag whether entries that already exist in VRLog() should be skipped or raise an error.
+            key:                Primary keys of the current VRLogFile() entry, passed down from self.make().
+            skip_duplicates:    Flag whether entries that already exist in VRLog() should be skipped or raise an error.
         """
         # Load LOG file
         log = pd.read_csv(os.path.join(login.get_neurophys_data_directory(),
