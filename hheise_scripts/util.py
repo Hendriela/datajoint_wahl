@@ -10,19 +10,31 @@ import os
 from pathlib import Path
 from copy import deepcopy
 import re
-from glob import glob
+from typing import List, Any, Type, Optional
 
 import yaml
-import numpy as np
 
+import datajoint as dj
 from schema import common_mice, common_exp
 import login
 
 REL_BACKUP_PATH = "Datajoint/manual_submissions"
 
 
-def numerical_sort(x):
-    """Sort a list of strings numerically"""
+def alphanumerical_sort(x: List[str]) -> List[str]:
+    """
+    Sorts a list of strings alpha-numerically, with proper interpretation of numbers in the string. Usually used to sort
+    file names to ensure files are processed in the correct order (if file name numbers are not zero-padded).
+    Elements are first  sorted by characters. If characters are the same, elements are sorted by numbers in the string.
+    Consecutive digits are treated as one number and sorted accordingly (e.g. "text_11" will be sorted behind "text_2").
+    Leading Zeros are ignored.
+
+    Args:
+        x:  List to be sorted. Elements are usually file names.
+
+    Returns:
+        Sorted list.
+    """
     x_sort = x.copy()
     def atoi(text):
         return int(text) if text.isdigit() else text
@@ -32,8 +44,13 @@ def numerical_sort(x):
     return x_sort
 
 
-def make_yaml_backup(sess_dict):
-    """Create YAML backup file for Hendriks Session entries"""
+def make_yaml_backup(sess_dict: dict) -> None:
+    """
+    Creates YAML backup file for Hendrik's common_exp.Session() entries.
+
+    Args:
+        sess_dict: Holds data of the current common_exp.Session() entry.
+    """
     identifier = common_exp.Session().create_id(investigator_name=sess_dict['username'],
                                                 mouse_id=sess_dict['mouse_id'],
                                                 date=sess_dict['day'],
@@ -46,8 +63,17 @@ def make_yaml_backup(sess_dict):
         yaml.dump(sess_dict, outfile, default_flow_style=False)
 
 
-def get_autopath(info):
-    """ Create automatic ABSOLUTE (with neurophys) session folder path based on the session_dict 'info'"""
+def get_autopath(info: dict) -> str:
+    """
+    Creates absolute path for a session (with Neurophys directory) based on a common_exp.Session() entry dict.
+    Structure: 'DATA-DIR\batch\mouseID\day'. Example: '...\Data\Batch1\M15\20201224'.
+
+    Args:
+        info: Holds information about the current session. The dict has to contain the keys "mouse_id" and "day".
+
+    Returns:
+        Absolute directory path of the session.
+    """
     mouse = str(info['mouse_id'])
     batch = str((common_mice.Mouse & "username = '{}'".format(login.get_user())
                                    & "mouse_id = {}".format(mouse)).fetch1('batch'))
@@ -58,18 +84,36 @@ def get_autopath(info):
     return path
 
 
-def remove_session_path(key, path):
-    """Make absolute trial path relative to session directory"""
+def remove_session_path(key: dict, path: str) -> str:
+    """
+    Creates absolute path of a single-trial file relative to it's session directory.
+
+    Args:
+        key:    Holds primary keys of the common_exp.Session() entry to which the file belongs.
+        path:   Path of the single-trial file. Has to be on the same drive as the session directory.
+
+    Returns:
+        Relative file path with the session directory as the reference directory.
+    """
     sess_path = os.path.join(login.get_neurophys_data_directory(), (common_exp.Session() & key).fetch1('session_path'))
     return os.path.relpath(path, sess_path)
 
 
-def add_many_sessions(date, mice, block=None, switch=None, **attributes):
+def add_many_sessions(date: str, mice: List[str], block: Optional[List[int]] = None,
+                      switch: Optional[List[List[int]]] = None, **attributes: Any) -> None:
     """
-    Automatically adds sessions of many mice on the same day. "Block" and "switch" can be set for each mouse separately.
-    :param date: str, date of the sessions in format (YYYY-MM-DD)
-    :param mice: list, mouse_ids of mice that had a session on that day
-    :param attributes: dict containing the values of the Session() attributes
+    Automatically adds sessions of many mice on the same day to common_exp.Session() and creates backup YAML files.
+    "Block" and "switch" can be left empty or have to be a list with length 'len(mice)'.
+
+    Args:
+        date:           Date of the sessions in format (YYYY-MM-DD)
+        mice:           Mouse_ids of mice that had a session on that day
+        block:          Block number of the session, in case sessions are grouped. Defaults to 1 if left empty.
+                        If set, needs one entry (int) per mouse).
+        switch:         The first trial index of a new condition. List of lists, outer list has 'len(mice)' entries,
+                        with each entry being a list with integers of condition-switched trials (multiple switches per
+                        session are possible). If no condition switch in this session, leave empty, defaults to -1.
+        **attributes:   Optional values for the Session() attributes.
     """
 
     # Set default values for attributes
@@ -116,19 +160,22 @@ def add_many_sessions(date, mice, block=None, switch=None, **attributes):
         make_yaml_backup(mouse_session_dict)
 
 
-def add_column(table, name, dtype, default_value=None, use_keyword_default=False, comment=None):
+# dj.table.Table should be the master class of all Datajoint tables, and as such the proper type hinting class
+def add_column(table: Type[dj.table.Table], name: str, dtype: str, default_value: Optional[str] = None,
+               use_keyword_default: bool = False, comment: Optional[str] = None) -> None:
     """
-    A (hacky) convenience function to add a new column into an existing table.
+    A (hacky) convenience function to add a new column into an existing table (in-place).
 
     Args:
-        table (DataJoint table class instance): table to add new column (attribute) to
-        name (str): name of the new column
-        dtype (str): data type of the new column
-        default_value (str, optional): default value for the new column. If 'null' or None, then the attribute
-            is considered non-required. Defaults to None.
-        use_keyword_default: Set to True if you want the default_value to be treated as MySQL keyword (e.g. `CURRENT_TIMESTAMP`)
-            This is False by default.
-        comment (str, optional): comment for the new column
+        table:                  Table to add new column (attribute) to.
+        name:                   Name of the new column.
+        dtype:                  Data type of the new column (see
+                                https://docs.datajoint.org/python/v0.11/definition/06-Datatypes.html).
+        default_value:          Default value for the new column. If 'null' or None, then the attribute is considered
+                                non-required. Defaults to None.
+        use_keyword_default:    Set to True if you want the default_value to be treated as MySQL keyword (e.g.
+                                `CURRENT_TIMESTAMP`). This is False by default.
+        comment:                Comment for the new column. Defaults to None.
     """
     full_table_name = table.full_table_name
     if default_value is None or default_value.strip().lower() == 'null':
