@@ -14,13 +14,12 @@ from schema import common_exp, common_mice #common_img
 from hheise_scripts import util
 
 from datetime import datetime, timedelta
-from typing import Iterable, List, Optional, Tuple, Union
+from typing import Iterable, List, Optional, Tuple
 import ast
 import os
 from glob import glob
 import numpy as np
 import pandas as pd
-import logging
 from copy import deepcopy
 from scipy import stats
 import statsmodels.api as sm
