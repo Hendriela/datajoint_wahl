@@ -213,7 +213,7 @@ def find_shift_stack(stack: np.ndarray, nr_lags: int = 10, nr_samples: int = 100
         return lags[np.argmax(avg_corr)]
 
 
-def find_shift_multiple_stacks(paths: List[str]) -> float:
+def find_shift_multiple_stacks(paths: List[str]) -> int:
     """
     Find the average shift between odd and even lines (raster correction) for a stack that has multiple parts.
     Adrian 2020-07-20
@@ -222,7 +222,7 @@ def find_shift_multiple_stacks(paths: List[str]) -> float:
         paths: List of file paths to the stack parts
 
     Returns:
-        Optimal lag with the highest average correlation across stacks
+        Optimal lag with the highest average correlation across stacks. Forced to be an integer.
     """
 
     avg_corrs = []
@@ -234,7 +234,13 @@ def find_shift_multiple_stacks(paths: List[str]) -> float:
 
     stack_avg = np.mean(np.array(avg_corrs), axis=0)  # array from corrs has shape (nr_samples, lags)
 
-    return lags[np.argmax(stack_avg)]
+    best_lag = lags[np.argmax(stack_avg)]
+
+    # Make sure that the lag is an integer
+    if best_lag % 1 == 0:
+        return int(best_lag)
+    else:
+        raise TypeError("Lag has to be a natural number, instead is a float with {:.5f}".format(best_lag))
 
 
 def apply_shift_to_stack(stack: np.ndarray, shift: int, crop_left: int = 50, crop_right: int = 50) -> np.ndarray:
