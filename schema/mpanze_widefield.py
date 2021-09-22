@@ -21,20 +21,6 @@ class LED(dj.Lookup):
         ["UV", 405, "405nm hemodynamics control LED through objective"]
     ]
 
-
-@schema
-class AcquisitionMethod(dj.Lookup):
-    definition = """ # Acquisition methods (e.g. alternating BLUE/UV)
-    method_name         : varchar(20)   # short name of imaging method
-    ---
-    method_description  : varchar(256)  # longer description of imaging method
-    """
-    contents = [
-        ["Single Wavelength", "Imaging at a fixed single wavelength"],
-        ["Blue/UV", "Alternate each frame between Blue and UV sources"]
-    ]
-
-
 @schema
 class Objective(dj.Lookup):
     definition = """ # Objectives for widefield imaging
@@ -74,11 +60,9 @@ class Scan(dj.Manual):
     -> common_exp.Session
     ---
     -> WidefieldMicroscope
-    -> AcquisitionMethod
     -> Objective.proj(top_objective = 'objective_name')
-    top_f_stop                  : float         # F stop used on top obj - should default to objective's minimum F
     -> Objective.proj(bottom_objective = 'objective_name')
-    bottom_f_stop               : float         # F stop used on bottom obj - should default to objective's minimum F
+    nr_channels                 : tinyint       # number of channels recorded
     """
 
 
@@ -91,7 +75,7 @@ class ScanInfo(dj.Manual):
     binning = 2                 : tinyint       # pixel binning used (this is already applied by the imaging camera)
     pixels_x                    : smallint      # number of pixels recorded along x axis (2nd matrix dimension) 
     pixels_y                    : smallint      # number of pixels recorded along y axis (1st matrix dimension)
-                                                # n. of pixels refers already to the raw image,binning is pre-applied!!! 
+    scan_notes                  : varchar(512)  # additional notes about the scan
     """
 
 
@@ -100,9 +84,8 @@ class RawImagingFile(dj.Manual):
     definition = """ # Paths to raw widefield imaging files in .tif format
     -> Scan
     -> LED
-    part = 0                    : int           # counter for parts of the same scan
     ---
-    filename_img                : varchar(256)  # name of the imaging file, relative to the session folder
+    filename_img                : varchar(512)  # name of the imaging file, relative to the session folder
     """
 
     def get_paths(self):
