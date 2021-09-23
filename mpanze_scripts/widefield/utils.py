@@ -3,6 +3,32 @@ import dcimg
 import numpy as np
 import tqdm
 import pathlib
+import json
+from datetime import datetime
+
+def mapping_date_from_dict(data_json):
+    """
+    Coverts the datetime timestamp from a mapping session to YYYY-MM-DD format for datajoint
+    Args:
+        data_json: dict containing mapping parameters
+    Returns:
+        datetime string, in the format YYYY-MM-DD
+    """
+    datetime_json = data_json["Date_Time"]
+    datetime_object = datetime.strptime(datetime_json, '%Y%m%d_%H%M')
+    return datetime_object.strftime("%Y-%m-%d")
+
+def mapping_date_from_json(path_json):
+    """
+    Coverts the datetime timestamp from a mapping session to YYYY-MM-DD format for datajoint
+    Args:
+        path_json: path to the .json file containing the mapping session parameters
+    Returns:
+        datetime string, in the format YYYY-MM-DD
+    """
+    with open(path_json) as f:
+        data_json = json.load(f)
+    return mapping_date_from_dict(data_json)
 
 
 def dcimg_to_tif(dcimg_path):
