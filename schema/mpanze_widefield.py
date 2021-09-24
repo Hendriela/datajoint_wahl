@@ -131,17 +131,17 @@ class RawImagingFile(dj.Manual):
         return paths
 
 
-# @schema
-# class ReferenceImage(dj.Manual):
-#     definition = """ # Reference image from the widefield microscope, used as a template for spatial alignment
-#     -> common_mice.Mouse
-#     -> LED
-#     ref_date                : date          # date the image was taken (YYYY-MM-DD)
-#     ---
-#     ref_image               : longblob      # reference image (np.uint16 array with 512x512 dimensions)
-#     ref_mask                : longblob      # mask with size matching the reference image (np.unint8 array)
-#     ref_notes               : varchar(256)  # additional notes
-#     """
+@schema
+class ReferenceImage(dj.Manual):
+    definition = """ # Reference image from the widefield microscope, used as a template for spatial alignment
+    -> common_mice.Mouse
+    -> LED
+    ref_date                : date          # date the image was taken (YYYY-MM-DD)
+    ---
+    ref_image               : longblob      # reference image (np.uint16 array with 512x512 dimensions)
+    ref_mask = NULL         : longblob      # mask with size matching the reference image (np.unint8 array)
+    ref_notes = ""          : varchar(256)  # additional notes
+    """
 
 # @schema
 # class SpatialAlignmentParameters(dj.Manual):
