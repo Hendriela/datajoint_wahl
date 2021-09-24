@@ -18,7 +18,8 @@ class LED(dj.Lookup):
     """
     contents = [
         ["Blue", 470, "470nm GCaMP stimulation LED through objective"],
-        ["UV", 405, "405nm hemodynamics control LED through objective"]
+        ["UV", 405, "405nm hemodynamics control LED through objective"],
+        ["Green", 530, "Green LED from the side"]
     ]
 
 @schema
@@ -34,12 +35,18 @@ class Objective(dj.Lookup):
     model = NULL                : varchar(256)  # manufacturer and model number
     objective_notes = ""        : varchar(256)  # any relevant notes about the objective
     """
-    # contents = [
-    #     {"objective_name": "Navitar 50mm F0.95", "efl": 50.0, "bfl": 25.62, "f_stop": 0.95,
-    #      "model": "Navitar DO-5095"},
-    #     {"objective_name": "Navitar 50mm F1.4", "efl": 50.0, "bfl": 14.80, "f_stop": 1.4,
-    #      "model": "Navitar NMV-50M1"}
-    # ]
+    contents = [
+        {"objective_name": "Navitar 50mm F0.95", "efl": 50.0, "bfl": 25.62, "f_stop": 0.95,
+         "model": "Navitar DO-5095"},
+        {"objective_name": "Navitar 50mm F1.4", "efl": 50.0, "bfl": 14.80, "f_stop": 1.4,
+         "model": "Navitar NMV-50M1"},
+        {"objective_name": "Thorlabs 100mm Tube Lens", "efl": 100.0, "bfl": 96.4, "magnification": 0.5,
+         "model": "Thorlabs WFA4102"},
+        {"objective_name": "Thorlabs 4x Apochromatic Objective", "efl": 60.0, "magnification": 4, "na": 0.2,
+         "model": "Thorlabs TL4X-SAP"},
+        {"objective_name": "Walimex 85mm F 1.4", "efl": 85.0, "f_stop": 1.4,
+         "model": "Walimex Product no. 19624", "objective_notes": "objective from Philipp"}
+    ]
 
 
 @schema
