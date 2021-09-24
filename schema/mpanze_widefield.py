@@ -125,7 +125,7 @@ class RawImagingFile(dj.Manual):
         paths = []
         for session in sessions:
             # obtain full path
-            path_session = session["path"]
+            path_session = session["session_path"]
             path_file = session["filename_img"]
             paths.append(pathlib.Path(path_neurophys, path_session, path_file))
         return paths
