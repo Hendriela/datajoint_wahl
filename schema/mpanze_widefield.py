@@ -65,12 +65,31 @@ class WidefieldMicroscope(dj.Lookup):
 class Scan(dj.Manual):
     definition = """ # Basic info about the hardware configuration of a recorded scan
     -> common_exp.Session
+    scan_id                     : smallint      # keep track of multiple scans per session
     ---
     -> WidefieldMicroscope
     -> Objective.proj(top_objective = 'objective_name')
     -> Objective.proj(bottom_objective = 'objective_name')
     nr_channels                 : tinyint       # number of channels recorded
     """
+
+    def helper_insert1(self, new_entry):
+        """
+        Automatically computes the scan_id for the session
+        Args:
+            new_entry: dict containing all attributes, except scan_id
+
+        Returns:
+            str: printout of the new insertion
+        """
+        query = common_exp.Scan() & new_entry
+        if len(query) == 0:
+            scan_id = 0
+        else:
+            scan_id = max(query.fetch("scan_id"))
+        new_entry["scan_id"] = scan_id
+        Scan().insert1(new_entry)
+        return new_entry
 
 
 @schema
