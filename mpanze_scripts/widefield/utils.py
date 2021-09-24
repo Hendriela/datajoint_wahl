@@ -6,6 +6,7 @@ import pathlib
 import json
 from datetime import datetime
 
+
 def mapping_date_from_dict(data_json):
     """
     Coverts the datetime timestamp from a mapping session to YYYY-MM-DD format for datajoint
@@ -17,6 +18,7 @@ def mapping_date_from_dict(data_json):
     datetime_json = data_json["Date_Time"]
     datetime_object = datetime.strptime(datetime_json, '%Y%m%d_%H%M')
     return datetime_object.strftime("%Y-%m-%d")
+
 
 def mapping_date_from_json(path_json):
     """
@@ -31,36 +33,30 @@ def mapping_date_from_json(path_json):
     return mapping_date_from_dict(data_json)
 
 
-def dcimg_to_tif(dcimg_path):
+def dcimg_to_tiff(path):
     """
-    Converts dcimg file to tif file and saves it in same directory.
-    Processes the files in blocks of roughly 4Gb size to prevent RAM from running out
-    :param dcimg_path: string containing full path to dcimg file
-    :return: string containing path to the new tif file
+    Converts Hamamatsu .dcimg file to .tif
+    :param path: string containing path of .dcimg file
+    :return: string containing path of new tif file
+    adapted from code by Adrian Hoffmann
     """
-    # make filepath for tif file
-    p = pathlib.Path(dcimg_path)
-    p_tif = str(pathlib.Path(p.parent, str(p.stem) + ".tif"))
+    # check whether the file already exists or if the path given is already a tif
+    if type("path") == str:
+        path = pathlib.Path(path)
+    if (path.suffix == ".tif") or (path.suffix == ".tiff"):
+        print("%s is already a tif file!" % str(path))
+        return str(path)
+    save_path = path.with_suffix(".tif")
+    if save_path.exists():
+        print("%s already exists!" % str(save_path))
+        return str(save_path)
 
-    # get dcimg file
-    with dcimg.DCIMGFile(dcimg_path) as f_dcimg:
-        # get shape
-        n_frames = int(f_dcimg.shape[0])
-        x_pixels = int(f_dcimg.shape[1])
-        y_pixels = int(f_dcimg.shape[2])
-        # allocate data for tif file
-        print("Writing data to %s ..." % p_tif, flush=True)
-        f_tif = tif.memmap(p_tif, shape=(n_frames, x_pixels, y_pixels), dtype=np.uint16)
-        for i in tqdm.tqdm(range(0, n_frames, 1000)):
-            # compute block edges
-            start = i
-            stop = i+1000
-            if stop > n_frames:
-                stop = n_frames
-            # copy block from dcimg file, switch to c order
-            data_c_order = np.copy(f_dcimg[start:stop], order='C', dtype=np.uint16)
-            # write to tif file and flush
-            f_tif[start:stop] = data_c_order
-            f_tif.flush()
+    wide = dcimg.DCIMGFile(path)
+    # save as .tif file
+    toSave_cOrder = np.array(np.array(wide[:, :, :]).copy(order='C'), dtype=np.uint16)
+    tif.imwrite(save_path, data=toSave_cOrder)
+    print("Saved:", save_path)
+    del wide
+    del toSave_cOrder
 
-    return p_tif
+    return str(save_path)

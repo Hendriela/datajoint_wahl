@@ -4,6 +4,7 @@ import datajoint as dj
 import login
 import pathlib
 from schema import common_mice, common_exp
+from mpanze_scripts.widefield import utils
 
 schema = dj.schema('mpanze_widefield', locals(), create_tables=True)
 
@@ -80,16 +81,16 @@ class Scan(dj.Manual):
             new_entry: dict containing all attributes, except scan_id
 
         Returns:
-            str: printout of the new insertion
+            str: key for the new entry
         """
-        query = common_exp.Scan() & new_entry
+        query = Scan() & new_entry
         if len(query) == 0:
             scan_id = 0
         else:
-            scan_id = max(query.fetch("scan_id"))
+            scan_id = max(query.fetch("scan_id"))+1
         new_entry["scan_id"] = scan_id
         Scan().insert1(new_entry)
-        return new_entry
+        return (Scan() & new_entry).fetch1("KEY")
 
 
 @schema
