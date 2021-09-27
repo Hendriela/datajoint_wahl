@@ -130,6 +130,16 @@ class RawImagingFile(dj.Manual):
             paths.append(pathlib.Path(path_neurophys, path_session, path_file))
         return paths
 
+    def get_path(self):
+        """
+        Construct full path to a raw imaging file.
+        Method only works for single-element query.
+        """
+        if len(self) == 1:
+            return self.get_paths()[0]
+        else:
+            raise Exception("This method only works for a single entry! For multiple entries use get_paths")
+
 
 @schema
 class ReferenceImage(dj.Manual):
@@ -142,6 +152,24 @@ class ReferenceImage(dj.Manual):
     ref_mask = NULL         : longblob      # mask with size matching the reference image (np.unint8 array)
     ref_notes = ""          : varchar(256)  # additional notes
     """
+
+@schema
+class AffineRegistration(dj.Manual):
+    definition = """ # Affine Registration matrix for a given reference image and imaging file
+    -> RawImagingFile
+    -> ReferenceImage
+    ---
+    affine_matrix           : longblob      # affine transformation matrix
+    """
+
+    def quality_control(self, mask=True):
+        """
+        Make quality control plots to check affine registration quality
+        Args:
+            mask: optional, if True, ReferenceImage mask will be applied
+        Returns: none
+        """
+        
 
 # @schema
 # class SpatialAlignmentParameters(dj.Manual):
