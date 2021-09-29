@@ -119,7 +119,7 @@ class RawImagingFile(dj.Manual):
 
     def get_paths(self):
         """Construct full paths to raw imaging files"""
-        path_neurophys = login.get_neurophys_data_directory()  # get data directory path on local machine
+        path_neurophys = login.get_working_directory()  # get data directory path on local machine
         # find sessions corresponding to current files
         sessions = (self * common_exp.Session())
 
@@ -156,6 +156,11 @@ class ReferenceImage(dj.Manual):
     """
 
     def plot(self, mask=False):
+        """
+        Plots the reference image(s), with the option to apply the mask
+        Args:
+            mask: optional, if True, the reference image is masked using ref_mask
+        """
         for row in self:
             plt.figure("M%i, %s, %s" % (row["mouse_id"], row["led_colour"], row["ref_date"]))
             img_array = row["ref_image"]
@@ -189,6 +194,11 @@ class AffineRegistration(dj.Manual):
         """
         return (RawImagingFile & AffineRegistration).get_paths()
 
+    # def generate_aligned_file(self):
+    #     """
+    #     Generates a spatially registered file in the location of the original file.
+    #     Returns: str, path to the registered file
+    #     """
 # @schema
 # class SpatialAlignmentParameters(dj.Manual):
 #     definition = """ # Contains transformation matrix for spatially registering different imaging sessions
