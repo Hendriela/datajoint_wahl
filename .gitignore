@@ -5,4 +5,4 @@ schema/__pycache__/
 .ipynb_checkpoints/
 /dj_local_conf.json
 /docs/
-mpanze_scripts/widefield/_pycache__/
+mpanze_scripts/widefield/__pycache__/
