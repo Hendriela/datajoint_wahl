@@ -160,7 +160,7 @@ class RawImagingFile(dj.Manual):
 class ReferenceImage(dj.Manual):
     definition = """ # Reference image from the widefield microscope, used as a template for spatial alignment
     -> common_mice.Mouse
-    -> LED
+    -> LED.proj(ref_led = 'led_colour')
     ref_date                : date          # date the image was taken (YYYY-MM-DD)
     ---
     ref_image               : longblob      # reference image (np.uint16 array with 512x512 dimensions)
@@ -175,7 +175,7 @@ class ReferenceImage(dj.Manual):
             mask: optional, if True, the reference image is masked using ref_mask
         """
         for row in self:
-            plt.figure("M%i, %s, %s" % (row["mouse_id"], row["led_colour"], row["ref_date"]))
+            plt.figure("M%i, %s, %s" % (row["mouse_id"], row["ref_led"], row["ref_date"]))
             img_array = row["ref_image"]
             if mask:
                 img_array = np.ma.masked_array(img_array, mask=row["ref_mask"])
