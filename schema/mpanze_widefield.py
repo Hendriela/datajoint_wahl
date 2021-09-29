@@ -162,14 +162,20 @@ class AffineRegistration(dj.Manual):
     affine_matrix           : longblob      # affine transformation matrix
     """
 
-    def quality_control(self, mask=True):
+    # def quality_control(self, mask=True):
+    #     """
+    #     Make quality control plots to check affine registration quality
+    #     Args:
+    #         mask: optional, if True, ReferenceImage mask will be applied
+    #     Returns: none
+    #     """
+
+    def get_paths(self):
         """
-        Make quality control plots to check affine registration quality
-        Args:
-            mask: optional, if True, ReferenceImage mask will be applied
-        Returns: none
+        Return the path to the raw imaging file
+        Returns: str, path
         """
-        
+        return (RawImagingFile & AffineRegistration).get_paths()
 
 # @schema
 # class SpatialAlignmentParameters(dj.Manual):
