@@ -7,6 +7,7 @@ from schema import common_mice, common_exp
 from mpanze_scripts.widefield import utils
 import matplotlib.pyplot as plt
 import numpy as np
+import tifffile as tif
 
 schema = dj.schema('mpanze_widefield', locals(), create_tables=True)
 
@@ -141,6 +142,18 @@ class RawImagingFile(dj.Manual):
             return self.get_paths()[0]
         else:
             raise Exception("This method only works for a single entry! For multiple entries use get_paths")
+
+    def get_first_image(self):
+        if len(self) != 1:
+            raise Exception("method implemented only for single element in query")
+        path = self.get_path()
+        return tif.imread(path, key=0)
+
+    def plot_first_image(self):
+        if len(self) != 1:
+            raise Exception("method implemented only for single element in query")
+        plt.figure()
+        plt.imshow(self.get_first_image(), "Greys_r")
 
 
 @schema
