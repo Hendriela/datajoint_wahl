@@ -5,6 +5,8 @@ import login
 import pathlib
 from schema import common_mice, common_exp
 from mpanze_scripts.widefield import utils
+import matplotlib.pyplot as plt
+import numpy as np
 
 schema = dj.schema('mpanze_widefield', locals(), create_tables=True)
 
@@ -149,9 +151,19 @@ class ReferenceImage(dj.Manual):
     ref_date                : date          # date the image was taken (YYYY-MM-DD)
     ---
     ref_image               : longblob      # reference image (np.uint16 array with 512x512 dimensions)
-    ref_mask = NULL         : longblob      # mask with size matching the reference image (np.unint8 array)
+    ref_mask = NULL         : longblob      # mask with size matching the reference image (np.unint8 array). A value of 255 indicates a masked entry.
     ref_notes = ""          : varchar(256)  # additional notes
     """
+
+    def plot(self, mask=False):
+        for row in self:
+            plt.figure("M%i, %s, %s" % (row["mouse_id"], row["led_colour"], row["ref_date"]))
+            img_array = row["ref_image"]
+            if mask:
+                img_array = np.ma.masked_array(img_array, mask=row["ref_mask"])
+            plt.imshow(img_array, cmap="Greys_r")
+            plt.colorbar()
+
 
 @schema
 class AffineRegistration(dj.Manual):

@@ -18,6 +18,10 @@ plt.figure()
 plt.imshow(image_ref,cmap="Greys_r")
 
 tif.imwrite("F:/Jithin/Batch_6/M41/Widefield/Pre_Stroke/img_ref.tif", image_ref)
-mask = tif.imread("F:/Jithin/Batch_6/M41/Widefield/Pre_Stroke/img_ref.tif")
+mask = tif.imread("F:/Jithin/Batch_6/M41/Widefield/Pre_Stroke/Mask.tif")
+
+# check mask
+# N.B.!!!!! when mask is True (or 255), data is masked
+mask = 255-mask
 
 ReferenceImage().insert1({"username": "jnambi", "mouse_id": 41, "led_colour": "Blue", "ref_date": "2021-07-04", "ref_image": image_ref, "ref_mask": mask})
