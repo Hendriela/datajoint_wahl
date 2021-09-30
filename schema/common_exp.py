@@ -132,7 +132,7 @@ class Session(dj.Manual):
             Relative path with the machine-specific Neurophysiology-Path removed
         """
 
-        dir = Path(login.get_neurophys_data_directory())   # get machine-specific path from local login file
+        dir = Path(login.get_working_directory())  # get current working directory (defaults to local path to neurophys)
 
         if dir in abs_path.parents:
             # If the session path is inside the Neurophys data directory, transform it to a relative path
@@ -189,7 +189,7 @@ class Session(dj.Manual):
 
         # In the current version we save the relative path (excluding base directory) which the user saves in the GUI,
         # including the leading directory separator ('\\') so the absolute path can be recovered by adding both strings
-        base_directory = login.get_neurophys_data_directory()
+        base_directory = login.get_working_directory()
         path = self.fetch1('session_path')
         return base_directory + path
 

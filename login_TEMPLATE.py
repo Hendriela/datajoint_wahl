@@ -18,6 +18,9 @@ Adapted by Hendrik 2021-05-04
 import keyring
 import datajoint as dj
 
+# define variable to keep track of working directory
+__cwd__ = ""
+
 def get_ip():
     """Return ip address of the server"""
     return '130.60.53.47'   # Ubuntu server in Anna-Sophias room
@@ -41,6 +44,10 @@ def connect():
     dj.config['database.user'] = get_user()
     dj.config['database.password'] = get_password()
     dj.conn()
+
+    # set working directory to neurophys by default
+    global __cwd__
+    __cwd__ = str(get_neurophys_data_directory())
 
     # TODO: Define cache and external storage here as well
 
@@ -83,3 +90,13 @@ def get_computer_name():
                     '"login.py". Please modify this file.')
 
     return # for example for Hendrik's PC:  'Hendrik_Lab'
+
+def get_working_directory():
+    """Return the current working directory"""
+    global __cwd__
+    return __cwd__
+
+def set_working_directory(new_path):
+    """ Set the current working directory to the one specified by new_path"""
+    global __cwd__
+    __cwd__ = str(new_path)
