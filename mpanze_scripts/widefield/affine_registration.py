@@ -2,10 +2,11 @@
 Script for performing spatial registration using (partial) affine transforms.
 Script finds RawImagingFile entries which have not yet been found and aligns them to the reference Image
 """
-
+##
 import cv2
 
 import login
+login.connect()
 from schema.mpanze_widefield import ReferenceImage, RawImagingFile, AffineRegistration
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,19 +17,21 @@ import numpy as np
 mouse = {"username": "jnambi", "mouse_id": 42}
 ref_pk = (ReferenceImage() & mouse).fetch("KEY", limit=1, as_dict=True)[0]
 ref_img = (ReferenceImage() & ref_pk).fetch1("ref_image")
+ref_mask = (ReferenceImage() & ref_pk).fetch1("ref_mask")
 
 # get first RawImagingFile not in AffineParameters, and load first image
 login.set_working_directory("F:/Jithin/")
 file_pk = (RawImagingFile() - AffineRegistration() & mouse).fetch("KEY", as_dict=True, limit=1)[0]
 reg_img = (RawImagingFile & file_pk).get_first_image()
 
-plt.subplot(1,2,1)
-plt.imshow(ref_img, "Greys_r")
-plt.colorbar()
-plt.subplot(1,2,2)
-plt.imshow(reg_img, "Greys_r")
-plt.colorbar()
-plt.tight_layout()
+print(len(RawImagingFile() - AffineRegistration() & mouse))
+# plt.subplot(1,2,1)
+# plt.imshow(ref_img, "Greys_r")
+# plt.colorbar()
+# plt.subplot(1,2,2)
+# plt.imshow(reg_img, "Greys_r")
+# plt.colorbar()
+# plt.tight_layout()
 
 ## choose at least 2 points per image to register
 posList=[]
@@ -65,8 +68,13 @@ pts_src = np.float32(posList[1::2])
 M,_ = cv2.estimateAffinePartial2D(pts_src,pts_dest)
 dst = cv2.warpAffine(reg_img, M, (512, 512))
 plt.figure()
+plt.subplot(131)
 plt.imshow(img_ref, cmap="Reds_r", alpha=0.5)
 plt.imshow(dst, "Blues_r", alpha=0.5)
+plt.subplot(132)
+plt.imshow(np.ma.masked_array(img_ref, mask=ref_mask), "Greys_r")
+plt.subplot(133)
+plt.imshow(np.ma.masked_array(dst, mask=ref_mask), "Greys_r")
 
 ## save params
 new_key = {**ref_pk, **file_pk, "affine_matrix": M}
