@@ -284,6 +284,74 @@ class ScanInfo(dj.Computed):
 
 
 @schema
+class MotionParameter(dj.Lookup):
+    definition = """ # Storage of sets of CaImAn motion correction parameters plus some custom parameters
+    motion_id:          smallint    # index for unique parameter set, base 0
+    ----
+    # Custom parameters related to preprocessing and cropping
+    crop_left   = 10     : smallint     # Pixels to crop on the left to remove scanning artifacts before MC.
+    crop_right  = 10     : smallint     # See crop_left. These two values are only to compute the MC shifts. The actual 
+                                        # movie is not cropped here, but in MemoryMappedFile(). Thus, more crop here can 
+                                        # improve motion correction performance (if border artefacts are removed) and do 
+                                        # not limit the size of the final motion-corrected movie.
+    offset      = 220    : int          # Fixed value that is added to all pixels to make values positive everywhere.
+    # CaImAn motion correction parameters
+    max_shift = 50:     smallint    # maximum allowed rigid shifts (in um)
+    stride_mc = 160:    smallint    # stride size for non-rigid correction (in um), patch size is stride+overlap)
+    overlap_mc = 40:    smallint    # Overlap between patches (Caiman recommends ca. 1/4 of stride)
+    pw_rigid = 1:       tinyint     # flag for performing rigid  or piecewise (patch-wise) rigid mc (0: rigid, 1: pw)
+    max_dev_rigid = 3:  smallint    # maximum deviation allowed for patches with respect to rigid shift
+    border_nan = 0:     tinyint     # flag for allowing NaN in the boundaries. If False, value of the nearest data point
+    n_iter = 1:         tinyint     # Number of iterations for motion correction
+    """
+
+    # Todo: check if n_iter is only important for rigid, or also for pw-rigid correction
+
+    def get_parameter_obj(self, scan_key: dict) -> params.CNMFParams:
+        """
+        Exports parameters as a params.CNMFParams type dictionary for CaImAn.
+        Args:
+            scan_key: Primary keys of ScanInfo() entry that is being processed
+
+        Returns:
+            CNMFParams-type dictionary that CaImAn uses for its pipeline
+        """
+        frame_rate = (ScanInfo & scan_key).fetch1('fr')
+        # TODO: use decay time depending on used calcium indicator
+        decay_time = 0.4
+
+        # Caiman wants border_nan = False to be 'copy'
+        border_nan = 'copy' if not self.fetch1('border_nan') else True
+
+        # Calculate X/Y resolution from FOV size and zoom setting
+        zoom = {'zoom': (ScanInfo & scan_key).fetch1('zoom')}
+        fov = ((FieldOfViewSize & zoom).fetch1('x'), (FieldOfViewSize & zoom).fetch1('y'))
+
+        dxy = (fov[0] / (ScanInfo & scan_key).fetch1('pixel_per_line'),
+               fov[1] / (ScanInfo & scan_key).fetch1('nr_lines'))
+
+        # Transform distance-based patch metrics to pixels
+        max_shifts = [int(a / b) for a, b in zip((self.fetch1('max_shift'), self.fetch1('max_shift')), dxy)]
+        strides = tuple([int(a / b) for a, b in zip((self.fetch1('stride_mc'), self.fetch1('stride_mc')), dxy)])
+
+        opts_dict = {'fr': frame_rate,
+                     'decay_time': decay_time,
+                     'dxy': dxy,
+                     'max_shifts': max_shifts,
+                     'strides': strides,
+                     'overlaps': self.fetch1('overlap_mc'),
+                     'max_deviation_rigid': self.fetch1('max_dev_rigid'),
+                     'pw_rigid': bool(self.fetch1('pw_rigid')),
+                     'border_nan': border_nan,
+                     'niter_rig': self.fetch1('n_iter')
+                     }
+
+        opts = params.CNMFParams(params_dict=opts_dict)
+
+        return opts
+
+
+@schema
 class MotionCorrection(dj.Computed):
     definition = """ # Motion correction of the network scan. Default attribute values are valid for Scientifica H37R.
     -> ScanInfo
@@ -297,12 +365,7 @@ class MotionCorrection(dj.Computed):
     template             : longblob     # 2d image of used template
     template_correlation : longblob     # 1d array (nr_frames) with correlations with the template
     outlier_frames       : longblob     # 1d array with detected outlier in motion correction
-    max_shift   = 0      : int          # Maximum shift value allowed by the motion correction.
-    n_iter      = 1      : int          # Number of iterations of the motion correction.
-    crop_left   = 10     : int          # Pixels to crop on the left to remove scanning artifacts before MC.
-    crop_right  = 10     : int          # Pixels to crop on the right to remove scanning artifacts before MC.
-    offset      = 220    : int          # Fixed value that is added to all pixels to make values positive everywhere.
-    line_shift  = 0      : int          # Detected shift between even and odd lines.    
+    line_shift           : smallint     # Detected shift between even and odd lines.    
     align_time=CURRENT_TIMESTAMP : timestamp     # Automatic timestamp of alignment
     """
 
@@ -326,20 +389,14 @@ class MotionCorrection(dj.Computed):
         c, dview, n_processes = cm.cluster.setup_cluster(
             backend='local', n_processes=n_processes, single_thread=False)
 
-        ## get the parameters for the motion correction (hardcoded, not datajoint style)
-        CROP_LEFT = 10
-        CROP_RIGHT = 10
-        OFFSET = 220
-        MAX_SHIFT = 15
-        N_ITER = 2
+        ## get the parameters for the motion correction
+        motion_params = (MotionParameter & key).fetch1()    # custom, non-Caiman params for preprocessing
         # Select second channel in case there are 2 (base 0 index)
         CHANNEL_SELECT = Scan().select_channel_if_necessary(key, 1)
 
-        opts_dict = {
-            'max_shifts': (MAX_SHIFT, MAX_SHIFT),
-            'pw_rigid': False,  # Todo: Test shifts for pw_rigid
-            'nonneg_movie': False,
-            'niter_rig': N_ITER}
+        # Get Caiman Param object from the parameter table
+        opts_dict = {**(MotionParameter & key).get_parameter_obj(key),
+                     'nonneg_movie': False}
 
         opts = params.CNMFParams(params_dict=opts_dict)
 
@@ -364,8 +421,8 @@ class MotionCorrection(dj.Computed):
         for path in local_paths:
             # apply raster and offset correction and save as new file
             new_path = motion_correction.create_raster_and_offset_corrected_file(
-                local_file=path, line_shift=line_shift, offset=OFFSET,
-                crop_left=CROP_LEFT, crop_right=CROP_RIGHT,
+                local_file=path, line_shift=line_shift, offset=motion_params['offset'],
+                crop_left=motion_params['crop_left'], crop_right=motion_params['crop_right'],
                 channel=CHANNEL_SELECT)
             corrected_files.append(new_path)
 
@@ -405,13 +462,12 @@ class MotionCorrection(dj.Computed):
 
         new_part_entries.append(
             dict(**key,
-                 motion_id=0,
+                 # motion_id=0, Todo: check if this attribute is needed or automatically filled
                  shifts=shifts,
                  x_std=np.std(shifts[0, :]),
                  y_std=np.std(shifts[1, :]),
                  x_max=int(np.max(np.abs(shifts[0, :]))),
                  y_max=int(np.max(np.abs(shifts[1, :]))),
-
                  template=template,
                  template_correlation=template_correlation)
         )
@@ -426,6 +482,7 @@ class MotionCorrection(dj.Computed):
 
         # insert MotionCorrection main table
         new_entry = dict(**key,
+                         # motion_id=0, Todo: check if this attribute is needed or automatically filled
                          shifts=shifts,
                          x_std=np.std(shifts[0, :]),
                          y_std=np.std(shifts[1, :]),
@@ -433,15 +490,7 @@ class MotionCorrection(dj.Computed):
                          y_max=int(np.max(np.abs(shifts[1, :]))),
                          template=template,
                          template_correlation=template_correlation,
-
-                         # new: parameters of motion correction
-                         max_shift=MAX_SHIFT,
-                         n_iter=N_ITER,
-                         crop_left=CROP_LEFT,
-                         crop_right=CROP_RIGHT,
-                         offset=OFFSET,
                          line_shift=line_shift,
-
                          outlier_frames=outlier_frames)
         self.insert1(new_entry)
 
