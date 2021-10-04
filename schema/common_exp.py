@@ -76,7 +76,7 @@ class Session(dj.Manual):
     session_num     : tinyint        # Counter of experimental sessions on the same day (base 1)
     ---
     session_id      : varchar(128)   # Unique identifier
-    session_path    : varchar(256)   # Relative path of this session on the Neurophysiology-Storage1 server
+    session_path    : varchar(256)   # Path of this session relative to the Neurophysiology-Storage1 DATA directory
     session_counter : smallint       # Overall counter of all sessions across mice (base 0)
     experimenter    : varchar(128)   # Who actually performed the experiment, must be a username from Investigator()
     -> Anesthesia
@@ -100,7 +100,7 @@ class Session(dj.Manual):
         Args:
             investigator_name:  Shortname of the investigator for this session (from common_mice.Investigator)
             mouse_id:           Investigator-specific mouse ID (from common_mice.Mice)
-            date:               Date of the session in format YYYY-MM-DD
+            date:               Datetime object of the session date
             session_num:        Iterator for number of sessions on that day
 
         Returns:
@@ -112,8 +112,8 @@ class Session(dj.Manual):
         mouse_id_str = 'M{:03d}'.format(int(mouse_id))
         first_part = 'session_' + investigator_name + '_' + mouse_id_str
 
-        # second: date to string
-        date_str = str(date)
+        # second: Transform datetime object to string, while removing the time stamp
+        date_str = date.strftime('%Y-%m-%d')
 
         # third: trial with leading zeros
         trial_str = '{:02d}'.format(session_num)
@@ -136,7 +136,7 @@ class Session(dj.Manual):
 
         if dir in abs_path.parents:
             # If the session path is inside the Neurophys data directory, transform it to a relative path
-            return Path(os.path.relpath(abs_path, dir))
+            return str(Path(os.path.relpath(abs_path, dir)))
         elif dir == abs_path:
             raise NameError('\nAbsolute session path {} cannot be the same as the Neurophys data directory.\n '
                             'Create a subdfolder inside the Neurophys data directory for the session.'.format(abs_path))
@@ -157,7 +157,6 @@ class Session(dj.Manual):
 
         Returns:
             Status update string confirming successful insertion.
-
         """
 
         id = self.create_id(new_entry_dict['username'], new_entry_dict['mouse_id'], new_entry_dict['day'],
