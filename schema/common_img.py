@@ -25,9 +25,9 @@ import tifffile as tif
 import caiman as cm
 from caiman.motion_correction import MotionCorrect
 from caiman.source_extraction.cnmf import params as params
-from .utils import motion_correction
+from util import motion_correction
 
-schema = dj.schema('img', locals(), create_tables=True)
+schema = dj.schema('common_img', locals(), create_tables=True)
 
 
 # CURRENT_VERSION = 0   # identifier for management of different versions
@@ -92,7 +92,7 @@ class Layer(dj.Lookup):
 
 @schema
 class BrainRegion(dj.Lookup):
-    definition = """ Possible brain regions for scanning
+    definition = """ # Possible brain regions for scanning
     brain_region    : varchar(32)       # Short name for brain region
     ----
     region_details   : varchar(128)     # More detailed description of area
@@ -106,7 +106,7 @@ class BrainRegion(dj.Lookup):
 
 @schema
 class FieldOfViewSize(dj.Lookup):
-    definition = """ Size of FOV (in um) of H37R Scientifica microscope at different zooms
+    definition = """ # Size of FOV (in um) of H37R Scientifica microscope at different zooms
     zoom    : tinyint       # zoom strength (higher = more magnification)
     ----
     x       : float         # Width
@@ -124,7 +124,7 @@ class FieldOfViewSize(dj.Lookup):
 @schema
 class Scan(dj.Manual):
     definition = """ # Basic info about the recorded scan
-    -> exp.Session
+    -> common_exp.Session
     ---
     -> Microscope
     -> Laser
@@ -161,6 +161,7 @@ class RawImagingFile(dj.Manual):
     ---
     file_name   : varchar(512)              # File name, for the path use the functions get_file_path(s)
     """
+
     # Todo make separate computed table for n_frames
 
     def get_path(self) -> str:
@@ -275,7 +276,6 @@ class ScanInfo(dj.Computed):
                          y_motor=info['motor_pos'][1],
                          z_motor=info['motor_pos'][2],
                          )
-
 
         # new_entry['nr_frames'] = nr_frames  # Todo: check later if its practical to store the combined frames per session again
 
@@ -513,7 +513,6 @@ class MemoryMappedFile(dj.Manual):
         Created if demanded by other functions in the pipeline (e.g. Caiman Segmentation), but the file and table entry
         are immediately deleted afterwards to save storage space.
 
-
         Adrian 2020-07-22
 
         Args:
@@ -618,7 +617,7 @@ class MemoryMappedFile(dj.Manual):
 
         if target_folder is None:
             # use the directory of the session on Neurophys
-            base_directory = login.get_neurophys_directory()
+            base_directory = login.get_working_directory()
             folder = (common_exp.Session() & self).fetch1('session_path')
             target_folder = os.path.join(base_directory, folder)
 
@@ -718,7 +717,7 @@ class QualityControl(dj.Computed):
 
 @schema
 class CaimanParameter(dj.Lookup):
-    definition = """ # Table which stores all CaImAn Parameters
+    definition = """ # Table which stores sets of CaImAn Parameters
     caiman_id:          smallint                # index for unique parameter set, base 0
     ----
     # Parameters for motion correction
@@ -768,8 +767,8 @@ class CaimanParameter(dj.Lookup):
         zoom = {'zoom': (ScanInfo & scan_key).fetch1('zoom')}
         fov = ((FieldOfViewSize & zoom).fetch1('x'), (FieldOfViewSize & zoom).fetch1('y'))
 
-        dxy = (fov[0]/(ScanInfo & scan_key).fetch1('pixel_per_line'),
-               fov[1]/(ScanInfo & scan_key).fetch1('nr_lines'))
+        dxy = (fov[0] / (ScanInfo & scan_key).fetch1('pixel_per_line'),
+               fov[1] / (ScanInfo & scan_key).fetch1('nr_lines'))
 
         # Transform distance-based patch metrics to pixels
         max_shifts = [int(a / b) for a, b in zip((self.fetch1('max_shift'), self.fetch1('max_shift')), dxy)]
@@ -814,394 +813,394 @@ class CaimanParameter(dj.Lookup):
 
         return opts
 
-
-@schema
-class AreaSegmentation(dj.Computed):
-    definition = """ # Table to store results of Caiman segmentation per area into ROIs
-    -> MotionCorrection.Area
-    -> CaimanParameter
-    ------
-    nr_masks : int            # Number of total detected masks in this area (includes rejected masks)
-    target_dim : longblob     # Tuple (dim_y, dim_x) to reconstruct mask from linearized index
-    time_seg = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
-    """
-
-    class ROI(dj.Part):
-        definition = """ # Data from mask created by Caiman
-        -> AreaSegmentation
-        mask_id : int      #  Mask index, per area (base 0)
-        -----
-        pixels   : longblob     # Linearized indicies of non-zero values
-        weights  : longblob     # Corresponding values at the index position
-        trace    : longblob     # Extracted raw fluorescence signal for this ROI
-        dff      : longblob     # Normalized deltaF/F fluorescence change
-        accepted : tinyint      # 0: False, 1: True
-        """
-
-        ## functions of part table
-        def get_roi(self):
-            """Returns the ROI mask as dense 2d array of the shape of the imaging field
-            TODO: add support for multiple ROIs at a time
-            Adrian 2019-09-05
-            """
-            if len(self) != 1:
-                raise Exception('Only length one allowed (not {})'.format(len(self)))
-
-            from scipy.sparse import csc_matrix
-            # create sparse matrix (https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.csc_matrix.html)
-            weights = self.fetch1('weights')
-            pixels = self.fetch1('pixels')
-            dims = (AreaSegmentation() & self).fetch1('target_dim')
-
-            sparse_matrix = csc_matrix((weights, (pixels, np.zeros(len(pixels)))), shape=(dims[0] * dims[1], 1))
-
-            # transform to dense matrix
-            return np.reshape(sparse_matrix.toarray(), dims, order='F')
-
-        def get_roi_center(self):
-            """ Returns center of mass of a single ROI as int array of length 2
-            Adrian 2019-09-05
-            """
-            if len(self) != 1:
-                raise Exception('Only length one allowed (not {})'.format(len(self)))
-
-            roi_mask = self.get_roi()
-
-            # calculate center of mass of mask by center of two projections
-            proj1 = np.sum(roi_mask, axis=0)
-            index1 = np.arange(proj1.shape[0])
-            center1 = np.inner(proj1, index1) / np.sum(proj1)  # weighted average index
-
-            proj2 = np.sum(roi_mask, axis=1)
-            index2 = np.arange(proj2.shape[0])
-            center2 = np.inner(proj2, index2) / np.sum(proj2)  # weighted average index
-
-            return np.array([np.round(center1), np.round(center2)], dtype=int)
-
-    ## make of main table AreaSegmentation
-    def make(self, key):
-        """Automatically populate the segmentation for one area of the scan
-        Adrian 2019-08-21
-        """
-        # log('Populating AreaSegmentation for {}.'.format(key))
-
-        import caiman as cm
-        from caiman.source_extraction.cnmf import cnmf as cnmf
-
-        if len(MemoryMappedFile() & key) == 0:
-            # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
-            channel = Scan().select_channel_if_necessary(key, 0)
-            MemoryMappedFile().create(key, channel)
-
-        mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')  # locally cached file
-
-        # get parameters
-        opts = (CaimanParameter() & key).get_parameter_obj(key)
-        log('Using the following parameters: {}'.format(opts.to_dict()))
-        p = opts.get('temporal', 'p')  # save for later
-
-        # load memory mapped file
-        Yr, dims, T = cm.load_memmap(mmap_file)
-        images = np.reshape(Yr.T, [T] + list(dims), order='F')
-        # load frames in python format (T x X x Y)
-
-        # start new cluster
-        n_processes = 1
-        c, dview, n_processes = cm.cluster.setup_cluster(
-            backend='local', n_processes=n_processes, single_thread=True)
-
-        # disable the most common warnings in the caiman code...
-        import warnings
-        from scipy.sparse import SparseEfficiencyWarning
-        warnings.filterwarnings('ignore', category=SparseEfficiencyWarning)
-        warnings.filterwarnings('ignore', category=FutureWarning)
-
-        # First extract spatial and temporal components on patches and combine them
-        # for this step deconvolution is turned off (p=0)
-        opts.change_params({'p': 0})
-        cnm = cnmf.CNMF(n_processes, params=opts, dview=dview)
-        log('Starting CaImAn on patches...')
-        cnm = cnm.fit(images)
-        log('Done.')
-
-        # %% RE-RUN seeded CNMF on accepted patches to refine and perform deconvolution
-        cnm.params.set('temporal', {'p': p})
-        log('Starting CaImAn on the whole recording...')
-        cnm2 = cnm.refit(images, dview=None)
-        log('Done')
-
-        # evaluate components
-        cnm2.estimates.evaluate_components(images, cnm2.params, dview=dview)
-
-        # %% Extract DF/F values
-        cnm2.estimates.detrend_df_f(quantileMin=8, frames_window=500)
-
-        save_results = True
-        if save_results:
-            log('Saving results also to file.')
-            folder = (exp.Session() & key).get_folder()
-            file = 'tmp_segmentation_caiman_id_{}.hdf5'.format(key['caiman_id'])
-            cnm2.save(os.path.join(folder, file))
-
-        # stop cluster
-        cm.stop_server(dview=dview)
-
-        ## reset warnings to normal:
-        # warnings.filterwarnings('default', category=FutureWarning)
-        warnings.filterwarnings('default', category=SparseEfficiencyWarning)
-
-        # save caiman results in easy to read datajoint variables
-
-        masks = cnm2.estimates.A  # (flattened_index, nr_masks)
-        nr_masks = masks.shape[1]
-
-        accepted = np.zeros(nr_masks)
-        accepted[cnm2.estimates.idx_components] = 1
-
-        traces = cnm2.estimates.C  # (nr_masks, nr_frames)
-        dff = cnm2.estimates.F_dff  # (nr_masks, nr_frames)
-
-        #### insert results in master table first
-        new_master_entry = dict(**key,
-                                nr_masks=nr_masks,
-                                target_dim=np.array(dims))
-        self.insert1(new_master_entry)
-
-        #### insert the masks and traces in the part table
-        for i in range(nr_masks):
-            new_part = dict(**key,
-                            mask_id=i,
-                            pixels=masks[:, i].indices,
-                            weights=masks[:, i].data,
-                            trace=traces[i, :],
-                            dff=dff[i, :],
-                            accepted=accepted[i])
-            AreaSegmentation.ROI().insert1(new_part)
-
-        # delete MemoryMappedFile to save storage
-        (MemoryMappedFile & key).delete_mmap_file()
-
-        log('Finished populating AreaSegmentation for {}.'.format(key))
-
-    ##### More functions for AreaSegmentation
-    def print_info(self):
-        """ Helper function to print some information about selected entries
-        Adrian 2020-03-16
-        """
-        roi_table = AreaSegmentation.ROI() & self
-        total_units = len(roi_table)
-        accepted_units = len(roi_table & 'accepted=1')
-        print('Total units:', total_units)
-        print('Accepted units: ', accepted_units)
-
-    def get_traces(self, only_accepted=True, trace_type='dff', include_id=False, decon_id=None):
-        """ Main function to get fluorescent traces in format (nr_traces, timepoints)
-        Parameters
-        ----------
-        only_accepted : bool  (default True)
-            If True, only return traces which have the property AreaSegmentation.ROI accepted==1
-        trace_type : str (default dff)
-            Type of the trace, either 'dff' for delta F over F, or 'trace' for absolute signal values
-            or 'decon' for spike rates
-        include_id : bool (default False)
-            If True, this functions returns a second argument with the mask ID's of the returned signals
-        decon_id : int (default None)
-            Additional restriction, in case trace_type 'decon' is selected and multiple deconvolution
-            models have been run. In case of only one model, function selects this one.
-        Returns
-        -------
-        2D numpy array (nr_traces, timepoints)
-            Fluorescent traces
-        optional: 1D numpy array (nr_traces)
-            Second argument returned only if include_id==True, contains mask ID's of the rows i
-        Adrian 2020-03-16
-        """
-
-        # some checks to catch errors in the input arguments
-        if not trace_type in ['dff', 'trace', 'decon']:
-            raise Exception('The trace_type "%s" is not allowed as input argument!' % trace_type)
-
-        # check if multiple caiman_ids are selected with self
-        caiman_ids = self.fetch('caiman_id')
-        if len(set(caiman_ids)) != 1:  # set returns unique entries in list
-            raise Exception('You requested traces from more the following caiman_ids: {}\n'.format(set(caiman_ids)) + \
-                            'Choose only one of them with & "caiman_id = ID"!')
-
-        # return only accepted units if requested
-        if only_accepted:
-            selected_rois = AreaSegmentation.ROI() & self & 'accepted = 1'
-        else:
-            selected_rois = AreaSegmentation.ROI() & self
-
-        if trace_type in ['dff', 'trace']:
-            traces_list = selected_rois.fetch(trace_type, order_by=('area', 'mask_id'))
-        else:  # decon
-            if only_accepted == False:
-                raise Exception('For deconvolved traces, only accepted=True is populated. Set only_accepted=True.')
-
-            # if no decon_id is given, check if there is a single correct one, otherwise error
-            if decon_id is None:
-                decon_ids = (Deconvolution & self).fetch('decon_id')
-                if len(decon_ids) == 1:
-                    decon_id = decon_ids[0]
-                else:
-                    raise Exception(
-                        'The following decon_ids were found: {}. Please specify using parameter decon_id.'.format(
-                            decon_ids))
-
-            table = Deconvolution.ROI() & selected_rois & {'decon_id': decon_id}
-            traces_list = table.fetch('decon', order_by=('area', 'mask_id'))
-
-        # some more sanity checks to catch common errors
-        if len(traces_list) == 0:
-            print('Warning: The query img.AreaSegmentation().get_traces() resulted in no traces!')
-            return None
-        # check if all traces have the same length and can be transformed into 2D array
-        if not all(len(trace) == len(traces_list[0]) for trace in traces_list):
-            raise Exception(
-                'Error: The traces in traces_list had different lengths (probably from different recordings)!')
-
-        traces = np.array([trace for trace in traces_list])  # (nr_traces, timepoints) array
-
-        if not include_id:
-            return traces
-
-        else:  # include mask_id as well
-            # TODO: return area as well if this is requested
-            mask_ids = selected_rois.fetch('mask_id', order_by=('area', 'mask_id'))
-            return (traces, mask_ids)
-
-
-@schema
-class DeconvolutionModel(dj.Lookup):
-    definition = """ # Table for different deconvolution methods
-    decon_id      : int            # index for methods, base 0
-    ----
-    model_name    : varchar(128)   # Name of the model
-    sampling_rate : int            # Sampling rate [Hz]
-    smoothing     : float          # Std of gaussian to smooth ground truth spike rate
-    causal        : int            # 0: symmetric smoothing, 1: causal kernel
-    nr_datasets   : int            # Number of datasets used for training the model
-    threshold     : int            # 0: threshold at zero, 1: threshold at height of one spike
-    """
-    contents = [
-        [0, 'Universal_15Hz_smoothing100ms_causalkernel', 15, 0.1, 1, 18, 0],
-        [1, 'Universal_15Hz_smoothing100ms_causalkernel', 15, 0.1, 1, 18, 1],
-        [2, 'Universal_30Hz_smoothing50ms_causalkernel', 30, 0.1, 1, 18, 1],
-    ]
-
-
-@schema
-class Deconvolution(dj.Computed):
-    definition = """ # Table to store deconvolved traces (only for accepted units)
-    -> AreaSegmentation
-    -> DeconvolutionModel
-    ------
-    time_decon = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
-    """
-
-    class ROI(dj.Part):
-        definition = """ # Data from mask created by Caiman
-        -> Deconvolution
-        mask_id : int        #  Mask index (as in AreaSegmentation.ROI), per area (base 0)
-        -----
-        decon   : longblob   # 1d array with deconvolved activity
-        """
-
-    def make(self, key):
-        """ Automatically populate deconvolution for all accepted traces of AreaSegementation.ROI
-        Adrian 2020-04-23
-        """
-
-        log('Populating Deconvolution for {}'.format(key))
-
-        from .utils.cascade2p import checks, cascade
-        # To run deconvolution, tensorflow, keras and ruaml.yaml must be installed
-        checks.check_packages()
-
-        model_name = (DeconvolutionModel & key).fetch1('model_name')
-        sampling_rate = (DeconvolutionModel & key).fetch1('sampling_rate')
-        threshold = (DeconvolutionModel & key).fetch1('threshold')
-        fs = (ScanInfo & key).fetch1('fs')
-
-        if np.abs(sampling_rate - fs) > 1:
-            raise Warning(('The model sampling rate {}Hz is too different from the '.format(sampling_rate) +
-                           'recording rate of {}Hz.'.format(fs)))
-
-        # get dff traces only for accepted units! If changing accepted, table has to be populated again
-        traces, unit_ids = (AreaSegmentation & key).get_traces(only_accepted=True, include_id=True)
-
-        # model is saved in subdirectory models of cascade2p
-        import inspect
-        cascade_path = os.path.dirname(inspect.getfile(cascade))
-        model_folder = os.path.join(cascade_path, 'models')
-
-        decon_traces = cascade.predict(model_name, traces, model_folder=model_folder,
-                                       threshold=threshold, padding=0)
-
-        # enter results into database
-        self.insert1(key)  # master entry
-
-        part_entries = list()
-        for i, unit_id in enumerate(unit_ids):
-            new_part = dict(**key,
-                            mask_id=unit_id,
-                            decon=decon_traces[i, :])
-            part_entries.append(new_part)
-
-        self.ROI.insert(part_entries)
-
-    def get_traces(self, only_accepted=True, include_id=False):
-        """ Wrapper function for AreaSegmentation.get_traces """
-
-        return (AreaSegmentation & self).get_traces(only_accepted=only_accepted, trace_type='decon',
-                                                    include_id=include_id, decon_id=self.fetch1('decon_id'))
-
-
-@schema
-class ActivityStatistics(dj.Computed):
-    definition = """ # Table to store summed, average activity and number of events
-    -> Deconvolution
-    ------
-    """
-
-    class ROI(dj.Part):
-        definition = """ # Part table for entries grouped by session
-        -> ActivityStatistics
-        mask_id : int        #  Mask index (as in AreaSegmentation.ROI), per area (base 0)
-        -----
-        sum_spikes   : float    # Sum of deconvolved activity trace (number of spikes)
-        rate_spikes  : float    # sum_spikes normalized to spikes / second
-        nr_events    : int      # Number of threshold crossings
-        """
-
-    def make(self, key):
-        """ Automatically populate for all accepted traces of Deconvolution.ROI
-        Adrian 2021-04-15
-        """
-        log('Populating ActivityStatistics for {}'.format(key))
-        THRES = 0.05  # hardcoded parameter
-
-        # traces is (nr_neurons, time) array
-        traces, unit_ids = (Deconvolution & key).get_traces(only_accepted=True, include_id=True)
-        fps = (ScanInfo & key).fetch1('fs')
-        nr_frames = traces.shape[1]
-
-        new_part_entries = list()
-        for i, unit_id in enumerate(unit_ids):
-            trace = traces[i]
-
-            # calculate the number of threshold crossings
-            thres_cross = (trace[:-1] <= THRES) & (trace[1:] > THRES)
-            nr_cross = np.sum(thres_cross)
-
-            new_entry = dict(**key,
-                             mask_id=unit_id,
-                             sum_spikes=np.sum(trace),
-                             rate_spikes=np.sum(trace) / nr_frames * fps,
-                             nr_events=nr_cross)
-            new_part_entries.append(new_entry)
-
-        # insert into database
-        ActivityStatistics.insert1(key)
-        ActivityStatistics.ROI.insert(new_part_entries)
+### COMMENT OUT FOR NOW UNTIL REST OF PIPELINE WORKS
+# @schema
+# class AreaSegmentation(dj.Computed):
+#     definition = """ # Table to store results of Caiman segmentation per area into ROIs
+#     -> MotionCorrection.Area
+#     -> CaimanParameter
+#     ------
+#     nr_masks : int            # Number of total detected masks in this area (includes rejected masks)
+#     target_dim : longblob     # Tuple (dim_y, dim_x) to reconstruct mask from linearized index
+#     time_seg = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
+#     """
+#
+#     class ROI(dj.Part):
+#         definition = """ # Data from mask created by Caiman
+#         -> AreaSegmentation
+#         mask_id : int      #  Mask index, per area (base 0)
+#         -----
+#         pixels   : longblob     # Linearized indicies of non-zero values
+#         weights  : longblob     # Corresponding values at the index position
+#         trace    : longblob     # Extracted raw fluorescence signal for this ROI
+#         dff      : longblob     # Normalized deltaF/F fluorescence change
+#         accepted : tinyint      # 0: False, 1: True
+#         """
+#
+#         ## functions of part table
+#         def get_roi(self):
+#             """Returns the ROI mask as dense 2d array of the shape of the imaging field
+#             TODO: add support for multiple ROIs at a time
+#             Adrian 2019-09-05
+#             """
+#             if len(self) != 1:
+#                 raise Exception('Only length one allowed (not {})'.format(len(self)))
+#
+#             from scipy.sparse import csc_matrix
+#             # create sparse matrix (https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.csc_matrix.html)
+#             weights = self.fetch1('weights')
+#             pixels = self.fetch1('pixels')
+#             dims = (AreaSegmentation() & self).fetch1('target_dim')
+#
+#             sparse_matrix = csc_matrix((weights, (pixels, np.zeros(len(pixels)))), shape=(dims[0] * dims[1], 1))
+#
+#             # transform to dense matrix
+#             return np.reshape(sparse_matrix.toarray(), dims, order='F')
+#
+#         def get_roi_center(self):
+#             """ Returns center of mass of a single ROI as int array of length 2
+#             Adrian 2019-09-05
+#             """
+#             if len(self) != 1:
+#                 raise Exception('Only length one allowed (not {})'.format(len(self)))
+#
+#             roi_mask = self.get_roi()
+#
+#             # calculate center of mass of mask by center of two projections
+#             proj1 = np.sum(roi_mask, axis=0)
+#             index1 = np.arange(proj1.shape[0])
+#             center1 = np.inner(proj1, index1) / np.sum(proj1)  # weighted average index
+#
+#             proj2 = np.sum(roi_mask, axis=1)
+#             index2 = np.arange(proj2.shape[0])
+#             center2 = np.inner(proj2, index2) / np.sum(proj2)  # weighted average index
+#
+#             return np.array([np.round(center1), np.round(center2)], dtype=int)
+#
+#     ## make of main table AreaSegmentation
+#     def make(self, key):
+#         """Automatically populate the segmentation for one area of the scan
+#         Adrian 2019-08-21
+#         """
+#         # log('Populating AreaSegmentation for {}.'.format(key))
+#
+#         import caiman as cm
+#         from caiman.source_extraction.cnmf import cnmf as cnmf
+#
+#         if len(MemoryMappedFile() & key) == 0:
+#             # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
+#             channel = Scan().select_channel_if_necessary(key, 0)
+#             MemoryMappedFile().create(key, channel)
+#
+#         mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')  # locally cached file
+#
+#         # get parameters
+#         opts = (CaimanParameter() & key).get_parameter_obj(key)
+#         # log('Using the following parameters: {}'.format(opts.to_dict()))
+#         p = opts.get('temporal', 'p')  # save for later
+#
+#         # load memory mapped file
+#         Yr, dims, T = cm.load_memmap(mmap_file)
+#         images = np.reshape(Yr.T, [T] + list(dims), order='F')
+#         # load frames in python format (T x X x Y)
+#
+#         # start new cluster
+#         n_processes = 1
+#         c, dview, n_processes = cm.cluster.setup_cluster(
+#             backend='local', n_processes=n_processes, single_thread=True)
+#
+#         # disable the most common warnings in the caiman code...
+#         import warnings
+#         from scipy.sparse import SparseEfficiencyWarning
+#         warnings.filterwarnings('ignore', category=SparseEfficiencyWarning)
+#         warnings.filterwarnings('ignore', category=FutureWarning)
+#
+#         # First extract spatial and temporal components on patches and combine them
+#         # for this step deconvolution is turned off (p=0)
+#         opts.change_params({'p': 0})
+#         cnm = cnmf.CNMF(n_processes, params=opts, dview=dview)
+#         # log('Starting CaImAn on patches...')
+#         cnm = cnm.fit(images)
+#         # log('Done.')
+#
+#         # %% RE-RUN seeded CNMF on accepted patches to refine and perform deconvolution
+#         cnm.params.set('temporal', {'p': p})
+#         # log('Starting CaImAn on the whole recording...')
+#         cnm2 = cnm.refit(images, dview=None)
+#         # log('Done')
+#
+#         # evaluate components
+#         cnm2.estimates.evaluate_components(images, cnm2.params, dview=dview)
+#
+#         # %% Extract DF/F values
+#         cnm2.estimates.detrend_df_f(quantileMin=8, frames_window=500)
+#
+#         save_results = True
+#         if save_results:
+#             # log('Saving results also to file.')
+#             folder = (common_exp.Session() & key).get_folder()
+#             file = 'tmp_segmentation_caiman_id_{}.hdf5'.format(key['caiman_id'])
+#             cnm2.save(os.path.join(folder, file))
+#
+#         # stop cluster
+#         cm.stop_server(dview=dview)
+#
+#         ## reset warnings to normal:
+#         # warnings.filterwarnings('default', category=FutureWarning)
+#         warnings.filterwarnings('default', category=SparseEfficiencyWarning)
+#
+#         # save caiman results in easy to read datajoint variables
+#
+#         masks = cnm2.estimates.A  # (flattened_index, nr_masks)
+#         nr_masks = masks.shape[1]
+#
+#         accepted = np.zeros(nr_masks)
+#         accepted[cnm2.estimates.idx_components] = 1
+#
+#         traces = cnm2.estimates.C  # (nr_masks, nr_frames)
+#         dff = cnm2.estimates.F_dff  # (nr_masks, nr_frames)
+#
+#         #### insert results in master table first
+#         new_master_entry = dict(**key,
+#                                 nr_masks=nr_masks,
+#                                 target_dim=np.array(dims))
+#         self.insert1(new_master_entry)
+#
+#         #### insert the masks and traces in the part table
+#         for i in range(nr_masks):
+#             new_part = dict(**key,
+#                             mask_id=i,
+#                             pixels=masks[:, i].indices,
+#                             weights=masks[:, i].data,
+#                             trace=traces[i, :],
+#                             dff=dff[i, :],
+#                             accepted=accepted[i])
+#             AreaSegmentation.ROI().insert1(new_part)
+#
+#         # delete MemoryMappedFile to save storage
+#         (MemoryMappedFile & key).delete_mmap_file()
+#
+#         # log('Finished populating AreaSegmentation for {}.'.format(key))
+#
+#     ##### More functions for AreaSegmentation
+#     def print_info(self):
+#         """ Helper function to print some information about selected entries
+#         Adrian 2020-03-16
+#         """
+#         roi_table = AreaSegmentation.ROI() & self
+#         total_units = len(roi_table)
+#         accepted_units = len(roi_table & 'accepted=1')
+#         print('Total units:', total_units)
+#         print('Accepted units: ', accepted_units)
+#
+#     def get_traces(self, only_accepted=True, trace_type='dff', include_id=False, decon_id=None):
+#         """ Main function to get fluorescent traces in format (nr_traces, timepoints)
+#         Parameters
+#         ----------
+#         only_accepted : bool  (default True)
+#             If True, only return traces which have the property AreaSegmentation.ROI accepted==1
+#         trace_type : str (default dff)
+#             Type of the trace, either 'dff' for delta F over F, or 'trace' for absolute signal values
+#             or 'decon' for spike rates
+#         include_id : bool (default False)
+#             If True, this functions returns a second argument with the mask ID's of the returned signals
+#         decon_id : int (default None)
+#             Additional restriction, in case trace_type 'decon' is selected and multiple deconvolution
+#             models have been run. In case of only one model, function selects this one.
+#         Returns
+#         -------
+#         2D numpy array (nr_traces, timepoints)
+#             Fluorescent traces
+#         optional: 1D numpy array (nr_traces)
+#             Second argument returned only if include_id==True, contains mask ID's of the rows i
+#         Adrian 2020-03-16
+#         """
+#
+#         # some checks to catch errors in the input arguments
+#         if not trace_type in ['dff', 'trace', 'decon']:
+#             raise Exception('The trace_type "%s" is not allowed as input argument!' % trace_type)
+#
+#         # check if multiple caiman_ids are selected with self
+#         caiman_ids = self.fetch('caiman_id')
+#         if len(set(caiman_ids)) != 1:  # set returns unique entries in list
+#             raise Exception('You requested traces from more the following caiman_ids: {}\n'.format(set(caiman_ids)) + \
+#                             'Choose only one of them with & "caiman_id = ID"!')
+#
+#         # return only accepted units if requested
+#         if only_accepted:
+#             selected_rois = AreaSegmentation.ROI() & self & 'accepted = 1'
+#         else:
+#             selected_rois = AreaSegmentation.ROI() & self
+#
+#         if trace_type in ['dff', 'trace']:
+#             traces_list = selected_rois.fetch(trace_type, order_by=('area', 'mask_id'))
+#         else:  # decon
+#             if only_accepted == False:
+#                 raise Exception('For deconvolved traces, only accepted=True is populated. Set only_accepted=True.')
+#
+#             # if no decon_id is given, check if there is a single correct one, otherwise error
+#             if decon_id is None:
+#                 decon_ids = (Deconvolution & self).fetch('decon_id')
+#                 if len(decon_ids) == 1:
+#                     decon_id = decon_ids[0]
+#                 else:
+#                     raise Exception(
+#                         'The following decon_ids were found: {}. Please specify using parameter decon_id.'.format(
+#                             decon_ids))
+#
+#             table = Deconvolution.ROI() & selected_rois & {'decon_id': decon_id}
+#             traces_list = table.fetch('decon', order_by=('area', 'mask_id'))
+#
+#         # some more sanity checks to catch common errors
+#         if len(traces_list) == 0:
+#             print('Warning: The query img.AreaSegmentation().get_traces() resulted in no traces!')
+#             return None
+#         # check if all traces have the same length and can be transformed into 2D array
+#         if not all(len(trace) == len(traces_list[0]) for trace in traces_list):
+#             raise Exception(
+#                 'Error: The traces in traces_list had different lengths (probably from different recordings)!')
+#
+#         traces = np.array([trace for trace in traces_list])  # (nr_traces, timepoints) array
+#
+#         if not include_id:
+#             return traces
+#
+#         else:  # include mask_id as well
+#             # TODO: return area as well if this is requested
+#             mask_ids = selected_rois.fetch('mask_id', order_by=('area', 'mask_id'))
+#             return (traces, mask_ids)
+#
+#
+# @schema
+# class DeconvolutionModel(dj.Lookup):
+#     definition = """ # Table for different deconvolution methods
+#     decon_id      : int            # index for methods, base 0
+#     ----
+#     model_name    : varchar(128)   # Name of the model
+#     sampling_rate : int            # Sampling rate [Hz]
+#     smoothing     : float          # Std of gaussian to smooth ground truth spike rate
+#     causal        : int            # 0: symmetric smoothing, 1: causal kernel
+#     nr_datasets   : int            # Number of datasets used for training the model
+#     threshold     : int            # 0: threshold at zero, 1: threshold at height of one spike
+#     """
+#     contents = [
+#         [0, 'Universal_15Hz_smoothing100ms_causalkernel', 15, 0.1, 1, 18, 0],
+#         [1, 'Universal_15Hz_smoothing100ms_causalkernel', 15, 0.1, 1, 18, 1],
+#         [2, 'Universal_30Hz_smoothing50ms_causalkernel', 30, 0.1, 1, 18, 1],
+#     ]
+#
+#
+# @schema
+# class Deconvolution(dj.Computed):
+#     definition = """ # Table to store deconvolved traces (only for accepted units)
+#     -> AreaSegmentation
+#     -> DeconvolutionModel
+#     ------
+#     time_decon = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
+#     """
+#
+#     class ROI(dj.Part):
+#         definition = """ # Data from mask created by Caiman
+#         -> Deconvolution
+#         mask_id : int        #  Mask index (as in AreaSegmentation.ROI), per area (base 0)
+#         -----
+#         decon   : longblob   # 1d array with deconvolved activity
+#         """
+#
+#     def make(self, key):
+#         """ Automatically populate deconvolution for all accepted traces of AreaSegementation.ROI
+#         Adrian 2020-04-23
+#         """
+#
+#         log('Populating Deconvolution for {}'.format(key))
+#
+#         from .utils.cascade2p import checks, cascade
+#         # To run deconvolution, tensorflow, keras and ruaml.yaml must be installed
+#         checks.check_packages()
+#
+#         model_name = (DeconvolutionModel & key).fetch1('model_name')
+#         sampling_rate = (DeconvolutionModel & key).fetch1('sampling_rate')
+#         threshold = (DeconvolutionModel & key).fetch1('threshold')
+#         fs = (ScanInfo & key).fetch1('fs')
+#
+#         if np.abs(sampling_rate - fs) > 1:
+#             raise Warning(('The model sampling rate {}Hz is too different from the '.format(sampling_rate) +
+#                            'recording rate of {}Hz.'.format(fs)))
+#
+#         # get dff traces only for accepted units! If changing accepted, table has to be populated again
+#         traces, unit_ids = (AreaSegmentation & key).get_traces(only_accepted=True, include_id=True)
+#
+#         # model is saved in subdirectory models of cascade2p
+#         import inspect
+#         cascade_path = os.path.dirname(inspect.getfile(cascade))
+#         model_folder = os.path.join(cascade_path, 'models')
+#
+#         decon_traces = cascade.predict(model_name, traces, model_folder=model_folder,
+#                                        threshold=threshold, padding=0)
+#
+#         # enter results into database
+#         self.insert1(key)  # master entry
+#
+#         part_entries = list()
+#         for i, unit_id in enumerate(unit_ids):
+#             new_part = dict(**key,
+#                             mask_id=unit_id,
+#                             decon=decon_traces[i, :])
+#             part_entries.append(new_part)
+#
+#         self.ROI.insert(part_entries)
+#
+#     def get_traces(self, only_accepted=True, include_id=False):
+#         """ Wrapper function for AreaSegmentation.get_traces """
+#
+#         return (AreaSegmentation & self).get_traces(only_accepted=only_accepted, trace_type='decon',
+#                                                     include_id=include_id, decon_id=self.fetch1('decon_id'))
+#
+#
+# @schema
+# class ActivityStatistics(dj.Computed):
+#     definition = """ # Table to store summed, average activity and number of events
+#     -> Deconvolution
+#     ------
+#     """
+#
+#     class ROI(dj.Part):
+#         definition = """ # Part table for entries grouped by session
+#         -> ActivityStatistics
+#         mask_id : int        #  Mask index (as in AreaSegmentation.ROI), per area (base 0)
+#         -----
+#         sum_spikes   : float    # Sum of deconvolved activity trace (number of spikes)
+#         rate_spikes  : float    # sum_spikes normalized to spikes / second
+#         nr_events    : int      # Number of threshold crossings
+#         """
+#
+#     def make(self, key):
+#         """ Automatically populate for all accepted traces of Deconvolution.ROI
+#         Adrian 2021-04-15
+#         """
+#         log('Populating ActivityStatistics for {}'.format(key))
+#         THRES = 0.05  # hardcoded parameter
+#
+#         # traces is (nr_neurons, time) array
+#         traces, unit_ids = (Deconvolution & key).get_traces(only_accepted=True, include_id=True)
+#         fps = (ScanInfo & key).fetch1('fs')
+#         nr_frames = traces.shape[1]
+#
+#         new_part_entries = list()
+#         for i, unit_id in enumerate(unit_ids):
+#             trace = traces[i]
+#
+#             # calculate the number of threshold crossings
+#             thres_cross = (trace[:-1] <= THRES) & (trace[1:] > THRES)
+#             nr_cross = np.sum(thres_cross)
+#
+#             new_entry = dict(**key,
+#                              mask_id=unit_id,
+#                              sum_spikes=np.sum(trace),
+#                              rate_spikes=np.sum(trace) / nr_frames * fps,
+#                              nr_events=nr_cross)
+#             new_part_entries.append(new_entry)
+#
+#         # insert into database
+#         ActivityStatistics.insert1(key)
+#         ActivityStatistics.ROI.insert(new_part_entries)
