@@ -21,24 +21,26 @@ import datajoint as dj
 # define variable to keep track of working directory
 __cwd__ = ""
 
-def get_ip():
+
+def get_ip() -> str:
     """Return ip address of the server"""
     return '130.60.53.47'   # Ubuntu server in Anna-Sophias room
 
-def get_user():
-    """Return user name"""
+
+def get_user() -> str:
+    """Return user name (short name) that is used in the Datajoint and MySQL credentials."""
     # Remove this line after setting a username
     raise Exception('Define a username before connecting to the database.')
     return  # Put your shortname here
 
-def get_password():
-    """Return password"""
+def get_password() -> str:
+    """Return password of the Datajoint and MySQL credentials"""
     # Before using DataJoint for the first time on a computer, store your password with
     # > keyring.set_password('datajoint_user', 'your_username', 'your_password')
     # This has to be the same password you used when registering at the MySQL database!
     return keyring.get_password('datajoint_user', get_user())
 
-def connect():
+def connect() -> None:
     """ Connects to the database using the credentials in the login.py file"""
     dj.config['database.host'] = get_ip()
     dj.config['database.user'] = get_user()
@@ -54,8 +56,8 @@ def connect():
 
 ## Functions to modify file paths depending on location of execution
 
-def get_cache_directory():
-    """Return the local directory used as cache"""
+def get_cache_directory() -> str:
+    """Return the local directory used as cache (temporary storage of files during processing)"""
 
     # comment this line out after creating a cache path
     raise Exception('The cached directory path has not been set in the file '
@@ -64,7 +66,7 @@ def get_cache_directory():
     return  # for example for Hendrik's PC: 'C:\\Users\\hheise\\Datajoint\\temp'
 
 
-def get_neurophys_wahl_directory():
+def get_neurophys_wahl_directory() -> str:
     """Return  path to the neurophys-storage1 Wahl folder (common folder for all Wahl group members) on this system"""
 
     # comment this line out after setting the mapped neurophys storage path
@@ -73,7 +75,7 @@ def get_neurophys_wahl_directory():
 
     return  # for example for Hendrik's PC: 'W:\\Neurophysiology-Storage1\\Wahl'
 
-def get_neurophys_data_directory():
+def get_neurophys_data_directory() -> str:
     """Return the path to the neurophys-storage1 data folder (specific folder for current user) on this system"""
 
     # comment this line out after setting the mapped neurophys storage path
@@ -82,7 +84,7 @@ def get_neurophys_data_directory():
 
     return # for example for Hendrik's PC:  'W:\\Neurophysiology-Storage1\\Wahl\\Hendrik\\PhD\\Data'
 
-def get_computer_name():
+def get_computer_name() -> str:
     """ Return the name of the local computer to check if the file is locally cached """
 
     # comment this line out after setting the computer name
@@ -91,12 +93,14 @@ def get_computer_name():
 
     return # for example for Hendrik's PC:  'Hendrik_Lab'
 
-def get_working_directory():
+
+def get_working_directory() -> str:
     """Return the current working directory"""
     global __cwd__
     return __cwd__
 
-def set_working_directory(new_path):
-    """ Set the current working directory to the one specified by new_path"""
+
+def set_working_directory(new_path: str) -> None:
+    """Set the current working directory to the one specified by new_path"""
     global __cwd__
     __cwd__ = str(new_path)
