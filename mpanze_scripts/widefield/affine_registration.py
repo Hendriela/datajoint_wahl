@@ -7,6 +7,7 @@ import cv2
 
 import login
 login.connect()
+login.set_working_directory("F:/Jithin/")
 from schema.mpanze_widefield import ReferenceImage, RawImagingFile, AffineRegistration
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,7 +15,7 @@ import numpy as np
 ## file selection: use 1st Reference image, and any Unaligned reference file
 
 # load ref image
-mouse = {"username": "jnambi", "mouse_id": 42}
+mouse = {"username": "jnambi", "mouse_id": 41}
 ref_pk = (ReferenceImage() & mouse).fetch("KEY", limit=1, as_dict=True)[0]
 ref_img = (ReferenceImage() & ref_pk).fetch1("ref_image")
 ref_mask = (ReferenceImage() & ref_pk).fetch1("ref_mask")
