@@ -177,7 +177,7 @@ class Session(dj.Manual):
         key_dict = {your_key: entry[your_key] for your_key in ['username', 'mouse_id', 'day', 'session_num']}
         return 'Inserted new session: {}'.format(key_dict)
 
-    def get_folder(self) -> str:
+    def get_absolute_path(self) -> str:
         """
         Return the folder on the current user's Neurophys data directory for this session on the current PC
         Adrian 2020-12-07
@@ -190,7 +190,7 @@ class Session(dj.Manual):
         # including the leading directory separator ('\\') so the absolute path can be recovered by adding both strings
         base_directory = login.get_working_directory()
         path = self.fetch1('session_path')
-        return base_directory + path
+        return os.path.join(base_directory, path)
 
     # Commented out because we are (currently) not grouping sessions this way
     # def get_group(self, group_name='?'):
