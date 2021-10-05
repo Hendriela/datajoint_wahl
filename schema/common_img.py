@@ -264,11 +264,11 @@ class ScanInfo(dj.Computed):
             key: Primary keys of the current Scan() entry.
         """
 
-        # log('Populating ScanInfo for key: {}'.format(key))
+        # print('Populating ScanInfo for key: {}'.format(key))
 
         if (Scan & key).fetch1('microscope') == 'Scientifica':
             # Extract meta-information from imaging .tif file
-            path = (RawImagingFile & key).get_paths()[0]  # Extract only from first file
+            path = (RawImagingFile & key & 'part=0').get_path()  # Extract only from first file
             info = scanimage.get_meta_info_as_dict(path)
             info['pockels'] = info['powers'][0]  # TODO: remove hardcoding of MaiTai laser
             info['gain'] = info['gains'][0]
@@ -281,7 +281,7 @@ class ScanInfo(dj.Computed):
                          zoom=info['zoom'],
                          nr_lines=info['nr_lines'],
                          pixel_per_line=info['pixel_per_line'],
-                         scanning=info['scanning'],
+                         scanning=info['scanning'][1:-1],     # Scanning string includes two apostrophes, remove one set
                          pockels=info['pockels'],
                          gain=info['gain'],
                          x_motor=info['motor_pos'][0],
@@ -289,7 +289,8 @@ class ScanInfo(dj.Computed):
                          z_motor=info['motor_pos'][2],
                          )
 
-        # new_entry['nr_frames'] = nr_frames  # Todo: check later if its practical to store the combined frames per session again
+        # Calculate total number of frames in this scan session
+        new_entry['nr_frames'] = np.sum((RawImagingFile & key).fetch('nr_frames'))
 
         self.insert1(new_entry)
         # log('Finished populating ScanInfo for key: {}'.format(key))
