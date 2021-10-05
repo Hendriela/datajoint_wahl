@@ -51,7 +51,7 @@ imaging:
 
   SKIP_IMG_TRANSFER: True
   H45_file: 'test_A{}_Ch{}_ ????.tif'    # later used as format string to fill in {} and wildcard chars ? for glob.glob
-  scientifica_file: 'file_000??.tif'     # Hendriks format
+  scientifica_file: ['file_000??.tif']     # Hendriks format
   parameter_file: 'parameters.xml'
   default_shutter_file: '###'
 
