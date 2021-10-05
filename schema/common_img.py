@@ -20,12 +20,14 @@ import os
 import numpy as np
 from typing import Optional, List
 import tifffile as tif
+import yaml
+from glob import glob
 
 # This code has to be run in a CaImAn environment
 import caiman as cm
 from caiman.motion_correction import MotionCorrect
 from caiman.source_extraction.cnmf import params as params
-from util import motion_correction
+from util import motion_correction, helper
 
 schema = dj.schema('common_img', locals(), create_tables=True)
 
@@ -68,7 +70,6 @@ class Laser(dj.Lookup):
     contents = [
         ['MaiTai', 'MaiTai laser, tunable, power depending on wavelength'],
         ['1040', 'add details...']
-        # TODO: add 1040 laser from scientifica
     ]
 
 
@@ -154,15 +155,50 @@ class Scan(dj.Manual):
 
 
 @schema
-class RawImagingFile(dj.Manual):
-    definition = """ # File names of the acquired .tif raw imaging files
+class RawImagingFile(dj.Imported):
+    definition = """ # File names and stack size of the acquired .tif raw imaging files
     -> Scan
-    part = 1    : tinyint                   # Counter for parts of the same scan (base 1, like in Scanimage)
+    part        : tinyint                   # Counter for part files of the same scan (base 0)
     ---
-    file_name   : varchar(512)              # File name, for the path use the functions get_file_path(s)
+    file_name   : varchar(512)              # File name with relative path compared to session directory
+    nr_frames   : int                       # Number of frames in this file
     """
 
-    # Todo make separate computed table for n_frames
+    def make(self, key: dict) -> None:
+        """
+        Automatically looks up file names for .tif files of a single Scan() entry.
+        Args:
+            key: Primary keys of the queried Scan() entry.
+        """
+
+        # Get session path
+        path = (common_exp.Session() & key).get_absolute_path()
+
+        # Get the file pattern for the current user from the YAML file
+        with open(r'.\gui_params.yaml') as file:
+            # The FullLoader parameter handles the conversion from YAML scalar values to Python's dictionary format
+            default_params = yaml.load(file, Loader=yaml.FullLoader)
+
+        # Iterate through the session directory and subdirectories and find files with the matching naming pattern
+        file_list = []
+        for step in os.walk(path):
+            for file_pattern in default_params['imaging']['scientifica_file']:
+                file_list.extend(glob(step[0] + f'\\{file_pattern}'))
+
+        # Sort list by postfix number
+        file_list_sort = helper.alphanumerical_sort(file_list)
+
+        # Insert files sequentially to the table
+        for idx, file in enumerate(file_list_sort):
+            # Get number of frames in the TIFF stack
+            nr_frames = len(tif.TiffFile(file).pages)
+
+            # get relative file path compared to session directory
+            base_directory = login.get_working_directory()
+            sess_folder = (common_exp.Session() & key).fetch1('session_path')
+            rel_filename = os.path.relpath(file, os.path.join(base_directory, sess_folder))
+
+            self.insert1(dict(**key, part=idx, file_name=rel_filename, nr_frames=nr_frames))
 
     def get_path(self) -> str:
         """
@@ -197,30 +233,6 @@ class RawImagingFile(dj.Manual):
         for key in keys:
             path_list.append((self & key).get_path())
         return path_list
-
-
-@schema
-class RawImagingFileFrames(dj.Computed):
-    definition = """ # Number of frames for each of the .tif files. Stored separately to keep computed attributes out of 
-    # manual table.
-    -> RawImagingFile
-    ---
-    nr_frames      : smallint unsigned         # Number of frames in this file
-    """
-
-    def make(self, key: dict) -> None:
-        """
-        Populates RawImagingFileFrames() for every entry of RawImagingFile(), storing the number of frames.
-
-        Args:
-            key: Primary keys to query each entry of RawImagingFile() to be populated
-        """
-
-        # Get number of frames in the TIFF stack
-        path = (RawImagingFile & key).get_path()
-        nr_frames = len(tif.TiffFile(path).pages)
-
-        self.insert1(dict(**key, nr_frames=nr_frames))
 
 
 @schema
