@@ -165,13 +165,14 @@ with exception
     try:
         # Check for due mice
         for investigator in common_mice.Investigator:
-            due_mice = get_due_mice(investigator['username'])
-
-            # If there are due mice, construct the email message and send it
-            if due_mice:
-                msg = construct_message(investigator['username'], due_mice)
-                send_mail(investigator['email'], msg)
+            if investigator['username'] == 'hheise':
+                due_mice = get_due_mice(investigator['username'])
                 
+                # If there are due mice, construct the email message and send it
+                if due_mice:
+                    msg = construct_message(investigator['username'], due_mice)
+                    send_mail(investigator['email'], msg)
+
     except Exception as ex:
         # If this fails, send the error message as an email to Hendrik's address and terminate the script.
         now = datetime.now()
