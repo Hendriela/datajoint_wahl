@@ -8,7 +8,8 @@ Automatically send email with mice that have still to be weighed this week.
 """
 import sys
 
-sys.path.append('../')
+# This line is necessary for the script running properly on the Ubuntu server, where it is uncommented
+# sys.path.append('/home/hheise/datajoint_wahl/datajoint_wahl/')
 
 import smtplib
 import ssl
@@ -168,13 +169,13 @@ with exception
     try:
         # Check for due mice
         for investigator in common_mice.Investigator:
-            if investigator['username'] == 'hheise':
-                due_mice = get_due_mice(investigator['username'])
+            due_mice = get_due_mice(investigator['username'])
 
-                # If there are due mice, construct the email message and send it
-                if due_mice:
-                    msg = construct_message(investigator['username'], due_mice)
-                    send_mail(investigator['email'], msg)
+            # If there are due mice, construct the email message and send it
+            if due_mice:
+                msg = construct_message(investigator['username'], due_mice)
+                print(msg)
+                # send_mail(investigator['email'], msg)
 
     except Exception as ex:
         # If this fails, send the error message as an email to Hendrik's address and terminate the script.
