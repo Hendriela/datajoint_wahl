@@ -8,7 +8,7 @@ Automatically send email with mice that have still to be weighed this week.
 """
 import sys
 
-# This line is necessary for the script running properly on the Ubuntu server, where it is uncommented
+# This line is necessary for the script running properly on the Ubuntu server in the crontab, where it is uncommented
 # sys.path.append('/home/hheise/datajoint_wahl/datajoint_wahl/')
 
 import smtplib
@@ -174,8 +174,7 @@ with exception
             # If there are due mice, construct the email message and send it
             if due_mice:
                 msg = construct_message(investigator['username'], due_mice)
-                print(msg)
-                # send_mail(investigator['email'], msg)
+                send_mail(investigator['email'], msg)
 
     except Exception as ex:
         # If this fails, send the error message as an email to Hendrik's address and terminate the script.
