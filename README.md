@@ -10,7 +10,7 @@ If the database got shut down (e.g. if the server was turned off), it has to be 
   <li>Ensure that the physical machine is running. Connect to it by typing this into a terminal and entering the password:
         <pre>ssh 130.60.53.47 -l hheise</pre> </li>
   <li>Navigate to the docker directory:
-        <pre>cd ../../db/mysql-docker</pre></li>
+        <pre>cd /db/mysql-docker</pre></li>
   <li>Start the container:
         <pre>sudo docker-compose up -d</pre>
       The computer might potentially ask you for the admin password again.</li>
