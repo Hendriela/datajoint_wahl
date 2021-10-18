@@ -162,18 +162,27 @@ with exception
     # Define sender address to be the datajoint wahl Gmail
     sender_address = 'datajoint.wahl@gmail.com'
 
-    # Check for due mice
-    for investigator in common_mice.Investigator:
-        if investigator['username'] == 'hheise':
-            break
+    try:
+        # Check for due mice
+        for investigator in common_mice.Investigator:
+            due_mice = get_due_mice(investigator['username'])
 
+            # If there are due mice, construct the email message and send it
+            if due_mice:
+                msg = construct_message(investigator['username'], due_mice)
+                send_mail(investigator['email'], msg)
+                
+    except Exception as ex:
+        # If this fails, send the error message as an email to Hendrik's address and terminate the script.
+        now = datetime.now()
+        msg = """Subject: Automatic mouse reminder email failed.
 
-    due_mice = get_due_mice(investigator['username'])
+Sending automatic mouse reminder failed at 
+{}
+with exception
+{}: {}.""".format(now, type(ex), ex)
 
-    # If there are due mice, construct the email message and send it
-    if due_mice:
-        msg = construct_message(investigator['username'], due_mice)
-        send_mail(investigator['email'], msg)
+        send_mail('heiser@hifo.uzh.ch', msg)
 
 
 
