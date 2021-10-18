@@ -6,6 +6,8 @@ Created on 18/10/2021 10:22
 
 Automatically send email with mice that have still to be weighed this week.
 """
+import sys
+sys.path.append('../')
 
 import smtplib
 import ssl
@@ -167,7 +169,7 @@ with exception
         for investigator in common_mice.Investigator:
             if investigator['username'] == 'hheise':
                 due_mice = get_due_mice(investigator['username'])
-                
+
                 # If there are due mice, construct the email message and send it
                 if due_mice:
                     msg = construct_message(investigator['username'], due_mice)
