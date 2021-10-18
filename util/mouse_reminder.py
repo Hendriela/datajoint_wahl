@@ -7,6 +7,7 @@ Created on 18/10/2021 10:22
 Automatically send email with mice that have still to be weighed this week.
 """
 import sys
+
 sys.path.append('../')
 
 import smtplib
@@ -64,17 +65,17 @@ def get_due_mice(username: str) -> List[dict]:
         date = get_last_weighing_date(mouse)
         # If the last weight day is 7 days or more ago, or no weight has been recorded, add relevant data to due_mice
         if date is None:
-            due_mice.append({'Last weight day': 'No weight on record!',
+            due_mice.append({'Mouse ID': mouse['mouse_id'],
+                             'Last weight day': 'No weight on record!',
                              'Days since last weighing': 'No weight on record!',
-                             'Mouse ID': mouse['mouse_id'],
                              'Cage number': mouse['cage_num'],
                              'Date of birth': datetime.strftime(mouse['dob'], '%Y-%m-%d'),
                              'Strain': mouse['strain'],
                              'Additional info': mouse['info']})
         elif (now - date).days >= 7:
-            due_mice.append({'Last weight day': datetime.strftime(date, '%Y-%m-%d'),
+            due_mice.append({'Mouse ID': mouse['mouse_id'],
+                             'Last weight day': datetime.strftime(date, '%Y-%m-%d'),
                              'Days since last weighing': (now - date).days,
-                             'Mouse ID': mouse['mouse_id'],
                              'Cage number': mouse['cage_num'],
                              'Date of birth': datetime.strftime(mouse['dob'], '%Y-%m-%d'),
                              'Strain': mouse['strain'],
@@ -186,6 +187,3 @@ with exception
 {}: {}.""".format(now, type(ex), ex)
 
         send_mail('heiser@hifo.uzh.ch', msg)
-
-
-
