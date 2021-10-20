@@ -771,7 +771,7 @@ class QualityControl(dj.Computed):
 @schema
 class CaimanParameter(dj.Lookup):
     definition = """ # Table which stores sets of CaImAn Parameters
-    -> common_exp.Mouse
+    -> common_mice.Mouse
     caiman_id:          smallint        # index for unique parameter set, base 0
     ----
     # Parameters for motion correction
@@ -954,7 +954,7 @@ class Segmentation(dj.Computed):
 
             return np.array([np.round(center1), np.round(center2)], dtype=int)
 
-    ## make of main table Segmentation
+    # make of main table Segmentation
     def make(self, key: dict, save_results: bool = False) -> None:
         """
         Automatically populate the segmentation for the scan.
@@ -1106,37 +1106,21 @@ class Segmentation(dj.Computed):
         print('Accepted units: ', accepted_units)
 
     def get_traces(self, only_accepted: bool = True, trace_type: str = 'dff', include_id: bool = False,
-                   decon_id: bool = None) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+                   decon_id: bool = None) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], None]:
         """
         Main function to get fluorescent traces in format (nr_traces, timepoints)
-        Parameters
-        ----------
-        only_accepted : bool  (default True)
-            If True, only return traces which have the property Segmentation.ROI accepted==1
-        trace_type : str (default dff)
-            Type of the trace, either 'dff' for delta F over F, or 'trace' for absolute signal values
-            or 'decon' for spike rates
-        include_id : bool (default False)
-            If True, this functions returns a second argument with the mask ID's of the returned signals
-        decon_id : int (default None)
-            Additional restriction, in case trace_type 'decon' is selected and multiple deconvolution
-            models have been run. In case of only one model, function selects this one.
-        Returns
-        -------
-        2D numpy array (nr_traces, timepoints)
-            Fluorescent traces
-        optional: 1D numpy array (nr_traces)
-            Second argument returned only if include_id==True, contains mask ID's of the rows i
         Adrian 2020-03-16
 
         Args:
             only_accepted   : If True, only return traces which have the property Segmentation.ROI accepted==1
             trace_type      : Type of the trace: 'dff', 'trace' (absolute signal values), 'decon' (Cascade spike rates)
-            include_id:
-            decon_id:
+            include_id      : Flag to return a second argument with the ROI ID's of the returned signals
+            decon_id        : Additional restriction, in case trace_type 'decon' is selected and multiple deconvolution
+                                models have been run. In case of only one model, function selects this one.
 
         Returns:
-
+            2D numpy array (nr_traces, timepoints): Fluorescent traces
+            optional: 1D numpy array (nr_traces): Only if include_id==True, contains mask ID's of the rows i
         """
 
         # some checks to catch errors in the input arguments
@@ -1156,9 +1140,9 @@ class Segmentation(dj.Computed):
             selected_rois = Segmentation.ROI() & self
 
         if trace_type in ['dff', 'trace']:
-            traces_list = selected_rois.fetch(trace_type, order_by=('area', 'mask_id'))
+            traces_list = selected_rois.fetch(trace_type, order_by='mask_id')
         else:  # decon
-            if only_accepted == False:
+            if not only_accepted:
                 raise Exception('For deconvolved traces, only accepted=True is populated. Set only_accepted=True.')
 
             # if no decon_id is given, check if there is a single correct one, otherwise error
@@ -1190,8 +1174,8 @@ class Segmentation(dj.Computed):
 
         else:  # include mask_id as well
             # TODO: return area as well if this is requested
-            mask_ids = selected_rois.fetch('mask_id', order_by=('area', 'mask_id'))
-            return (traces, mask_ids)
+            mask_ids = selected_rois.fetch('mask_id', order_by='mask_id')
+            return traces, mask_ids
 
 
 @schema
@@ -1230,12 +1214,16 @@ class Deconvolution(dj.Computed):
         decon   : longblob   # 1d array with deconvolved activity
         """
 
-    def make(self, key):
-        """ Automatically populate deconvolution for all accepted traces of AreaSegementation.ROI
+    def make(self, key: dict) -> None:
+        """
+        Automatically populate deconvolution for all accepted traces of Segmentation.ROI()
         Adrian 2020-04-23
+
+        Args:
+            key: Primary keys of the current Segmentation() entry.
         """
 
-        log('Populating Deconvolution for {}'.format(key))
+        # log('Populating Deconvolution for {}'.format(key))
 
         from .utils.cascade2p import checks, cascade
         # To run deconvolution, tensorflow, keras and ruaml.yaml must be installed
@@ -1244,7 +1232,7 @@ class Deconvolution(dj.Computed):
         model_name = (DeconvolutionModel & key).fetch1('model_name')
         sampling_rate = (DeconvolutionModel & key).fetch1('sampling_rate')
         threshold = (DeconvolutionModel & key).fetch1('threshold')
-        fs = (ScanInfo & key).fetch1('fs')
+        fs = (ScanInfo & key).fetch1('fr')
 
         if np.abs(sampling_rate - fs) > 1:
             raise Warning(('The model sampling rate {}Hz is too different from the '.format(sampling_rate) +
@@ -1273,8 +1261,9 @@ class Deconvolution(dj.Computed):
 
         self.ROI.insert(part_entries)
 
-    def get_traces(self, only_accepted=True, include_id=False):
-        """ Wrapper function for Segmentation.get_traces """
+    def get_traces(self, only_accepted: bool = True, include_id: bool = False) \
+            -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], None]:
+        """ Wrapper function for Segmentation.get_traces(). See that function for documentation """
 
         return (Segmentation & self).get_traces(only_accepted=only_accepted, trace_type='decon',
                                                 include_id=include_id, decon_id=self.fetch1('decon_id'))
@@ -1297,16 +1286,20 @@ class ActivityStatistics(dj.Computed):
         nr_events    : int      # Number of threshold crossings
         """
 
-    def make(self, key):
-        """ Automatically populate for all accepted traces of Deconvolution.ROI
-        Adrian 2021-04-15
+    def make(self, key: dict) -> None:
         """
-        log('Populating ActivityStatistics for {}'.format(key))
-        THRES = 0.05  # hardcoded parameter
+        Automatically populate for all accepted traces of Deconvolution.ROI
+        Adrian 2021-04-15
+
+        Args:
+            key: Primary keys of the current Deconvolution() entry.
+        """
+        # log('Populating ActivityStatistics for {}'.format(key))
+        THRESH = 0.05  # Threshold for deconvolved events, hardcoded parameter
 
         # traces is (nr_neurons, time) array
         traces, unit_ids = (Deconvolution & key).get_traces(only_accepted=True, include_id=True)
-        fps = (ScanInfo & key).fetch1('fs')
+        fps = (ScanInfo & key).fetch1('fr')
         nr_frames = traces.shape[1]
 
         new_part_entries = list()
@@ -1314,7 +1307,7 @@ class ActivityStatistics(dj.Computed):
             trace = traces[i]
 
             # calculate the number of threshold crossings
-            thres_cross = (trace[:-1] <= THRES) & (trace[1:] > THRES)
+            thres_cross = (trace[:-1] <= THRESH) & (trace[1:] > THRESH)
             nr_cross = np.sum(thres_cross)
 
             new_entry = dict(**key,
