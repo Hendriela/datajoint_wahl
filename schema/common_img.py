@@ -162,6 +162,7 @@ class RawImagingFile(dj.Imported):
     ---
     file_name   : varchar(512)              # File name with relative path compared to session directory
     nr_frames   : int                       # Number of frames in this file
+    file_size   : int                       # Approximate file size in KB (for memory demand estimation)
     """
 
     def make(self, key: dict) -> None:
@@ -193,12 +194,14 @@ class RawImagingFile(dj.Imported):
             # Get number of frames in the TIFF stack
             nr_frames = len(tif.TiffFile(file).pages)
 
+            file_size = int(np.round(os.stat(file).st_size/1024))
+
             # get relative file path compared to session directory
             base_directory = login.get_working_directory()
             sess_folder = (common_exp.Session() & key).fetch1('session_path')
             rel_filename = os.path.relpath(file, os.path.join(base_directory, sess_folder))
 
-            self.insert1(dict(**key, part=idx, file_name=rel_filename, nr_frames=nr_frames))
+            self.insert1(dict(**key, part=idx, file_name=rel_filename, nr_frames=nr_frames, file_size=file_size))
 
     def get_path(self) -> str:
         """
