@@ -297,28 +297,52 @@ class ScanInfo(dj.Computed):
 
 
 @schema
-class MotionParameter(dj.Lookup):
+class MotionParameter(dj.Manual):
     definition = """ # Storage of sets of CaImAn motion correction parameters plus some custom parameters
-    motion_id:          smallint    # index for unique parameter set, base 0
+    motion_id           : smallint  # index for unique parameter set, base 0
     ----
+    motion_shortname    : varchar(256)      # Short meaningful name of parameter set
+    motion_description  : varchar(1024)     # Longer description of conditions for which this parameter set fits
     # Custom parameters related to preprocessing and cropping
-    crop_left   = 10     : smallint     # Pixels to crop on the left to remove scanning artifacts before MC.
-    crop_right  = 10     : smallint     # See crop_left. These two values are only to compute the MC shifts. The actual 
-                                        # movie is not cropped here, but in MemoryMappedFile(). Thus, more crop here can 
-                                        # improve motion correction performance (if border artefacts are removed) and do 
-                                        # not limit the size of the final motion-corrected movie.
-    offset      = 220    : int          # Fixed value that is added to all pixels to make values positive everywhere.
+    crop_left   = 12    : smallint  # Pixels to crop on the left to remove scanning artifacts before MC.
+    crop_right  = 12    : smallint  # See crop_left. These two values are only to compute the MC shifts. The actual 
+                                    # movie is not cropped here, but in MemoryMappedFile(). Thus, more crop here can 
+                                    # improve motion correction performance (if border artefacts are removed) and do 
+                                    # not limit the size of the final motion-corrected movie.
+    offset      = 220   : int       # Fixed value that is added to all pixels to make values positive everywhere.
+                                    # Only used if nonneg_movie=False.
     # CaImAn motion correction parameters
-    max_shift = 50:     smallint    # maximum allowed rigid shifts (in um)
-    stride_mc = 160:    smallint    # stride size for non-rigid correction (in um), patch size is stride+overlap)
-    overlap_mc = 40:    smallint    # Overlap between patches (Caiman recommends ca. 1/4 of stride)
-    pw_rigid = 1:       tinyint     # flag for performing rigid  or piecewise (patch-wise) rigid mc (0: rigid, 1: pw)
-    max_dev_rigid = 3:  smallint    # maximum deviation allowed for patches with respect to rigid shift
-    border_nan = 0:     tinyint     # flag for allowing NaN in the boundaries. If False, value of the nearest data point
-    n_iter = 1:         tinyint     # Number of iterations for motion correction
+    max_shift = 50      : smallint  # maximum allowed rigid shifts (in um)
+    stride_mc = 250     : smallint  # stride size for non-rigid correction (in um), patch size is stride+overlap)
+    overlap_mc = 32     : smallint  # Overlap between patches (Caiman recommends ca. 1/4 of stride)
+    pw_rigid = 1        : tinyint   # flag for performing rigid  or piecewise (patch-wise) rigid mc (0: rigid, 1: pw)
+    max_dev_rigid = 3   : smallint  # maximum deviation allowed for patches with respect to rigid shift
+    border_nan = 0      : tinyint   # flag for allowing NaN in the boundaries. If False, value of the nearest data point
+    n_iter_rig = 2      : tinyint   # Number of iterations for rigid motion correction (not used for pw-rigid)
+    nonneg_movie = 1    : tinyint   # flag for producing a non-negative movie
     """
 
     # Todo: check if n_iter is only important for rigid, or also for pw-rigid correction
+
+    def helper_insert1(self, entry: dict) -> None:
+        """
+        Extended insert1() method that also creates a backup YAML file for every parameter set.
+
+        Args:
+            entry: Content of the new MotionParameter() entry.
+        """
+
+        self.insert1(entry)
+
+        # TODO: remove hard-coding of folder location
+        REL_BACKUP_PATH = "Datajoint/manual_submissions"
+
+        identifier = f"motion_{entry['motion_id']}"
+
+        # save dictionary in a backup YAML file for faster re-population
+        filename = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier + '.yaml')
+        with open(filename, 'w') as outfile:
+            yaml.dump(entry, outfile, default_flow_style=False)
 
     def get_parameter_obj(self, scan_key: dict) -> params.CNMFParams:
         """
@@ -356,7 +380,8 @@ class MotionParameter(dj.Lookup):
                      'max_deviation_rigid': self.fetch1('max_dev_rigid'),
                      'pw_rigid': bool(self.fetch1('pw_rigid')),
                      'border_nan': border_nan,
-                     'niter_rig': self.fetch1('n_iter')
+                     'niter_rig': self.fetch1('n_iter_rig'),
+                     'nonneg_movie': bool(self.fetch1('nonneg_movie'))
                      }
 
         opts = params.CNMFParams(params_dict=opts_dict)
@@ -408,14 +433,13 @@ class MotionCorrection(dj.Computed):
         CHANNEL_SELECT = Scan().select_channel_if_necessary(key, 1)
 
         # Get Caiman Param object from the parameter table
-        opts_dict = {**(MotionParameter & key).get_parameter_obj(key),
-                     'nonneg_movie': False}
+        opts_dict = (MotionParameter & key).get_parameter_obj(key)
 
-        opts = params.CNMFParams(params_dict=opts_dict)
+        # opts = params.CNMFParams(params_dict=opts_dict) Todo check that this line is unnecessary
 
         # perform motion correction area by area
-        new_part_entries = list()  # save new entries for part tables
-        part_mmap_files = list()
+        new_part_entries = []  # save new entries for part tables
+        part_mmap_files = []
 
         # get path to file for this network scan and locally cache files
         paths = (RawImagingFile & key).get_paths()
@@ -444,7 +468,7 @@ class MotionCorrection(dj.Computed):
         motion_correction.delete_cache_files(local_paths)
 
         # perform actual motion correction
-        mc = MotionCorrect(corrected_files, **opts.get_group('motion'), dview=dview)
+        mc = MotionCorrect(corrected_files, **opts_dict.get_group('motion'), dview=dview)
 
         # log('Starting CaImAn motion correction for area {}...'.format(area))
         # log('Used parameters: {}'.format(opts.get_group('motion')))
@@ -459,8 +483,8 @@ class MotionCorrection(dj.Computed):
         mmap_files = mc.mmap_file  # list of files
 
         # extract and calculate information about the motion correction
-        shifts = np.array(mc.shifts_rig).T  # caiman output: list with x,y shift tuples
-        template = mc.total_template_rig
+        shifts = np.array(mc.shifts_rig).T  # caiman output: list with x,y shift tuples, shape (2, nr_frames)
+        template = mc.total_template_rig    # 2D np array, mean intensity image
 
         # log('Calculate correlation between template and frames...')
         template_correlations = []
@@ -540,9 +564,9 @@ class MemoryMappedFile(dj.Manual):
 
         # get parameter from motion correction
         line_shift = (MotionCorrection() & key).fetch1('line_shift')
-        offset = (MotionCorrection() & key).fetch1('offset')
-        max_shift_allowed = (MotionCorrection() & key).fetch1('max_shift')
-        xy_shift = (MotionCorrection.Area() & key).fetch1('shifts')  # (2 x nr_frames)
+        offset = (MotionParameter() & key).fetch1('offset')
+        max_shift_allowed = (MotionParameter() & key).fetch1('max_shift')
+        xy_shift = (MotionCorrection & key).fetch1('shifts')  # (2 x nr_frames)
 
         # save raw recordings locally in cache
         paths = (RawImagingFile & key).get_paths()
@@ -552,7 +576,7 @@ class MemoryMappedFile(dj.Manual):
         paths = None  # make sure that the files at neurophysiology are not used by accident
 
         # correct line shift between even and odd lines and add offset
-        corrected_files = list()
+        corrected_files = []
         for path in local_paths:
             # apply raster and offset correction and save as new file
             new_path = motion_correction.create_raster_and_offset_corrected_file(
@@ -565,12 +589,12 @@ class MemoryMappedFile(dj.Manual):
 
         # apply motion correction file by file (to save hard-disk storage, only 100GB available on ScienceCloud)
         # get number of frames without loading whole stack
-        nr_frames_per_file = len(tif.TiffFile(corrected_files[0]).pages)
+        nr_frames_per_file = np.cumsum([0, *[len(tif.TiffFile(x).pages) for x in corrected_files]])
         scan_size = (ScanInfo & key).fetch1('pixel_per_line')
 
-        shift_parts = list()
-        for i in range(0, xy_shift.shape[1], nr_frames_per_file):
-            shift_parts.append(xy_shift[:, i:i + nr_frames_per_file].T)
+        shift_parts = []
+        for i in range(len(nr_frames_per_file)-1):
+            shift_parts.append(xy_shift[:, nr_frames_per_file[i]:nr_frames_per_file[i+1]].T)
 
         temp_mmap_files = list()
         for i, file in enumerate(corrected_files):
