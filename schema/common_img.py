@@ -18,7 +18,7 @@ from schema import common_exp
 
 import os
 import numpy as np
-from typing import Optional, List
+from typing import Optional, List, Union, Tuple
 import tifffile as tif
 import yaml
 from glob import glob
@@ -207,7 +207,7 @@ class RawImagingFile(dj.Imported):
             # Get number of frames in the TIFF stack
             nr_frames = len(tif.TiffFile(file).pages)
 
-            file_size = int(np.round(os.stat(file).st_size/1024))
+            file_size = int(np.round(os.stat(file).st_size / 1024))
 
             # get relative file path compared to session directory
             base_directory = login.get_working_directory()
@@ -297,7 +297,7 @@ class ScanInfo(dj.Computed):
                          zoom=info['zoom'],
                          nr_lines=info['nr_lines'],
                          pixel_per_line=info['pixel_per_line'],
-                         scanning=info['scanning'][1:-1],     # Scanning string includes two apostrophes, remove one set
+                         scanning=info['scanning'][1:-1],  # Scanning string includes two apostrophes, remove one set
                          pockels=info['pockels'],
                          gain=info['gain'],
                          x_motor=info['motor_pos'][0],
@@ -444,7 +444,7 @@ class MotionCorrection(dj.Computed):
             backend='local', n_processes=n_processes, single_thread=False)
 
         ## get the parameters for the motion correction
-        motion_params = (MotionParameter & key).fetch1()    # custom, non-Caiman params for preprocessing
+        motion_params = (MotionParameter & key).fetch1()  # custom, non-Caiman params for preprocessing
         # Select second channel in case there are 2 (base 0 index)
         CHANNEL_SELECT = Scan().select_channel_if_necessary(key, 1)
 
@@ -500,7 +500,7 @@ class MotionCorrection(dj.Computed):
 
         # extract and calculate information about the motion correction
         shifts = np.array(mc.shifts_rig).T  # caiman output: list with x,y shift tuples, shape (2, nr_frames)
-        template = mc.total_template_rig    # 2D np array, mean intensity image
+        template = mc.total_template_rig  # 2D np array, mean intensity image
 
         # log('Calculate correlation between template and frames...')
         template_correlations = []
@@ -609,8 +609,8 @@ class MemoryMappedFile(dj.Manual):
         scan_size = (ScanInfo & key).fetch1('pixel_per_line')
 
         shift_parts = []
-        for i in range(len(nr_frames_per_file)-1):
-            shift_parts.append(xy_shift[:, nr_frames_per_file[i]:nr_frames_per_file[i+1]].T)
+        for i in range(len(nr_frames_per_file) - 1):
+            shift_parts.append(xy_shift[:, nr_frames_per_file[i]:nr_frames_per_file[i + 1]].T)
 
         temp_mmap_files = list()
         for i, file in enumerate(corrected_files):
@@ -783,7 +783,7 @@ class CaimanParameter(dj.Lookup):
     border_nan = 0:         tinyint     # flag for allowing NaN in the boundaries. If False, take value of the nearest data point
     # Parameters for CNMF and component extraction
     p = 1:                  tinyint     # order of the autoregressive system (should always be 1)
-    gnb = 2:                tinyint     # number of global background components
+    nb = 2:                 tinyint     # number of global background components
     merge_thr = 0.75:       float       # merging threshold, max correlation of components allowed before merged
     rf = 80:                smallint    # half-size of the patches in pixels. e.g., if rf=25, patches are 50x50. -1 if no patches.
     stride_cnmf = 10:       smallint    # amount of overlap between the patches in pixels
@@ -844,7 +844,7 @@ class CaimanParameter(dj.Lookup):
             'pw_rigid': bool(self.fetch1('pw_rigid')),
             'border_nan': border_nan,
             'p': self.fetch1('p'),
-            'nb': self.fetch1('gnb'),
+            'nb': self.fetch1('nb'),
             'rf': self.fetch1('rf'),
             'K': self.fetch1('k'),
             'gSig': (self.fetch1('g_sig'), self.fetch1('g_sig')),
@@ -881,9 +881,15 @@ class Segmentation(dj.Computed):
     ------
     nr_masks                        : int         # Number of total detected masks in this FOV (includes rejected masks)
     target_dim                      : longblob    # Tuple (dim_y, dim_x) to reconstruct mask from linearized index
+    cn                              : longblob    # Local correlation image
+    s_background                    : longblob    # Spatial background component(s) weight mask (dim_y, dim_x, nb) 
+    f_background                    : longblob    # Background fluorescence (nb, nr_frames)
     time_seg = CURRENT_TIMESTAMP    : timestamp   # automatic timestamp
     """
+
     # Todo: check how the dependency with CaimanParameter works. Only parameters for the specific mouse should be used.
+    #   Also check that this cn is the same as Adrians "cor_img" in QualityControl()
+
     class ROI(dj.Part):
         definition = """ # Data from mask created by Caiman
         -> Segmentation
@@ -891,13 +897,16 @@ class Segmentation(dj.Computed):
         -----
         pixels   : longblob     # Linearized indices of non-zero values
         weights  : longblob     # Corresponding values at the index position
-        trace    : longblob     # Extracted raw fluorescence signal for this ROI
+        trace    : longblob     # Non-normalized fluorescence signal for this ROI (estimates.C + estimates.Yr)
+        residual : longblob     # Residual fluorescence (estimates.Yr)
         dff      : longblob     # Normalized deltaF/F fluorescence change
         perc     : float        # Percentile used for deltaF/F computation 
+        snr      : float        # Signal-to-noise ratio of this ROI (evaluation criterion)
+        r        : float        # Spatial correlation of fluorescence and mask (evaluation criterion)
+        cnn      : float        # CNN estimation of neuron-like shape (evaluation criterion)
         accepted : tinyint      # 0: False, 1: True
         """
 
-        ## functions of part table
         def get_roi(self) -> np.ndarray:
             """
             Returns the ROI mask as a dense 2d array of the shape of the imaging field
@@ -946,16 +955,15 @@ class Segmentation(dj.Computed):
             return np.array([np.round(center1), np.round(center2)], dtype=int)
 
     ## make of main table Segmentation
-    def make(self, key):
+    def make(self, key: dict, save_results: bool = False) -> None:
         """
-        Automatically populate the segmentation for the scan
+        Automatically populate the segmentation for the scan.
         Adrian 2019-08-21
 
         Args:
-            key: Primary keys of the current MotionCorrection() entry.
-
-        Returns:
-
+            key:            Primary keys of the current MotionCorrection() entry.
+            save_results:   Flag to save Caiman results in the session's folder in an HDF5 file in addition to storing
+                            data in Segmentation() and ROI().
         """
         # log('Populating Segmentation for {}.'.format(key))
 
@@ -1012,9 +1020,19 @@ class Segmentation(dj.Computed):
         # Caiman's source code has to be edited to return the computed percentiles (which are always used instead of
         # quantileMin if flag_auto is not actively set to False). It is a numpy array with shape (#components) with the
         # percentile used as fluorescence baseline for each neuron.
-        _, perc = cnm2.estimates.detrend_df_f(quantileMin=8, frames_window=500)
+        flag_auto = (CaimanParameter() & key).fetch1('flag_auto')
+        frames_window = (CaimanParameter() & key).fetch1('frames_window')
+        quantileMin = (CaimanParameter() & key).fetch1('quantile_min')
+        _, perc = cnm2.estimates.detrend_df_f(flag_auto=flag_auto, quantileMin=quantileMin, frames_window=frames_window)
 
-        save_results = True
+        if not flag_auto:
+            # If percentiles are not computed, they are not returned but have to be filled manually as quantileMin
+            perc = np.array([quantileMin] * len(cnm2.estimates.F_dff))
+
+        # TODO: Check if this works!
+        # Save_results is a custom argument that is provided during the populate() call and passed to all subsequent
+        # make() calls. For populate() to accept additional kwargs, the source code under datajoint/autopopulate.py
+        # had to be adapted.
         if save_results:
             # log('Saving results also to file.')
             folder = (common_exp.Session() & key).get_folder()
@@ -1024,11 +1042,13 @@ class Segmentation(dj.Computed):
         # stop cluster
         cm.stop_server(dview=dview)
 
-        ## reset warnings to normal:
+        # reset warnings to normal:
         # warnings.filterwarnings('default', category=FutureWarning)
         warnings.filterwarnings('default', category=SparseEfficiencyWarning)
 
-        # save caiman results in easy to read datajoint variables
+        #### save caiman results in easy to read datajoint variables
+        s_background = np.reshape(cnm2.estimates.b, cnm2.dims + (opts.get('init', 'nb'),), order='F')
+        f_background = cnm2.estimates.f
 
         masks = cnm2.estimates.A  # (flattened_index, nr_masks)
         nr_masks = masks.shape[1]
@@ -1036,13 +1056,21 @@ class Segmentation(dj.Computed):
         accepted = np.zeros(nr_masks)
         accepted[cnm2.estimates.idx_components] = 1
 
-        traces = cnm2.estimates.C  # (nr_masks, nr_frames)
-        dff = cnm2.estimates.F_dff  # (nr_masks, nr_frames)
+        traces = cnm2.estimates.C + cnm2.estimates.Yr
+        residual = cnm2.estimates.Yr
+        dff = cnm2.estimates.F_dff
+
+        snr = cnm2.estimates.SNR_comp
+        r = cnm2.estimates.r_values
+        cnn = cnm2.estimates.cnn_preds
 
         #### insert results in master table first
         new_master_entry = dict(**key,
                                 nr_masks=nr_masks,
-                                target_dim=np.array(dims))
+                                target_dim=np.array(dims),
+                                cn=cnm2.estimates.Cn,
+                                s_background=s_background,
+                                f_background=f_background)
         self.insert1(new_master_entry)
 
         #### insert the masks and traces in the part table
@@ -1052,7 +1080,12 @@ class Segmentation(dj.Computed):
                             pixels=masks[:, i].indices,
                             weights=masks[:, i].data,
                             trace=traces[i, :],
+                            residual=residual[i, :],
                             dff=dff[i, :],
+                            perc=perc[i],
+                            snr=snr[i],
+                            r=r[i],
+                            cnn=cnn[i],
                             accepted=accepted[i])
             Segmentation.ROI().insert1(new_part)
 
@@ -1062,7 +1095,7 @@ class Segmentation(dj.Computed):
         # log('Finished populating Segmentation for {}.'.format(key))
 
     ##### More functions for Segmentation
-    def print_info(self):
+    def print_info(self) -> None:
         """ Helper function to print some information about selected entries
         Adrian 2020-03-16
         """
@@ -1072,8 +1105,10 @@ class Segmentation(dj.Computed):
         print('Total units:', total_units)
         print('Accepted units: ', accepted_units)
 
-    def get_traces(self, only_accepted=True, trace_type='dff', include_id=False, decon_id=None):
-        """ Main function to get fluorescent traces in format (nr_traces, timepoints)
+    def get_traces(self, only_accepted: bool = True, trace_type: str = 'dff', include_id: bool = False,
+                   decon_id: bool = None) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+        """
+        Main function to get fluorescent traces in format (nr_traces, timepoints)
         Parameters
         ----------
         only_accepted : bool  (default True)
@@ -1093,6 +1128,15 @@ class Segmentation(dj.Computed):
         optional: 1D numpy array (nr_traces)
             Second argument returned only if include_id==True, contains mask ID's of the rows i
         Adrian 2020-03-16
+
+        Args:
+            only_accepted   : If True, only return traces which have the property Segmentation.ROI accepted==1
+            trace_type      : Type of the trace: 'dff', 'trace' (absolute signal values), 'decon' (Cascade spike rates)
+            include_id:
+            decon_id:
+
+        Returns:
+
         """
 
         # some checks to catch errors in the input arguments
