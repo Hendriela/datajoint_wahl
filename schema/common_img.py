@@ -579,9 +579,11 @@ class MemoryMappedFile(dj.Manual):
             raise Exception('The memory mapped file already exists!')
 
         # get parameter from motion correction
+        opts_dict = (MotionParameter & key).get_parameter_obj(key)
+
         line_shift = (MotionCorrection() & key).fetch1('line_shift')
         offset = (MotionParameter() & key).fetch1('offset')
-        max_shift_allowed = (MotionParameter() & key).fetch1('max_shift')
+        # max_shift_allowed = opts_dict.get('motion', 'max_shifts')[0]
         xy_shift = (MotionCorrection & key).fetch1('shifts')  # (2 x nr_frames)
 
         # save raw recordings locally in cache
@@ -615,10 +617,10 @@ class MemoryMappedFile(dj.Manual):
         temp_mmap_files = list()
         for i, file in enumerate(corrected_files):
             part_file = cm.save_memmap([file], xy_shifts=shift_parts[i], base_name='tmp{:02d}_'.format(i + 1),
-                                       order='C',
-                                       slices=(slice(0, 100000),
-                                               slice(max_shift_allowed, scan_size - max_shift_allowed),
-                                               slice(max_shift_allowed, scan_size - max_shift_allowed)))
+                                       order='C')
+                                       # slices=(slice(0, 100000),
+                                       #         slice(max_shift_allowed, scan_size - max_shift_allowed),
+                                       #         slice(max_shift_allowed, scan_size - max_shift_allowed)))
             temp_mmap_files.append(part_file)
             motion_correction.delete_cache_files([file])  # save
 
