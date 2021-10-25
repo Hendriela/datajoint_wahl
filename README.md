@@ -9,7 +9,7 @@ The scripts that have to be changed are in the <code>edit_source</code> director
 
 ## Re-starting the MySQL database
 
-If the database got shut down (e.g. if the server was turned off), it has to be re-started with these steps.
+If the database is unreachable, but the server machine is running (SSH works), it has to be re-started with these steps. 
 
 <ol>
   <li>Ensure that the physical machine is running. Connect to it by typing this into a terminal and entering the password:
