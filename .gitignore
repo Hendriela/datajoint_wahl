@@ -6,3 +6,4 @@ schema/__pycache__/
 /dj_local_conf.json
 /docs/
 mpanze_scripts/widefield/__pycache__/
+/.vscode/
