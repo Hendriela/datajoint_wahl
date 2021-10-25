@@ -369,7 +369,7 @@ class MotionParameter(dj.Manual):
         """
         frame_rate = (ScanInfo & scan_key).fetch1('fr')
         # TODO: use decay time depending on used calcium indicator
-        decay_time = 0.4
+        decay_time = (CaIndicator & scan_key).fetch1('decay')
 
         # Caiman wants border_nan = False to be 'copy'
         border_nan = 'copy' if not self.fetch1('border_nan') else True
@@ -431,7 +431,7 @@ class MotionCorrection(dj.Computed):
         Args:
             key: Primary keys of the current NetworkScan() entry.
         """
-        # log('Populating MotionCorrection for key: {}'.format(key))
+        print('Populating MotionCorrection for key: {}'.format(key))
 
         n_processes = 4  # TODO: remove hardcoding and choose as function of recording and RAM size?
 
@@ -459,15 +459,23 @@ class MotionCorrection(dj.Computed):
         paths = (RawImagingFile & key).get_paths()
         local_cache = login.get_cache_directory()
 
-        local_paths = motion_correction.cache_files(paths, local_cache)
+        try:
+            local_paths = motion_correction.cache_files(paths, local_cache)
+        except MemoryError as ex:
+            # Catch memory error and stop cluster
+            cm.stop_server(dview=dview)
+            raise ex
+
         paths = None  # make sure that the files at neurophysiology are not used by accident
 
         corrected_files = []
 
-        # log('Calculating shift between even and odd lines...')
+        print('Calculating shift between even and odd lines...')
         # For multiple channels, take images from both (offset should be the same)
         line_shift = motion_correction.find_shift_multiple_stacks(local_paths)
-        # log('Detected line shift of {} pixel'.format(line_shift))
+        print('Detected line shift of {} pixel'.format(line_shift))
+
+        print("Correcting file with offset {}".format(motion_params['offset']))
 
         for path in local_paths:
             # apply raster and offset correction and save as new file
@@ -478,13 +486,13 @@ class MotionCorrection(dj.Computed):
             corrected_files.append(new_path)
 
         # delete not corrected files from cache to save storage
-        # log('Deleting raw cached files...')
+        print('Deleting raw cached files...')
         motion_correction.delete_cache_files(local_paths)
 
         # perform actual motion correction
         mc = MotionCorrect(corrected_files, **opts_dict.get_group('motion'), dview=dview)
 
-        # log('Starting CaImAn motion correction for area {}...'.format(area))
+        print('Starting CaImAn motion correction...')
         # log('Used parameters: {}'.format(opts.get_group('motion')))
         mc.motion_correct(save_movie=True)
         # log('Finished CaImAn motion correction for area {}.'.format(area))
@@ -500,7 +508,7 @@ class MotionCorrection(dj.Computed):
         shifts = np.array(mc.shifts_rig).T  # caiman output: list with x,y shift tuples, shape (2, nr_frames)
         template = mc.total_template_rig  # 2D np array, mean intensity image
 
-        # log('Calculate correlation between template and frames...')
+        print('Calculate correlation between template and frames...')
         template_correlations = []
         for mmap_file in mmap_files:
             template_correlations.append(motion_correction.calculate_correlation_with_template(
@@ -545,7 +553,7 @@ class MotionCorrection(dj.Computed):
                          outlier_frames=outlier_frames)
         self.insert1(new_entry)
 
-        # log('Finished populating MotionCorrection for key: {}'.format(key))
+        print('Finished populating MotionCorrection for key: {}'.format(key))
 
 
 @schema
@@ -571,14 +579,12 @@ class MemoryMappedFile(dj.Manual):
             channel:    If value is given (0 or 1), the stack is deinterleaved before corrections. Default is None.
         """
 
-        # log('Creating memory mapped file...')
+        print('Creating memory mapped file...')
 
         if len(MemoryMappedFile() & key) != 0:
             raise Exception('The memory mapped file already exists!')
 
         # get parameter from motion correction
-        opts_dict = (MotionParameter & key).get_parameter_obj(key)
-
         line_shift = (MotionCorrection() & key).fetch1('line_shift')
         offset = (MotionParameter() & key).fetch1('offset')
         crop = (MotionParameter() & key).fetch1('crop_left')
@@ -630,9 +636,9 @@ class MemoryMappedFile(dj.Manual):
 
         # create new entry in database
         # make sure no key attributes are too much or missing
-        area_key = (MotionCorrection.Area & key).fetch1('KEY')
+        motion_key = (MotionCorrection & key).fetch1('KEY')
 
-        new_entry = dict(**area_key, mmap_path=mmap_file)
+        new_entry = dict(**motion_key, mmap_path=mmap_file)
 
         self.insert1(new_entry)
         # log('Finished creating memory mapped file.')
@@ -680,7 +686,7 @@ class MemoryMappedFile(dj.Manual):
         corrected_int = np.array(corrected[:nr_frames, :, :], dtype='int16')
 
         file = 'motionCorrected_mouse_{mouse_id}_day_{day}_session_{session_num}_frames_{frames}'.format(
-            dict(**key, frames=len(corrected)))
+            **dict(**key, frames=len(corrected)))
 
         corrected = None  # save memory
 
