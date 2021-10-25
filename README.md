@@ -2,6 +2,11 @@
 
 This repository contains the source code for the Datajoint server maintained by the Wahl group.
 
+## Necessary source code edits
+
+To optimise our pipeline, a few changes to the Caiman and DataJoint source code were introduced. Until these changes are patched in, they have to be done manually.
+The scripts that have to be changed are in the <code>edit_source</code> directory. The location of the original script that has to be replaced is at the top of each adapted script. The exact path is user-specific and depends a.o. on the name of your environments and drives. Replace the content of the original script with our adapted version before running the pipeline.
+
 ## Re-starting the MySQL database
 
 If the database got shut down (e.g. if the server was turned off), it has to be re-started with these steps.
