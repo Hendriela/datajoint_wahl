@@ -321,12 +321,10 @@ class MotionParameter(dj.Manual):
     motion_description  : varchar(1024)     # Longer description of conditions for which this parameter set fits
     # Custom parameters related to preprocessing and cropping
     crop_left   = 12    : smallint  # Pixels to crop on the left to remove scanning artifacts before MC.
-    crop_right  = 12    : smallint  # See crop_left. These two values are only to compute the MC shifts. The actual 
-                                    # movie is not cropped here, but in MemoryMappedFile(). Thus, more crop here can 
-                                    # improve motion correction performance (if border artefacts are removed) and do 
-                                    # not limit the size of the final motion-corrected movie.
-    offset      = 220   : int       # Fixed value that is added to all pixels to make values positive everywhere.
-                                    # Only used if nonneg_movie=False.
+    crop_right  = 12    : smallint  # See crop_left. The actual movie is not cropped here, but in MemoryMappedFile(), 
+                                    # where it is used to remove border artifacts.
+    offset = 220        : int       # Fixed value that is added to all pixels to make mean pixel values positive.
+                                    # Default value of 220 is ~95th percentile of 900 randomly checked raw tif files.
     # CaImAn motion correction parameters
     max_shift = 50      : smallint  # maximum allowed rigid shifts (in um)
     stride_mc = 250     : smallint  # stride size for non-rigid correction (in um), patch size is stride+overlap)
@@ -337,7 +335,7 @@ class MotionParameter(dj.Manual):
     n_iter_rig = 2      : tinyint   # Number of iterations for rigid motion correction (not used for pw-rigid)
     nonneg_movie = 1    : tinyint   # flag for producing a non-negative movie
     """
-
+    # TODO: CRUCIAL!! CHECK HOW THE CHANGED PMT SETTING THAT AFFECTS dF/F CAN BE CORRECTED TO MAKE SESSIONS COMPARABLE
     # Todo: check if n_iter is only important for rigid, or also for pw-rigid correction
 
     def helper_insert1(self, entry: dict) -> None:
@@ -583,7 +581,7 @@ class MemoryMappedFile(dj.Manual):
 
         line_shift = (MotionCorrection() & key).fetch1('line_shift')
         offset = (MotionParameter() & key).fetch1('offset')
-        # max_shift_allowed = opts_dict.get('motion', 'max_shifts')[0]
+        crop = (MotionParameter() & key).fetch1('crop_left')
         xy_shift = (MotionCorrection & key).fetch1('shifts')  # (2 x nr_frames)
 
         # save raw recordings locally in cache
@@ -617,10 +615,10 @@ class MemoryMappedFile(dj.Manual):
         temp_mmap_files = list()
         for i, file in enumerate(corrected_files):
             part_file = cm.save_memmap([file], xy_shifts=shift_parts[i], base_name='tmp{:02d}_'.format(i + 1),
-                                       order='C')
-                                       # slices=(slice(0, 100000),
-                                       #         slice(max_shift_allowed, scan_size - max_shift_allowed),
-                                       #         slice(max_shift_allowed, scan_size - max_shift_allowed)))
+                                       order='C',
+                                       slices=(slice(0, 100000),
+                                               slice(crop, scan_size - crop),
+                                               slice(crop, scan_size - crop)))
             temp_mmap_files.append(part_file)
             motion_correction.delete_cache_files([file])  # save
 
