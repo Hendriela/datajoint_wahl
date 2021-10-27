@@ -14,7 +14,7 @@ import datajoint as dj
 import login
 
 from util import scanimage, motion_correction
-from schema import common_exp
+from schema import common_exp, common_mice
 
 import os
 import numpy as np
@@ -327,8 +327,8 @@ class MotionParameter(dj.Manual):
                                     # Default value of 220 is ~95th percentile of 900 randomly checked raw tif files.
     # CaImAn motion correction parameters
     max_shift = 50      : smallint  # maximum allowed rigid shifts (in um)
-    stride_mc = 250     : smallint  # stride size for non-rigid correction (in um), patch size is stride+overlap)
-    overlap_mc = 32     : smallint  # Overlap between patches (Caiman recommends ca. 1/4 of stride)
+    stride_mc = 150     : smallint  # stride size for non-rigid correction (in um), patch size is stride+overlap)
+    overlap_mc = 30     : smallint  # Overlap between patches, in pixels
     pw_rigid = 1        : tinyint   # flag for performing rigid  or piecewise (patch-wise) rigid mc (0: rigid, 1: pw)
     max_dev_rigid = 3   : smallint  # maximum deviation allowed for patches with respect to rigid shift
     border_nan = 0      : tinyint   # flag for allowing NaN in the boundaries. If False, value of the nearest data point
@@ -348,15 +348,17 @@ class MotionParameter(dj.Manual):
 
         self.insert1(entry)
 
+        full_entry = (self & entry).fetch1()        # Query full entry in case some default attributes were not set
+
         # TODO: remove hard-coding of folder location
         REL_BACKUP_PATH = "Datajoint/manual_submissions"
 
-        identifier = f"motion_{entry['motion_id']}"
+        identifier = f"motion_{full_entry['motion_id']}"
 
         # save dictionary in a backup YAML file for faster re-population
         filename = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier + '.yaml')
         with open(filename, 'w') as outfile:
-            yaml.dump(entry, outfile, default_flow_style=False)
+            yaml.dump(full_entry, outfile, default_flow_style=False)
 
     def get_parameter_obj(self, scan_key: dict) -> params.CNMFParams:
         """
@@ -368,7 +370,6 @@ class MotionParameter(dj.Manual):
             CNMFParams-type dictionary that CaImAn uses for its pipeline
         """
         frame_rate = (ScanInfo & scan_key).fetch1('fr')
-        # TODO: use decay time depending on used calcium indicator
         decay_time = (CaIndicator & scan_key).fetch1('decay')
 
         # Caiman wants border_nan = False to be 'copy'
@@ -390,7 +391,7 @@ class MotionParameter(dj.Manual):
                      'dxy': dxy,
                      'max_shifts': max_shifts,
                      'strides': strides,
-                     'overlaps': self.fetch1('overlap_mc'),
+                     'overlaps': (self.fetch1('overlap_mc'), self.fetch1('overlap_mc')),
                      'max_deviation_rigid': self.fetch1('max_dev_rigid'),
                      'pw_rigid': bool(self.fetch1('pw_rigid')),
                      'border_nan': border_nan,
@@ -433,13 +434,13 @@ class MotionCorrection(dj.Computed):
         """
         print('Populating MotionCorrection for key: {}'.format(key))
 
-        n_processes = 4  # TODO: remove hardcoding and choose as function of recording and RAM size?
+        # n_processes = 4  # TODO: remove hardcoding and choose as function of recording and RAM size?
 
         # start the cluster (if a cluster already exists terminate it)
         if 'dview' in locals():
             cm.stop_server(dview=dview)
         c, dview, n_processes = cm.cluster.setup_cluster(
-            backend='local', n_processes=n_processes, single_thread=False)
+            backend='local', n_processes=None, single_thread=False)
 
         ## get the parameters for the motion correction
         motion_params = (MotionParameter & key).fetch1()  # custom, non-Caiman params for preprocessing
@@ -448,8 +449,6 @@ class MotionCorrection(dj.Computed):
 
         # Get Caiman Param object from the parameter table
         opts_dict = (MotionParameter & key).get_parameter_obj(key)
-
-        # opts = params.CNMFParams(params_dict=opts_dict) Todo check that this line is unnecessary
 
         # perform motion correction area by area
         new_part_entries = []  # save new entries for part tables
@@ -708,7 +707,7 @@ class MemoryMappedFile(dj.Manual):
             with h5py.File(path, 'w') as h5file:
                 h5file.create_dataset('scan', data=toSave_cOrder, dtype=np.int16)
 
-        print('Done!')
+        print('Saved file at {}'.format(path))
 
 
 @schema
@@ -776,31 +775,24 @@ class QualityControl(dj.Computed):
 
 @schema
 class CaimanParameter(dj.Lookup):
-    definition = """ # Table which stores sets of CaImAn Parameters
+    definition = """ # Table which stores sets of CaImAn Parameters. Defaults fit for dense CA1 1x FOV with good SNR.
     -> common_mice.Mouse
     caiman_id:          smallint        # index for unique parameter set, base 0
     ----
-    # Parameters for motion correction
-    max_shift = 50:         smallint    # maximum allowed rigid shifts (in um)
-    stride_mc = 160:        smallint    # stride size for non-rigid correction (in um), patch size is stride+overlap
-    overlap_mc = 40:        smallint    # Overlap between patches (Caiman recommends ca. 1/4 of stride)
-    pw_rigid = 1:           tinyint     # flag for performing rigid  or piecewise-rigid mc (0: rigid, 1: pw)
-    max_dev_rigid = 3:      smallint    # maximum deviation allowed for patches with respect to rigid shift
-    border_nan = 0:         tinyint     # flag for allowing NaN in the boundaries. If False, take value of the nearest data point
     # Parameters for CNMF and component extraction
     p = 1:                  tinyint     # order of the autoregressive system (should always be 1)
     nb = 2:                 tinyint     # number of global background components
     merge_thr = 0.75:       float       # merging threshold, max correlation of components allowed before merged
-    rf = 80:                smallint    # half-size of the patches in pixels. e.g., if rf=25, patches are 50x50. -1 if no patches.
-    stride_cnmf = 10:       smallint    # amount of overlap between the patches in pixels
-    k = 12:                 smallint    # number of components per patch
-    g_sig = 5:              smallint    # expected half size of neurons in pixels
+    rf = 25:                smallint    # half-size of the patches in pixels. e.g., if rf=25, patches are 50x50. -1 if no patches.
+    stride_cnmf = 6 :       smallint    # amount of overlap between the patches in pixels
+    k = 18:                 smallint    # number of components per patch
+    g_sig = 4:              smallint    # expected half size of neurons in pixels
     method_init = 'greedy_roi' : varchar(128)   # initialization method (if analyzing dendritic data using 'sparse_nmf')
-    ssub = 1:               tinyint     # spatial subsampling during initialization
+    ssub = 2:               tinyint     # spatial subsampling during initialization
     tsub = 2:               tinyint     # temporal subsampling during initialization
     # parameters for component evaluation
-    snr_lowest = 4.0:       float       # rejection threshold of signal-to-noise ratio
-    snr_thr = 8.0:          float       # upper threshold of signal-to-noise ratio
+    snr_lowest = 5.0:       float       # rejection threshold of signal-to-noise ratio
+    snr_thr = 9.0:          float       # upper threshold of signal-to-noise ratio
     rval_lowest = -1.0:     float       # rejection threshold of spatial correlation of ROI mask vs trace
     rval_thr = 0.85:        float       # upper threshold of spatial correlation of ROI mask vs trace
     cnn_lowest = 0.1:       float       # rejection threshold of CNN-based classifier
@@ -813,20 +805,42 @@ class CaimanParameter(dj.Lookup):
     frame_window = 2000:    int         # Sliding window size of fluorescence normalization
     """
 
-    def get_parameter_obj(self, scan_key: dict) -> params.CNMFParams:
+    def helper_insert1(self, entry: dict) -> None:
+        """
+        Extended insert1() method that also creates a backup YAML file for every parameter set.
+
+        Args:
+            entry: Content of the new CaimanParameter() entry.
+        """
+
+        self.insert1(entry)
+
+        full_entry = (self & entry).fetch1()  # Query full entry in case some default attributes were not set
+
+        # TODO: remove hard-coding of folder location
+        REL_BACKUP_PATH = "Datajoint/manual_submissions"
+
+        identifier = f"caiman_{full_entry['caiman_id']}_{full_entry['username']}_M{full_entry['mouse_id']}"
+
+        # save dictionary in a backup YAML file for faster re-population
+        filename = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier + '.yaml')
+        with open(filename, 'w') as outfile:
+            yaml.dump(full_entry, outfile, default_flow_style=False)
+
+    def get_parameter_obj(self, scan_key: dict, return_dict: bool = True) -> Union[params.CNMFParams, dict]:
         """
         Exports parameters as a params.CNMFParams type dictionary for CaImAn.
         Args:
             scan_key: Primary keys of Scan entry that is being processed
+            return_dict: Bool flag whether a a dict instead of a CNMFParams object should be returned.
+                            This is necessary to integrate the Caiman parameters into an existing CNMFParams object.
 
         Returns:
-            CNMFParams-type dictionary that CaImAn uses for its pipeline
+            Dict of CaImAn parameters (if return_dict == True)
+            CNMFParams-type dictionary that CaImAn uses for its pipeline (if return_dict == False)
         """
         frame_rate = (ScanInfo & scan_key).fetch1('fr')
         decay_time = (CaIndicator & scan_key).fetch1('decay')
-
-        # Caiman wants border_nan = False to be 'copy'
-        border_nan = 'copy' if not self.fetch1('border_nan') else True
 
         # Calculate X/Y resolution from FOV size and zoom setting
         zoom = {'zoom': (ScanInfo & scan_key).fetch1('zoom')}
@@ -835,25 +849,15 @@ class CaimanParameter(dj.Lookup):
         dxy = (fov[0] / (ScanInfo & scan_key).fetch1('pixel_per_line'),
                fov[1] / (ScanInfo & scan_key).fetch1('nr_lines'))
 
-        # Transform distance-based patch metrics to pixels
-        max_shifts = [int(a / b) for a, b in zip((self.fetch1('max_shift'), self.fetch1('max_shift')), dxy)]
-        strides = tuple([int(a / b) for a, b in zip((self.fetch1('stride_mc'), self.fetch1('stride_mc')), dxy)])
-
         opts_dict = {  # 'fnames': fnames,
             'fr': frame_rate,
             'decay_time': decay_time,
             'dxy': dxy,
-            'max_shifts': max_shifts,
-            'strides': strides,
-            'overlaps': self.fetch1('overlap_mc'),
-            'max_deviation_rigid': self.fetch1('max_dev_rigid'),
-            'pw_rigid': bool(self.fetch1('pw_rigid')),
-            'border_nan': border_nan,
             'p': self.fetch1('p'),
             'nb': self.fetch1('nb'),
             'rf': self.fetch1('rf'),
             'K': self.fetch1('k'),
-            'gSig': (self.fetch1('g_sig'), self.fetch1('g_sig')),
+            'gSig': [self.fetch1('g_sig'), self.fetch1('g_sig')],
             'stride': self.fetch1('stride_cnmf'),
             'method_init': self.fetch1('method_init'),
             'rolling_sum': True,
@@ -874,9 +878,11 @@ class CaimanParameter(dj.Lookup):
         if opts_dict['rf'] == -1:
             opts_dict['rf'] = None
 
-        opts = params.CNMFParams(params_dict=opts_dict)
-
-        return opts
+        if return_dict:
+            return opts_dict
+        else:
+            opts = params.CNMFParams(params_dict=opts_dict)
+            return opts
 
 
 @schema
@@ -892,9 +898,6 @@ class Segmentation(dj.Computed):
     f_background                    : longblob    # Background fluorescence (nb, nr_frames)
     time_seg = CURRENT_TIMESTAMP    : timestamp   # automatic timestamp
     """
-
-    # Todo: check how the dependency with CaimanParameter works. Only parameters for the specific mouse should be used.
-    #   Also check that this cn is the same as Adrians "cor_img" in QualityControl()
 
     class ROI(dj.Part):
         definition = """ # Data from mask created by Caiman
