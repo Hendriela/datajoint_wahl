@@ -1247,6 +1247,7 @@ class Deconvolution(dj.Computed):
         mask_id : int        #  Mask index (as in Segmentation.ROI, base 0)
         -----
         decon   : longblob   # 1d array with deconvolved activity
+        noise   : float      # noise level as computed by Cascade based on frame-rate-normalized dF/F standard deviation
         """
 
     def make(self, key: dict) -> None:
@@ -1282,8 +1283,8 @@ class Deconvolution(dj.Computed):
         cascade_path = os.path.dirname(inspect.getfile(cascade))
         model_folder = os.path.join(cascade_path, 'Pretrained_models')
 
-        decon_traces = cascade.predict(model_name, traces, model_folder=model_folder,
-                                       threshold=threshold, padding=0)
+        decon_traces, trace_noise_levels = cascade.predict(model_name, traces, model_folder=model_folder,
+                                                           threshold=threshold, padding=0)
 
         # enter results into database
         self.insert1(key)  # master entry
@@ -1292,7 +1293,8 @@ class Deconvolution(dj.Computed):
         for i, unit_id in enumerate(unit_ids):
             new_part = dict(**key,
                             mask_id=unit_id,
-                            decon=decon_traces[i, :])
+                            decon=decon_traces[i, :],
+                            noise=trace_noise_levels[i])
             part_entries.append(new_part)
 
         self.ROI.insert(part_entries)

@@ -224,9 +224,8 @@ def train_model(
     print("Runtime: {:.0f} min".format((time.time() - start) / 60))
 
 
-def predict(
-    model_name, traces, model_folder="Pretrained_models", threshold=0, padding=np.nan
-):
+def predict(model_name: str, traces: np.ndarray, model_folder: str = "Pretrained_models", threshold: int = 0,
+            padding: Union[float, int] = np.nan) -> Tuple[np.ndarray, np.ndarray]:
 
     """Use a specific trained neural network ('model_name') to predict spiking activity for calcium traces ('traces')
 
@@ -469,7 +468,7 @@ def predict(
 
     print("Done")
 
-    return Y_predict
+    return Y_predict, trace_noise_levels
 
 
 def verify_config_dict(config_dictionary):
