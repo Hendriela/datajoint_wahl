@@ -4,13 +4,14 @@
 General checks to simplify jupyter notebooks and GUI
 """
 
-def check_packages():
+
+def check_packages(verbose=False):
     """ Wrapper for check_yaml and check_keras_version """
-    check_yaml()
-    check_keras_version()
+    check_yaml(verbose)
+    check_keras_version(verbose)
 
 
-def check_yaml():
+def check_yaml(verbose):
     """ Check if ruamel.yaml is installed, otherwise notify user with instructions """
 
     try:
@@ -21,9 +22,11 @@ def check_yaml():
               'Please install it with "pip install ruamel.yaml"')
         return
 
-    print('\tYAML reader installed (version {}).'.format(ruamel.yaml.__version__))
+    if verbose:
+        print('\tYAML reader installed (version {}).'.format(ruamel.yaml.__version__))
 
-def check_keras_version():
+
+def check_keras_version(verbose):
     """ Import keras and tensorflow and check versions """
     try:
         import keras
@@ -40,7 +43,8 @@ def check_keras_version():
               'Please install tensorflow with "pip install tensorflow==2.1.0".')
         return
 
-    print('\tKeras installed (version {}).'.format(keras.__version__) )
-    print('\tTensorflow installed (version {}).'.format(tensorflow.__version__) )
+    if verbose:
+        print('\tKeras installed (version {}).'.format(keras.__version__) )
+        print('\tTensorflow installed (version {}).'.format(tensorflow.__version__) )
 
     ## TODO: perform check that versions are compatible, notify user

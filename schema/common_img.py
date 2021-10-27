@@ -13,7 +13,7 @@ Schemas for the CaImAn 2-photon image analysis pipeline
 import datajoint as dj
 import login
 
-from util import scanimage, motion_correction
+from util import scanimage
 from schema import common_exp, common_mice
 
 import os
@@ -1125,7 +1125,13 @@ class Segmentation(dj.Computed):
             Segmentation.ROI().insert1(new_part)
 
         # delete MemoryMappedFile to save storage
-        (MemoryMappedFile & key).delete_mmap_file()
+        try:
+            # Clean up movie variables to close mmap file for deletion
+            Yr = None
+            images = None
+            (MemoryMappedFile & key).delete_mmap_file()
+        except PermissionError:
+            print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
 
         print('Finished populating Segmentation for {}.'.format(key))
 
@@ -1184,7 +1190,7 @@ class Segmentation(dj.Computed):
                             decon_ids))
 
             table = Deconvolution.ROI() & selected_rois & {'decon_id': decon_id}
-            traces_list = table.fetch('decon', order_by=('area', 'mask_id'))
+            traces_list = table.fetch('decon', order_by='mask_id')
 
         # some more sanity checks to catch common errors
         if len(traces_list) == 0:
@@ -1208,20 +1214,21 @@ class Segmentation(dj.Computed):
 
 @schema
 class DeconvolutionModel(dj.Lookup):
-    definition = """ # Table for different deconvolution methods
+    definition = """ # Table for different deconvolution models
     decon_id      : int            # index for methods, base 0
     ----
     model_name    : varchar(128)   # Name of the model
     sampling_rate : int            # Sampling rate [Hz]
-    smoothing     : float          # Std of gaussian to smooth ground truth spike rate
+    smoothing     : float          # Std of gaussian to smooth ground truth spike rate [in sec]
     causal        : int            # 0: symmetric smoothing, 1: causal kernel
     nr_datasets   : int            # Number of datasets used for training the model
     threshold     : int            # 0: threshold at zero, 1: threshold at height of one spike
     """
     contents = [
-        [0, 'Universal_15Hz_smoothing100ms_causalkernel', 15, 0.1, 1, 18, 0],
-        [1, 'Universal_15Hz_smoothing100ms_causalkernel', 15, 0.1, 1, 18, 1],
-        [2, 'Universal_30Hz_smoothing50ms_causalkernel', 30, 0.1, 1, 18, 1],
+        [0, 'Global_EXC_30Hz_smoothing50ms_causalkernel', 30, 0.05, 1, 18, 0],
+        [1, 'Global_EXC_30Hz_smoothing50ms', 30, 0.05, 0, 18, 0],
+        [2, 'Global_EXC_30Hz_smoothing100ms_causalkernel', 30, 0.2, 1, 18, 0],
+        [3, 'Global_EXC_30Hz_smoothing100ms', 30, 0.2, 0, 18, 0]
     ]
 
 
@@ -1237,7 +1244,7 @@ class Deconvolution(dj.Computed):
     class ROI(dj.Part):
         definition = """ # Data from mask created by Caiman
         -> Deconvolution
-        mask_id : int        #  Mask index (as in Segmentation.ROI), per area (base 0)
+        mask_id : int        #  Mask index (as in Segmentation.ROI, base 0)
         -----
         decon   : longblob   # 1d array with deconvolved activity
         """
@@ -1251,9 +1258,9 @@ class Deconvolution(dj.Computed):
             key: Primary keys of the current Segmentation() entry.
         """
 
-        # log('Populating Deconvolution for {}'.format(key))
+        print('Populating Deconvolution for {}'.format(key))
 
-        from .utils.cascade2p import checks, cascade
+        from util.cascade2p import checks, cascade
         # To run deconvolution, tensorflow, keras and ruaml.yaml must be installed
         checks.check_packages()
 
@@ -1262,17 +1269,18 @@ class Deconvolution(dj.Computed):
         threshold = (DeconvolutionModel & key).fetch1('threshold')
         fs = (ScanInfo & key).fetch1('fr')
 
+        print('Using deconvolution model {}'.format(model_name))
+
         if np.abs(sampling_rate - fs) > 1:
             raise Warning(('The model sampling rate {}Hz is too different from the '.format(sampling_rate) +
                            'recording rate of {}Hz.'.format(fs)))
 
-        # get dff traces only for accepted units! If changing accepted, table has to be populated again
-        traces, unit_ids = (Segmentation & key).get_traces(only_accepted=True, include_id=True)
+        traces, unit_ids = (Segmentation & key).get_traces(include_id=True)
 
         # model is saved in subdirectory models of cascade2p
         import inspect
         cascade_path = os.path.dirname(inspect.getfile(cascade))
-        model_folder = os.path.join(cascade_path, 'models')
+        model_folder = os.path.join(cascade_path, 'Pretrained_models')
 
         decon_traces = cascade.predict(model_name, traces, model_folder=model_folder,
                                        threshold=threshold, padding=0)
@@ -1289,12 +1297,11 @@ class Deconvolution(dj.Computed):
 
         self.ROI.insert(part_entries)
 
-    def get_traces(self, only_accepted: bool = True, include_id: bool = False) \
+    def get_traces(self, include_id: bool = False) \
             -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], None]:
         """ Wrapper function for Segmentation.get_traces(). See that function for documentation """
 
-        return (Segmentation & self).get_traces(only_accepted=only_accepted, trace_type='decon',
-                                                include_id=include_id, decon_id=self.fetch1('decon_id'))
+        return (Segmentation & self).get_traces(trace_type='decon', include_id=include_id, decon_id=self.fetch1('decon_id'))
 
 
 @schema
@@ -1307,7 +1314,7 @@ class ActivityStatistics(dj.Computed):
     class ROI(dj.Part):
         definition = """ # Part table for entries grouped by session
         -> ActivityStatistics
-        mask_id : int        #  Mask index (as in Segmentation.ROI), per area (base 0)
+        mask_id : int        #  Mask index (as in Segmentation.ROI, base 0)
         -----
         sum_spikes   : float    # Sum of deconvolved activity trace (number of spikes)
         rate_spikes  : float    # sum_spikes normalized to spikes / second
@@ -1326,7 +1333,7 @@ class ActivityStatistics(dj.Computed):
         THRESH = 0.05  # Threshold for deconvolved events, hardcoded parameter
 
         # traces is (nr_neurons, time) array
-        traces, unit_ids = (Deconvolution & key).get_traces(only_accepted=True, include_id=True)
+        traces, unit_ids = (Deconvolution & key).get_traces(include_id=True)
         fps = (ScanInfo & key).fetch1('fr')
         nr_frames = traces.shape[1]
 
