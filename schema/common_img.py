@@ -22,6 +22,7 @@ from typing import Optional, List, Union, Tuple
 import tifffile as tif
 import yaml
 from glob import glob
+import matplotlib.pyplot as plt
 
 # This code has to be run in a CaImAn environment
 import caiman as cm
@@ -893,7 +894,6 @@ class Segmentation(dj.Computed):
     ------
     nr_masks                        : int         # Number of total detected masks in this FOV (includes rejected masks)
     target_dim                      : longblob    # Tuple (dim_y, dim_x) to reconstruct mask from linearized index
-    cn                              : longblob    # Local correlation image
     s_background                    : longblob    # Spatial background component(s) weight mask (dim_y, dim_x, nb) 
     f_background                    : longblob    # Background fluorescence (nb, nr_frames)
     time_seg = CURRENT_TIMESTAMP    : timestamp   # automatic timestamp
@@ -913,7 +913,6 @@ class Segmentation(dj.Computed):
         snr      : float        # Signal-to-noise ratio of this ROI (evaluation criterion)
         r        : float        # Spatial correlation of fluorescence and mask (evaluation criterion)
         cnn      : float        # CNN estimation of neuron-like shape (evaluation criterion)
-        accepted : tinyint      # 0: False, 1: True
         """
 
         def get_roi(self) -> np.ndarray:
@@ -964,7 +963,7 @@ class Segmentation(dj.Computed):
             return np.array([np.round(center1), np.round(center2)], dtype=int)
 
     # make of main table Segmentation
-    def make(self, key: dict, save_results: bool = False) -> None:
+    def make(self, key: dict, save_results: bool = False, save_overviews: bool = False) -> None:
         """
         Automatically populate the segmentation for the scan.
         Adrian 2019-08-21
@@ -973,8 +972,11 @@ class Segmentation(dj.Computed):
             key:            Primary keys of the current MotionCorrection() entry.
             save_results:   Flag to save Caiman results in the session's folder in an HDF5 file in addition to storing
                             data in Segmentation() and ROI().
+            save_overviews: Flag to plot overview graphs during Segmentation (pre- and post-evaluation components)
+                            and save them in the session folder.
         """
-        # log('Populating Segmentation for {}.'.format(key))
+
+        print('Populating Segmentation for {}.'.format(key))
 
         import caiman as cm
         from caiman.source_extraction.cnmf import cnmf as cnmf
@@ -985,12 +987,17 @@ class Segmentation(dj.Computed):
             channel = Scan().select_channel_if_necessary(key, 0)
             MemoryMappedFile().create(key, channel)
 
-        mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')  # locally cached file
+        mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')    # locally cached file
+        folder = (common_exp.Session() & key).get_absolute_path()   # Session folder on the Neurophys server
 
-        # get parameters
-        opts = (CaimanParameter() & key).get_parameter_obj(key)
+        # Get Caiman parameters and include it into the parameters of the motion correction
+        opts = (MotionParameter() & key).get_parameter_obj(key)
+        opts_dict = (CaimanParameter() & key).get_parameter_obj(key, return_dict=True)
+        opts = opts.change_params(opts_dict)
+
         # log('Using the following parameters: {}'.format(opts.to_dict()))
         p = opts.get('temporal', 'p')  # save for later
+        cn = (QualityControl() & key).fetch1('cor_image')   # Local correlation image for FOV background
 
         # load memory mapped file
         Yr, dims, T = cm.load_memmap(mmap_file)
@@ -998,9 +1005,8 @@ class Segmentation(dj.Computed):
         # load frames in python format (T x X x Y)
 
         # start new cluster
-        n_processes = 1
         c, dview, n_processes = cm.cluster.setup_cluster(
-            backend='local', n_processes=n_processes, single_thread=True)
+            backend='local', n_processes=None, single_thread=True)
 
         # disable the most common warnings in the caiman code...
         import warnings
@@ -1012,25 +1018,49 @@ class Segmentation(dj.Computed):
         # for this step deconvolution is turned off (p=0)
         opts.change_params({'p': 0})
         cnm = cnmf.CNMF(n_processes, params=opts, dview=dview)
-        # log('Starting CaImAn on patches...')
+        # print('Starting CaImAn on patches...')
         cnm = cnm.fit(images)
         # log('Done.')
 
         # %% RE-RUN seeded CNMF on accepted patches to refine and perform deconvolution
         cnm.params.set('temporal', {'p': p})
         # log('Starting CaImAn on the whole recording...')
-        cnm2 = cnm.refit(images, dview=None)
-        # log('Done')
+        cnm2 = cnm.refit(images, dview=dview)
+
+        if save_overviews:
+            print("Saving plots at: {}".format(folder))
+            cnm2.estimates.plot_contours(img=cn, display_numbers=False)
+            plt.tight_layout()
+            fig = plt.gcf()
+            fig.set_size_inches((10, 10))
+            plt.savefig(os.path.join(folder, 'pre_sel_components.png'))
+            plt.close()
 
         # evaluate components
         cnm2.estimates.evaluate_components(images, cnm2.params, dview=dview)
+
+        cnm2.estimates.plot_contours(img=cn, idx=cnm2.estimates.idx_components, display_numbers=False)
+        plt.tight_layout()
+        fig = plt.gcf()
+        fig.set_size_inches((10, 10))
+
+        # discard rejected components
+        cnm2.estimates.select_components(use_object=True)
+
+        if save_overviews:
+            cnm2.estimates.plot_contours(img=cn, display_numbers=False)
+            plt.tight_layout()
+            fig = plt.gcf()
+            fig.set_size_inches((10, 10))
+            plt.savefig(os.path.join(folder, 'components.png'))
+            plt.close()
 
         # Extract DF/F values
         # Caiman's source code has to be edited to return the computed percentiles (which are always used instead of
         # quantileMin if flag_auto is not actively set to False). It is a numpy array with shape (#components) with the
         # percentile used as fluorescence baseline for each neuron.
-        flag_auto = (CaimanParameter() & key).fetch1('flag_auto')
-        frames_window = (CaimanParameter() & key).fetch1('frames_window')
+        flag_auto = bool((CaimanParameter() & key).fetch1('flag_auto'))
+        frames_window = (CaimanParameter() & key).fetch1('frame_window')
         quantileMin = (CaimanParameter() & key).fetch1('quantile_min')
         _, perc = cnm2.estimates.detrend_df_f(flag_auto=flag_auto, quantileMin=quantileMin, frames_window=frames_window)
 
@@ -1038,15 +1068,15 @@ class Segmentation(dj.Computed):
             # If percentiles are not computed, they are not returned but have to be filled manually as quantileMin
             perc = np.array([quantileMin] * len(cnm2.estimates.F_dff))
 
-        # TODO: Check if this works!
         # Save_results is a custom argument that is provided during the populate() call and passed to all subsequent
         # make() calls. For populate() to accept additional kwargs, the source code under datajoint/autopopulate.py
         # had to be adapted.
         if save_results:
             # log('Saving results also to file.')
-            folder = (common_exp.Session() & key).get_folder()
             file = 'tmp_segmentation_caiman_id_{}.hdf5'.format(key['caiman_id'])
-            cnm2.save(os.path.join(folder, file))
+            path = os.path.join(folder, file)
+            print("Saving results at {}".format(path))
+            cnm2.save(path)
 
         # stop cluster
         cm.stop_server(dview=dview)
@@ -1062,14 +1092,12 @@ class Segmentation(dj.Computed):
         masks = cnm2.estimates.A  # (flattened_index, nr_masks)
         nr_masks = masks.shape[1]
 
-        accepted = np.zeros(nr_masks)
-        accepted[cnm2.estimates.idx_components] = 1
-
-        traces = cnm2.estimates.C + cnm2.estimates.Yr
-        residual = cnm2.estimates.Yr
+        traces = cnm2.estimates.C + cnm2.estimates.YrA
+        residual = cnm2.estimates.YrA
         dff = cnm2.estimates.F_dff
 
-        snr = cnm2.estimates.SNR_comp
+        # Inf SNR is possible, has to be replaced by a large number (100 is arbitrary, but should work
+        snr = np.nan_to_num(cnm2.estimates.SNR_comp, posinf=100)
         r = cnm2.estimates.r_values
         cnn = cnm2.estimates.cnn_preds
 
@@ -1077,7 +1105,6 @@ class Segmentation(dj.Computed):
         new_master_entry = dict(**key,
                                 nr_masks=nr_masks,
                                 target_dim=np.array(dims),
-                                cn=cnm2.estimates.Cn,
                                 s_background=s_background,
                                 f_background=f_background)
         self.insert1(new_master_entry)
@@ -1094,34 +1121,32 @@ class Segmentation(dj.Computed):
                             perc=perc[i],
                             snr=snr[i],
                             r=r[i],
-                            cnn=cnn[i],
-                            accepted=accepted[i])
+                            cnn=cnn[i])
             Segmentation.ROI().insert1(new_part)
 
         # delete MemoryMappedFile to save storage
         (MemoryMappedFile & key).delete_mmap_file()
 
-        # log('Finished populating Segmentation for {}.'.format(key))
+        print('Finished populating Segmentation for {}.'.format(key))
 
     ##### More functions for Segmentation
-    def print_info(self) -> None:
-        """ Helper function to print some information about selected entries
-        Adrian 2020-03-16
-        """
-        roi_table = Segmentation.ROI() & self
-        total_units = len(roi_table)
-        accepted_units = len(roi_table & 'accepted=1')
-        print('Total units:', total_units)
-        print('Accepted units: ', accepted_units)
+    # def print_info(self) -> None:
+    #     """ Helper function to print some information about selected entries
+    #     Adrian 2020-03-16
+    #     """
+    #     roi_table = Segmentation.ROI() & self
+    #     total_units = len(roi_table)
+    #     accepted_units = len(roi_table & 'accepted=1')
+    #     print('Total units:', total_units)
+    #     print('Accepted units: ', accepted_units)
 
-    def get_traces(self, only_accepted: bool = True, trace_type: str = 'dff', include_id: bool = False,
+    def get_traces(self, trace_type: str = 'dff', include_id: bool = False,
                    decon_id: bool = None) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], None]:
         """
         Main function to get fluorescent traces in format (nr_traces, timepoints)
         Adrian 2020-03-16
 
         Args:
-            only_accepted   : If True, only return traces which have the property Segmentation.ROI accepted==1
             trace_type      : Type of the trace: 'dff', 'trace' (absolute signal values), 'decon' (Cascade spike rates)
             include_id      : Flag to return a second argument with the ROI ID's of the returned signals
             decon_id        : Additional restriction, in case trace_type 'decon' is selected and multiple deconvolution
@@ -1142,17 +1167,11 @@ class Segmentation(dj.Computed):
             raise Exception('You requested traces from more the following caiman_ids: {}\n'.format(set(caiman_ids)) + \
                             'Choose only one of them with & "caiman_id = ID"!')
 
-        # return only accepted units if requested
-        if only_accepted:
-            selected_rois = Segmentation.ROI() & self & 'accepted = 1'
-        else:
-            selected_rois = Segmentation.ROI() & self
+        selected_rois = Segmentation.ROI() & self
 
         if trace_type in ['dff', 'trace']:
             traces_list = selected_rois.fetch(trace_type, order_by='mask_id')
         else:  # decon
-            if not only_accepted:
-                raise Exception('For deconvolved traces, only accepted=True is populated. Set only_accepted=True.')
 
             # if no decon_id is given, check if there is a single correct one, otherwise error
             if decon_id is None:
