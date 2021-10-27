@@ -556,7 +556,7 @@ def plot_noise_matched_ground_truth( model_name, median_noise, frame_rate, nb_tr
   model_folder = os.path.join('Pretrained_models', model_name)
 
   # Load config file
-  cfg = config.read_config( os.path.join( model_folder, 'config.yaml'))
+  cfg = config.read_config(os.path.join(model_folder, 'config.yaml'))
 
   # extract values from config file into variables
   training_folders = [os.path.join('Ground_truth', ds) for ds in cfg['training_datasets']]

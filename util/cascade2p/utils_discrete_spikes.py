@@ -13,7 +13,6 @@ import scipy.ndimage as ndim
 from copy import deepcopy
 import numpy as np
 import os
-import scipy.io as sio
 
 from . import config
 
@@ -41,7 +40,7 @@ def infer_discrete_spikes(spike_rates,model_name,model_folder='Pretrained_models
       raise Exception(m)
 
   # Load config file
-  cfg = config.read_config( cfg_file )
+  cfg = config.read_config(cfg_file)
 
   # extract values from config file into variables
   sampling_rate = cfg['sampling_rate']

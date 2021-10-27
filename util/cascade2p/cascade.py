@@ -69,7 +69,6 @@ def train_model(
         All results are saved in the folder model_name as .h5 files containing the trained model
 
     """
-    import tensorflow.keras
     from tensorflow.keras.optimizers import Adagrad
 
     model_path = os.path.join(model_folder, model_name)
