@@ -6,14 +6,18 @@ Created on 18/10/2021 10:22
 
 Automatically send email with mice that have still to be weighed this week.
 """
-import sys
+import platform
 
-# This line is necessary for the script running properly on the Ubuntu server in the crontab, where it is uncommented
-# sys.path.append('/home/hheise/datajoint_wahl/datajoint_wahl/')
+if platform.system() == 'Linux':
+    # This is necessary for the script running properly on the Ubuntu server in the crontab
+    import sys
+    sys.path.append('/home/hheise/datajoint_wahl/datajoint_wahl/')
+else:
+    # keyring is not installed on the server, where the password getter will be replaced with plain text
+    import keyring
 
 import smtplib
 import ssl
-import keyring
 from datetime import datetime
 import numpy as np
 from typing import Optional, List
@@ -142,7 +146,11 @@ def send_mail(receiver: str, message: str, sender: str = 'datajoint.wahl@gmail.c
     context = ssl.create_default_context()
 
     with smtplib.SMTP_SSL("smtp.gmail.com", port, context=context) as server:
-        server.login(sender, keyring.get_password('dj_wahl_email', sender))
+        if platform.system() == 'Linux':
+            # Replace plain text password directly on the server
+            server.login(sender, 'plain_text_password')
+        else:
+            server.login(sender, keyring.get_password('dj_wahl_email', sender))
         server.sendmail(sender, receiver, message)
 
 
