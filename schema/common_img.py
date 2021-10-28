@@ -13,9 +13,17 @@ Schemas for the CaImAn 2-photon image analysis pipeline
 import datajoint as dj
 import login
 
-from util import scanimage
-from schema import common_exp, common_mice
+# Only import Caiman-specific modules if code is run inside a caiman environment
+try:
+    from util import scanimage, motion_correction, helper
+    import caiman as cm
+    from caiman.motion_correction import MotionCorrect
+    from caiman.source_extraction.cnmf import params as params
+except ModuleNotFoundError:
+    print('Skipping caiman-specific imports because code is not run in CaImAn environment.\nYou can view the tables, '
+          'but CaImAn-specific functions will not work.')
 
+from schema import common_exp, common_mice
 import os
 import numpy as np
 from typing import Optional, List, Union, Tuple
@@ -23,12 +31,6 @@ import tifffile as tif
 import yaml
 from glob import glob
 import matplotlib.pyplot as plt
-
-# This code has to be run in a CaImAn environment
-import caiman as cm
-from caiman.motion_correction import MotionCorrect
-from caiman.source_extraction.cnmf import params as params
-from util import motion_correction, helper
 
 schema = dj.schema('common_img', locals(), create_tables=True)
 
@@ -361,7 +363,7 @@ class MotionParameter(dj.Manual):
         with open(filename, 'w') as outfile:
             yaml.dump(full_entry, outfile, default_flow_style=False)
 
-    def get_parameter_obj(self, scan_key: dict) -> params.CNMFParams:
+    def get_parameter_obj(self, scan_key: dict):
         """
         Exports parameters as a params.CNMFParams type dictionary for CaImAn.
         Args:
@@ -434,8 +436,6 @@ class MotionCorrection(dj.Computed):
             key: Primary keys of the current NetworkScan() entry.
         """
         print('Populating MotionCorrection for key: {}'.format(key))
-
-        # n_processes = 4  # TODO: remove hardcoding and choose as function of recording and RAM size?
 
         # start the cluster (if a cluster already exists terminate it)
         if 'dview' in locals():
@@ -828,7 +828,7 @@ class CaimanParameter(dj.Lookup):
         with open(filename, 'w') as outfile:
             yaml.dump(full_entry, outfile, default_flow_style=False)
 
-    def get_parameter_obj(self, scan_key: dict, return_dict: bool = True) -> Union[params.CNMFParams, dict]:
+    def get_parameter_obj(self, scan_key: dict, return_dict: bool = True):
         """
         Exports parameters as a params.CNMFParams type dictionary for CaImAn.
         Args:
@@ -978,9 +978,6 @@ class Segmentation(dj.Computed):
 
         print('Populating Segmentation for {}.'.format(key))
 
-        import caiman as cm
-        from caiman.source_extraction.cnmf import cnmf as cnmf
-
         # Create the memory mapped file if it does not exist yet
         if len(MemoryMappedFile() & key) == 0:
             # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
@@ -1017,7 +1014,7 @@ class Segmentation(dj.Computed):
         # First extract spatial and temporal components on patches and combine them
         # for this step deconvolution is turned off (p=0)
         opts.change_params({'p': 0})
-        cnm = cnmf.CNMF(n_processes, params=opts, dview=dview)
+        cnm = cm.cnmf.CNMF(n_processes, params=opts, dview=dview)
         # print('Starting CaImAn on patches...')
         cnm = cnm.fit(images)
         # log('Done.')
