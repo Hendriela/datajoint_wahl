@@ -338,7 +338,7 @@ def align_behavior_files(trial_key: dict, enc_path: str, pos_path: str, trig_pat
     return array
 
 
-def compute_performances(curr_trial: hheise_behav.VRSession.VRTrial, data: np.ndarray, params: dict) \
+def compute_performances(curr_trial, data: np.ndarray, params: dict) \
         -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Computes lick, binned lick and stop performance of a single trial. Called during VRPerformance.populate().
@@ -461,7 +461,7 @@ def compute_performances(curr_trial: hheise_behav.VRSession.VRTrial, data: np.nd
     return binned_lick_ratio, lick_count_ratio, stop_ratio
 
 
-def compute_time_metrics(curr_trial: hheise_behav.VRSession.VRTrial, params: dict, timestamps: np.ndarray) \
+def compute_time_metrics(curr_trial, params: dict, timestamps: np.ndarray) \
         -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Compute mean speed, running speed and trial duration of a single trial.
