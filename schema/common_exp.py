@@ -73,7 +73,7 @@ class Session(dj.Manual):
     definition = """ # Information about the session and experimental setup
     -> common_mice.Mouse
     day             : date           # Date of the experimental session (YYYY-MM-DD)
-    session_num     : tinyint        # Counter of experimental sessions on the same day (base 1)
+    session_num     : tinyint        # Counter of experimental sessions on the same day (base 0)
     ---
     session_id      : varchar(128)   # Unique identifier
     session_path    : varchar(256)   # Path of this session relative to the Neurophysiology-Storage1 DATA directory
@@ -85,7 +85,8 @@ class Session(dj.Manual):
     session_notes   : varchar(2048)  # description of important things that happened
     """
 
-    def create_id(self, investigator_name: str, mouse_id: int, date: datetime, session_num: int) -> str:
+    @staticmethod
+    def create_id(investigator_name: str, mouse_id: int, date: datetime, session_num: int) -> str:
         """
         Create unique session id with the format inv_MXXX_YYYY-MM-DD_ZZ:
         inv: investigator shortname (called 'experimenter' in Adrians GUI)
@@ -121,7 +122,8 @@ class Session(dj.Manual):
         # combine and return the unique session id
         return first_part + '_' + date_str + '_' + trial_str
 
-    def get_relative_path(self, abs_path: str) -> str:
+    @staticmethod
+    def get_relative_path(abs_path: str) -> str:
         """
         Removes the Neurophysiology-Server path from an absolute path and returns the relative path
 
@@ -132,12 +134,12 @@ class Session(dj.Manual):
             Relative path with the machine-specific Neurophysiology-Path removed
         """
 
-        dir = Path(login.get_working_directory())  # get current working directory (defaults to local path to neurophys)
+        cwd = Path(login.get_working_directory())  # get current working directory (defaults to local path to neurophys)
 
-        if dir in abs_path.parents:
+        if cwd in abs_path.parents:
             # If the session path is inside the Neurophys data directory, transform it to a relative path
-            return str(Path(os.path.relpath(abs_path, dir)))
-        elif dir == abs_path:
+            return str(Path(os.path.relpath(abs_path, cwd)))
+        elif cwd == abs_path:
             raise NameError('\nAbsolute session path {} cannot be the same as the Neurophys data directory.\n '
                             'Create a subdfolder inside the Neurophys data directory for the session.'.format(abs_path))
         else:
@@ -159,18 +161,18 @@ class Session(dj.Manual):
             Status update string confirming successful insertion.
         """
 
-        id = self.create_id(new_entry_dict['username'], new_entry_dict['mouse_id'], new_entry_dict['day'],
-                            new_entry_dict['session_num'])
-        if len(Session.fetch('session_counter')) == 0:
+        sess_id = self.create_id(new_entry_dict['username'], new_entry_dict['mouse_id'], new_entry_dict['day'],
+                                 new_entry_dict['session_num'])
+        if len(self.fetch('session_counter')) == 0:
             counter = 0
         else:
-            counter = max(Session.fetch('session_counter')) + 1
+            counter = max(self.fetch('session_counter')) + 1
 
         # Transform absolute path from the GUI to the relative path on the Neurophys-Storage1 server
         new_entry_dict['session_path'] = self.get_relative_path(new_entry_dict['session_path'])
 
         # add automatically computed values to the dictionary
-        entry = dict(**new_entry_dict, session_id=id, session_counter=counter)
+        entry = dict(**new_entry_dict, session_id=sess_id, session_counter=counter)
 
         self.insert1(entry)
         # Only print out primary keys
