@@ -6,6 +6,7 @@ from schema import common_mice
 from pathlib import Path
 import os
 from datetime import datetime
+from typing import Union
 
 schema = dj.schema('common_exp', locals(), create_tables=True)
 
@@ -64,7 +65,7 @@ class Task(dj.Lookup):
         # Jithins tasks
         # Todo: enter Matteos wheel tasks
         # Matteos tasks
-        ['Sensory mapping', 'mpanze', 0, 'Various stimuli are presented to the anestethized mouse'],
+        ['Sensory mapping', 'mpanze', 0, 'Various stimuli are presented to the anesthetized mouse'],
     ]
 
 
@@ -73,7 +74,7 @@ class Session(dj.Manual):
     definition = """ # Information about the session and experimental setup
     -> common_mice.Mouse
     day             : date           # Date of the experimental session (YYYY-MM-DD)
-    session_num     : tinyint        # Counter of experimental sessions on the same day (base 0)
+    session_num     : tinyint        # Counter of experimental sessions on the same day (base 1)
     ---
     session_id      : varchar(128)   # Unique identifier
     session_path    : varchar(256)   # Path of this session relative to the Neurophysiology-Storage1 DATA directory
@@ -123,27 +124,31 @@ class Session(dj.Manual):
         return first_part + '_' + date_str + '_' + trial_str
 
     @staticmethod
-    def get_relative_path(abs_path: str) -> str:
+    def get_relative_path(abs_path: Union[Path, str]) -> str:
         """
-        Removes the Neurophysiology-Server path from an absolute path and returns the relative path
+        Removes the user-specific Neurophysiology-Server DATA path from an absolute path and returns the relative path
 
         Args:
-            abs_path: Absolute path of a directory on the Neurophysiology-Storage1 server
+            abs_path: Absolute path of a directory in the user's Neurophysiology-Storage1 server DATA directory
 
         Returns:
-            Relative path with the machine-specific Neurophysiology-Path removed
+            Relative path with the machine-specific Neurophysiology-DATA-Path removed
         """
 
-        cwd = Path(login.get_working_directory())  # get current working directory (defaults to local path to neurophys)
+        cwd = Path(login.get_neurophys_data_directory())
+
+        # Typecast absolute path to a Path object to easily get parents
+        if type(abs_path) == str:
+            abs_path = Path(abs_path)
 
         if cwd in abs_path.parents:
             # If the session path is inside the Neurophys data directory, transform it to a relative path
-            return str(Path(os.path.relpath(abs_path, cwd)))
+            return os.path.relpath(abs_path, cwd)
         elif cwd == abs_path:
             raise NameError('\nAbsolute session path {} cannot be the same as the Neurophys data directory.\n '
                             'Create a subdfolder inside the Neurophys data directory for the session.'.format(abs_path))
         else:
-            raise Warning('\nAbsolute session path {} \ndoes not seem to be on the main Neurophys server directory. '
+            raise Warning('\nAbsolute session path {} \ndoes not seem to be on your Neurophys server DATA directory. '
                           'Make sure that the session path and the \nlocal server directory in '
                           'login.get_neurophys_data_directory() are set correctly.\n'
                           'Absolute path used for now.'.format(abs_path))
