@@ -19,6 +19,8 @@ try:
     import caiman as cm
     from caiman.motion_correction import MotionCorrect
     from caiman.source_extraction.cnmf import params as params
+    from caiman.source_extraction.cnmf import cnmf as cnmf
+
 except ModuleNotFoundError:
     print('Skipping caiman-specific imports because code is not run in CaImAn environment.\nYou can view the tables, '
           'but CaImAn-specific functions will not work.')
@@ -557,7 +559,7 @@ class MotionCorrection(dj.Computed):
 
 
 @schema
-class MemoryMappedFile(dj.Manual):
+class MemoryMappedFile(dj.Imported):
     definition = """ # Table to store path of motion corrected memory mapped file (C-order) used for ROI detection.
     -> MotionCorrection
     -----
@@ -565,7 +567,7 @@ class MemoryMappedFile(dj.Manual):
     """
 
     ## entries are inserted during population of the motion correction table
-    def create(self, key: dict, channel: Optional[int] = None) -> None:
+    def make(self, key: dict, channel: Optional[int] = None) -> None:
         """
         Creates a memory mapped file with raster and motion correction and cropping from parameters computed and
         stored in the queried MotionCorrection() entry.
@@ -634,13 +636,13 @@ class MemoryMappedFile(dj.Manual):
         # delete temporary files
         motion_correction.delete_cache_files(temp_mmap_files)
 
-        # create new entry in database
+        # make new entry in database
         # make sure no key attributes are too much or missing
         motion_key = (MotionCorrection & key).fetch1('KEY')
 
         new_entry = dict(**motion_key, mmap_path=mmap_file)
 
-        self.insert1(new_entry)
+        self.insert1(new_entry, allow_direct_insert=True)
         # log('Finished creating memory mapped file.')
 
     def delete_mmap_file(self) -> None:
@@ -739,7 +741,7 @@ class QualityControl(dj.Computed):
         if len(MemoryMappedFile() & key) == 0:
             # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
             channel = Scan().select_channel_if_necessary(key, 0)
-            MemoryMappedFile().create(key, channel=channel)
+            MemoryMappedFile().make(key, channel=channel)
 
         mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')  # locally cached file
 
@@ -775,7 +777,7 @@ class QualityControl(dj.Computed):
 
 
 @schema
-class CaimanParameter(dj.Lookup):
+class CaimanParameter(dj.Manual):
     definition = """ # Table which stores sets of CaImAn Parameters. Defaults fit for dense CA1 1x FOV with good SNR.
     -> common_mice.Mouse
     caiman_id:          smallint        # index for unique parameter set, base 0
@@ -928,7 +930,7 @@ class Segmentation(dj.Computed):
                 raise Exception('Only length one allowed (not {})'.format(len(self)))
 
             from scipy.sparse import csc_matrix
-            # create sparse matrix (https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.csc_matrix.html)
+            # make sparse matrix (https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.csc_matrix.html)
             weights = self.fetch1('weights')
             pixels = self.fetch1('pixels')
             dims = (Segmentation() & self).fetch1('target_dim')
@@ -982,7 +984,7 @@ class Segmentation(dj.Computed):
         if len(MemoryMappedFile() & key) == 0:
             # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
             channel = Scan().select_channel_if_necessary(key, 0)
-            MemoryMappedFile().create(key, channel)
+            MemoryMappedFile().make(key, channel)
 
         mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')    # locally cached file
         folder = (common_exp.Session() & key).get_absolute_path()   # Session folder on the Neurophys server
@@ -1014,7 +1016,7 @@ class Segmentation(dj.Computed):
         # First extract spatial and temporal components on patches and combine them
         # for this step deconvolution is turned off (p=0)
         opts.change_params({'p': 0})
-        cnm = cm.cnmf.CNMF(n_processes, params=opts, dview=dview)
+        cnm = cnmf.CNMF(n_processes, params=opts, dview=dview)
         # print('Starting CaImAn on patches...')
         cnm = cnm.fit(images)
         # log('Done.')
