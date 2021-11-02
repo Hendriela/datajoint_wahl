@@ -204,6 +204,9 @@ class RawImagingFile(dj.Imported):
             for file_pattern in default_params['imaging']['scientifica_file']:
                 file_list.extend(glob(step[0] + f'\\{file_pattern}'))
 
+        if len(file_list) == 0:
+            raise ImportError("No files found in {} that fit the patterns {}!".format(path, default_params['imaging']['scientifica_file']))
+
         # Sort list by postfix number
         file_list_sort = helper.alphanumerical_sort(file_list)
 
