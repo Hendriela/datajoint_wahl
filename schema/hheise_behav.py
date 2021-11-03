@@ -15,7 +15,7 @@ from schema import common_exp, common_img
 from hheise_scripts import util, behav_util
 
 from datetime import datetime
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Optional, Tuple, Dict
 import os
 from glob import glob
 import numpy as np
@@ -24,6 +24,7 @@ from copy import deepcopy
 from scipy import stats
 import statsmodels.api as sm
 import seaborn as sns
+import matplotlib.pyplot as plt
 
 schema = dj.schema('hheise_behav', locals(), create_tables=True)
 # logging.basicConfig(filename='example.log', encoding='utf-8', level=logging.DEBUG)
@@ -58,7 +59,7 @@ class CorridorPattern(dj.Lookup):
 
 @schema
 class VRSession(dj.Imported):
-    definition = """ # Info about the VR Session
+    definition = """ # Info about the VR Session, mostly read from "behavioral evaluation" Excel file
     -> common_exp.Session
     ---
     imaging_session     : bool              # bool flag whether imaging was performed during this session
@@ -72,68 +73,6 @@ class VRSession(dj.Imported):
     vr_notes            : varchar(1024)     # Notes about the session
     """
 
-    class VRTrial(dj.Part):
-        definition = """ # Single trial of VR data
-        -> VRSession
-        trial_id            : tinyint           # Counter of the trial in 
-        ---
-        -> CorridorPattern
-        tone                : bool              # bool flag whether the RZ tone during the trial was on or off
-        pos                 : longblob          # 1d array with VR position sampled every 8 ms
-        lick                : longblob          # 1d array with licks sampled every 8 ms
-        frame               : longblob          # 1d array with frame triggers sampled every 8 ms
-        enc                 : longblob          # 1d array with raw encoder ticks sampled every 8 ms
-        valve               : longblob          # 1d array with valve openings (reward) sampled every 8 ms
-        """
-
-        def enc2speed(self) -> np.ndarray:
-            """
-            Transform encoder ticks of the queried SINGLE trial to speed in cm/s.
-
-            Returns:
-                1D numpy array of encoder data transformed to cm/s
-            """
-            # Hard-coded constant properties of encoder wheel
-            D_WHEEL = 10.5  # wheel diameter in cm
-            N_TICKS = 1436  # number of ticks in a full wheel rotation
-            DEG_DIST = (D_WHEEL * np.pi) / N_TICKS  # distance in cm the band moves for each encoder tick
-
-            # TODO: How to deal with the encoder artifact of "catching up" ticks from the ITI?
-            # Query encoder data from queried trial and translate encoder data into velocity [cm/s]
-            speed = self.fetch1('enc') * DEG_DIST / SAMPLE
-            speed[speed == -0] = 0
-            return speed
-
-        def get_zone_borders(self) -> np.ndarray:
-            """
-            Return a deepcopy of the queried SINGLE trial's reward zone borders. The deepcopy is necessary to edit the
-            zone borders without changing the data in the database.
-
-            Returns:
-                A numpy array with dimensions (2, 4), start and end position of all four RZs
-            """
-            return deepcopy((self * CorridorPattern).fetch1('positions'))
-
-        def get_array(self, attr: Iterable[str] = None) -> np.ndarray:
-            """
-            Combine individual attribute data with reconstructed time stamp to a common array for processing.
-
-            Args:
-                attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
-
-            Returns:
-                A numpy array (# samples, # attributes + 1) with single attributes as columns, the common
-                time stamp as first column.
-            """
-            if attr is None:
-                attr = ['pos', 'lick', 'frame', 'enc', 'valve']
-
-            # Fetch behavioral data of the trial, add time scale and merge into np.array
-            data = self.fetch1(*attr)
-            # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
-            time = np.array(range(0, len(data[0]) * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
-            return np.vstack((time, *data)).T
-
     def make(self, key: dict) -> None:
         """
         Populates VRSession() for every entry of common_exp.Session().
@@ -145,168 +84,19 @@ class VRSession(dj.Imported):
         if key['username'] != login.get_user():
             return
 
-        # print(f'Start to populate key: {key}')
-
+        print(f'Start to populate key: {key}')
         # First, create entries of VRSession and VRLogFile and insert them
         vrsession_entry = behav_util.create_vrsession_entry(key)
-        self.insert1(vrsession_entry, allow_direct_insert=True)
+        self.insert1(vrsession_entry)
 
         vrlogfile_entry = behav_util.create_vrlogfile_entry(key)
         VRLogFile().insert1(row=vrlogfile_entry, skip_duplicates=True)
         VRLog().helper_insert1(key=vrlogfile_entry, skip_duplicates=True)  # Load the LOG file into the other table
 
-        # Then, create entries of single trials
-        data = self.create_vrtrial_entries(key)
 
         # TODO Manually curate session (show it to the user to select possible bad trials) before entering it in the DB
 
-        # Enter the single trial entries one by one
-        for i in range(len(data['trial'])):
-            VRSession.VRTrial().insert1(data['trial'][i])
-            RawEncFile().insert1(data['enc'][i])
-            RawTDTFile().insert1(data['trig'][i])
-            RawTCPFile().insert1(data['pos'][i])
 
-    def create_vrtrial_entries(self, key: dict) -> dict:
-        """
-        Find raw behavior files, load data, and align it. Return entry dicts for VRTrial(), RawEncFile(), RawTDTFile()
-        and RawTCPFile() in a dict, each entry corresponding to a list of trial dicts for each table.
-
-        The entry dict has to be returned instead of inserted here because DJ only lets you insert entries into Imported
-        or Computed tables inside the make() function call.
-
-        Args:
-            key: Primary keys to query each entry of VRSession() to be populated
-
-        Returns:
-            Each key ('trial', 'enc', 'pos' and 'trig') holds one list, which contains entry dicts for every trial of
-            the current session for tables VRTrial(), RawEncFile(), RawTCPFile(), and RawTDTFile() respectively.
-        """
-
-        def find_file(tstamp: str, file_list: List[str], tolerance: int = 3) -> Optional[str]:
-            """
-            Finds a file with the same time stamp from a list of file names.
-
-            Args:
-                tstamp:      Sought time stamp string in format '%H%M%S'
-                file_list:   Search space of all file names
-                tolerance:   Max difference between sought and found time stamp in seconds. Defaults to 3.
-
-            Returns:
-                Path of the file name with the sought time stamp
-            """
-            time_format = '%H%M%S'
-            time_stamp = datetime.strptime(str(tstamp), time_format)
-            matched_file = []
-            for filename in file_list:
-                curr_stamp = datetime.strptime(filename.split('_')[-1][:-4], time_format)
-                diff = time_stamp - curr_stamp
-                if abs(diff.total_seconds()) < tolerance:
-                    matched_file.append(filename)
-            if len(matched_file) == 0:
-                print(f'No files with timestamp {tstamp} found in {root}!')
-                return
-            elif len(matched_file) > 1:
-                print(f'More than one file with timestamp {tstamp} found in {root}!')
-                return
-            else:
-                return matched_file[0]
-
-        def get_behavior_file_paths(root_path: str, is_imaging: bool) -> Optional[
-            Tuple[List[str], List[str], List[str]]]:
-            """
-            Get lists of encoder, position and trigger file paths of all trials in this session.
-
-            Args:
-                root_path:      Path of the session
-                is_imaging:     Flag whether it's an imaging session (files in subdirectory) or not (files in root_path)
-
-            Returns:
-                Three lists containing file paths of encoder, position and trigger files
-            """
-
-            # Todo: change this for new folder structure, probably without trial subfolders. But backwards compatibility
-            #  should probably be preserved, or old sessions have to be changed to the new structure...
-            if is_imaging:
-                prefix = r"\\**\\"
-            else:
-                prefix = r"\\"
-
-            encoder_files = glob(root_path + prefix + 'Encoder*.txt')
-            position_files = glob(root_path + prefix + 'TCP*.txt')
-            trigger_files = glob(root_path + prefix + 'TDT TASK*.txt')
-
-            encoder_files = util.alphanumerical_sort(encoder_files)
-            position_files = util.alphanumerical_sort(position_files)
-            trigger_files = util.alphanumerical_sort(trigger_files)
-
-            if (len(encoder_files) == len(position_files)) & (len(encoder_files) == len(trigger_files)):
-                return encoder_files, position_files, trigger_files
-            else:
-                print(f'Uneven numbers of encoder, position and trigger files in folder {root_path}!')
-                return
-
-        # Get complete path of the current session
-        root = os.path.join(login.get_neurophys_data_directory(), (common_exp.Session & key).fetch1('session_path'))
-
-        # Find out if this session is an imaging session
-        imaging = bool((self & key).fetch1('imaging_session'))
-
-        # Get the task condition of this session
-        cond = (common_exp.Session & key).fetch1('task')
-        cond_switch = (self & key).fetch1('condition_switch')
-
-        # Get paths of all behavior files in this session and process them sequentially
-        enc_files, pos_files, trig_files = get_behavior_file_paths(root, imaging)
-        counter = 0
-
-        # Initialize dict that holds all entries
-        data = {'trial': [], 'enc': [], 'pos': [], 'trig': []}
-
-        for enc_file in enc_files:
-
-            # Initialize relevant variables
-            trial_key = dict(key, trial_id=counter)  # dict containing the values of all trial attributes
-            frame_count = None  # frame count of the imaging file of that trial
-            if imaging:
-                frame_count = (common_img.RawImagingFile & trial_key).fetch1('nr_frames')
-
-            # Find out which condition this trial was
-            trial_key['pattern'], trial_key['tone'] = self.get_condition(trial_key, cond, cond_switch)
-
-            ### ALIGN BEHAVIOR ###
-            # Find the files of the same trial in the session folder
-            timestamp = int(
-                os.path.basename(enc_file).split('_')[1][:-4])  # here the 0 in front of early times is removed
-            pos_file = find_file(timestamp, pos_files)
-            trig_file = find_file(timestamp, trig_files)
-            if pos_file is None or trig_file is None:
-                print(f'Could not find all three files for timestamp {timestamp}!')
-                # return
-
-            # Create array containing merged and time-aligned behavior data.
-            # Returns None if there was a problem with the data, and the trial will be skipped (like incomplete trials)
-            merge = behav_util.align_behavior_files(trial_key, enc_file, pos_file, trig_file,
-                                                    imaging=imaging, frame_count=frame_count)
-
-            if merge is not None:
-                # parse columns into entry dict and typecast to int to save disk space
-                # TODO: make "frame" and "valve" to event-times rather than continuous sampling?
-                trial_key['pos'] = merge[:, 1]
-                trial_key['lick'] = merge[:, 2].astype(int)
-                trial_key['frame'] = merge[:, 3].astype(int)
-                trial_key['enc'] = -merge[:, 4].astype(int)  # encoder is installed upside down, so reverse sign
-                trial_key['valve'] = merge[:, 5].astype(int)
-
-                # Collect data of the current trial
-                data['trial'].append(trial_key)
-                data['enc'].append(dict(key, trial_id=counter, enc_filename=util.remove_session_path(key, enc_file)))
-                data['pos'].append(dict(key, trial_id=counter, tcp_filename=util.remove_session_path(key, pos_file)))
-                data['trig'].append(dict(key, trial_id=counter, tdt_filename=util.remove_session_path(key, trig_file)))
-
-                counter += 1
-
-        return data
 
     def is_session_novel(self, sess_key: dict) -> bool:
         """
@@ -387,30 +177,186 @@ class VRSession(dj.Imported):
 
 
 @schema
-class RawTCPFile(dj.Manual):
-    definition = """ # Filename of the unprocessed TCP (VR position) file for each trial
-    -> VRSession.VRTrial
+class RawBehaviorFile(dj.Imported):
+    definition = """ # File names (relative to session folder) of raw VR behavior files (3 separate files per trial)
+    -> VRSession
+    trial_id            : smallint          # Counter for file sets (base 0)
     ---
-    tcp_filename        : varchar(128)      # filename of the TCP file
+    tdt_filename        : varchar(256)      # filename of the TDT file (licking and frame trigger)
+    tcp_filename        : varchar(256)      # filename of the TCP file (VR position)
+    enc_filename        : varchar(128)      # filename of the Enc file (running speed)
     """
 
+    def make(self, key: dict) -> None:
+        """
+        Automatically looks up file names for behavior files of a single VRSession() entry.
+
+        Args:
+            key: Primary keys of the queried Scan() entry.
+        """
+
+        print("Finding raw behavior files for session {}".format(key))
+
+        # Get complete path of the current session
+        root = os.path.join(login.get_neurophys_data_directory(), (common_exp.Session & key).fetch1('session_path'))
+
+        # Find all behavioral files; for now both file systems (in trial subfolder and outside)
+        encoder_files = glob(root + '\\Encoder*.txt')
+        encoder_files.extend(glob(root + '\\**\\Encoder*.txt'))
+        position_files = glob(root + '\\TCP*.txt')
+        position_files.extend(glob(root + '\\**\\TCP*.txt'))
+        trigger_files = glob(root + '\\TDT TASK*.txt')
+        trigger_files.extend(glob(root + '\\**\\TDT TASK*.txt'))
+
+        # Sort them by time stamp (last part of filename, separated by underscore
+        encoder_files.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
+        position_files.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
+        trigger_files.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
+
+        # Catch an uneven number of files
+        if not (len(encoder_files) == len(position_files)) & (len(encoder_files) == len(trigger_files)):
+            raise ImportError(f'Uneven numbers of encoder, position and trigger files in folder {root}!')
+
+        # Catch different numbers of behavior files and raw imaging files
+        if len(encoder_files) != len(common_img.RawImagingFile() & key):
+            raise ImportError(f'Different numbers of behavior and imaging files in folder {root}!')
+
+        # If everything is fine, insert the behavioral file paths, relative to session folder, sorted by time
+        session_path = (common_exp.Session() & key).get_absolute_path()
+        for idx in range(len(encoder_files)):
+            new_entry = dict(
+                trial_id=idx,
+                tdt_filename=os.path.relpath(trigger_files[idx], session_path),
+                tcp_filename=os.path.relpath(position_files[idx], session_path),
+                enc_filename=os.path.relpath(encoder_files[idx], session_path)
+            )
+            self.insert1(new_entry)
+
+        print("Done!")
+
+    def load_data(self) -> Dict[List[np.ndarray]]:
+        """
+        Loads data of queried trials and returns it in dict form.
+
+        Returns:
+            Data dict with keys "tdt", "tcp" and "enc", holding lists of np arrays of the respective data
+        """
+        # Get the session of the current query (through restriction)
+        session_path = (common_exp.Session() & self.restriction).get_absolute_path()
+
+        # Load data into a dict
+        data = dict(
+            tdt=[np.loadtxt(os.path.join(session_path, fname)) for fname in self.fetch['tdt_filename']],
+            tcp=[np.loadtxt(os.path.join(session_path, fname)) for fname in self.fetch['tcp_filename']],
+            enc=[np.loadtxt(os.path.join(session_path, fname)) for fname in self.fetch['enc_filename']],
+        )
+        return data
 
 @schema
-class RawTDTFile(dj.Manual):
-    definition = """ # Filename of the unprocessed TDT (licking and frame trigger) file for each trial
-    -> VRSession.VRTrial
+class CuratedBehaviorFile(dj.Imported):
+    definition = """ # Sets of behavioral files that have been manually accepted (safeguard against bad trials).
+    -> VRSession
+    trial_id            : smallint          # Counter for file sets (base 0)
     ---
-    tdt_filename        : varchar(128)      # filename of the TDT file
     """
 
+    def make(self, key: dict) -> None:
+        """
+        Displays trials of a session to select bad trials.
 
-@schema
-class RawEncFile(dj.Manual):
-    definition = """ # Filename of the unprocessed Encoder (running speed) file for each trial
-    -> VRSession.VRTrial
-    ---
-    enc_filename        : varchar(128)      # filename of the Enc file
-    """
+        Args:
+            key: Primary keys of the queried VRSession() entry.
+        """
+
+        def plot_screening(trial_key: dict, path: str, trial_id_list: List[int]) -> List[int]:
+            """
+            Displays the running and licking data of all trials of one session in an interactive pyplot. Each subplot is
+            clickable, upon which it is marked red and added to a list of trials that should not be analysed further.
+            Clicking again will turn the plot white again and remove the trial from that list. The sorted list of bad
+            trial IDs is returned when the figure is closed.
+
+            Args:
+                trial_key: Primary keys of the queried VRSession() entry.
+                path: Absolute path to the session directory on the Neurophysiology-Wahl server
+                trial_id_list: List of trial IDs of the session, from RawBehaviorFile()
+
+            Returns:
+                List with trial IDs that should NOT be entered into CuratedBehaviorFile() and not be used further.
+            """
+            n_trials = len(trial_id_list)
+            bad_trials = []
+            nrows = int(np.ceil(n_trials / 3))
+            ncols = 3
+            fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 8))
+            count = 0
+            for row in range(nrows):
+                for col in range(ncols):
+                    if count < n_trials or (row == nrows and col == 0):
+                        curr_ax = ax[row, col]
+
+                        # Query the file paths of the current trial and load the data
+                        enc_path = os.path.join(path, (RawBehaviorFile() & dict(**trial_key, trial_id=trial_id_list[count])).fetch1("enc_filename"))
+                        tdt_path = os.path.join(path, (RawBehaviorFile() & dict(**trial_key, trial_id=trial_id_list[count])).fetch1("tdt_filename"))
+                        curr_enc = -np.loadtxt(enc_path)[1:, 1]  # Load encoder time series (ignore first time stamp)
+                        curr_lick = np.loadtxt(tdt_path)[1:, 1]  # Load licking time series (ignore first time stamp)
+
+                        # plot behavior
+                        curr_ax.plot(curr_enc, color='tab:red')  # plot running
+                        curr_ax.spines['top'].set_visible(False)
+                        curr_ax.spines['right'].set_visible(False)
+                        curr_ax.set_xticks([])
+                        ax2 = curr_ax.twinx().twiny()  # instantiate a second, independent axes in the same plot
+                        ax2.plot(curr_lick, color='tab:blue')  # plot licking
+                        ax2.set_ylim(-0.1, 1.1)
+                        ax2.set_ylabel(count)
+                        ax2.axis('off')
+
+                        # Make curr_ax (where axis is not turned off and you can see the background color) pickable
+                        curr_ax.set_picker(True)
+                        # Save the index of the current trial in the URL field of the axes to recall it later
+                        curr_ax.set_url(trial_id_list[count])
+                        # Put curr_ax on top to make it reachable through clicking (only the top-most axes is pickable)
+                        curr_ax.set_zorder(ax2.get_zorder() + 1)
+                        # Make the background color of curr_ax completely transparent to keep ax2 visible
+                        curr_ax.set_facecolor((0, 0, 0, 0))
+
+                        count += 1
+
+            def onpick(event):
+                """ Define what happens when a subplot is selected/clicked. """
+                clicked_ax = event.artist           # save artist (axis) where the pick was triggered
+                trial = clicked_ax.get_url()        # Get the picked trial from the URL field
+                if trial not in bad_trials:
+                    # If the trial was not clicked before, add it to the list and make the background red
+                    bad_trials.append(trial)
+                    clicked_ax.set_facecolor((1, 0, 0, 0.2))
+                    fig.canvas.draw()
+                else:
+                    # If the trial was clicked before, remove it from the list and make the background transparent again
+                    bad_trials.remove(trial)
+                    clicked_ax.set_facecolor((0, 0, 0, 0))
+                    fig.canvas.draw()
+
+            # Connect the "Pick" event (Subplot is clicked/selected) with the function describing what happens then
+            fig.canvas.mpl_connect('pick_event', onpick)
+            fig.suptitle('Curate trials for mouse {}, session {}'.format(trial_key['mouse_id'], trial_key['day']),
+                         fontsize=14)
+            plt.tight_layout(rect=[0, 0, 1, 0.95])
+            plt.show(block=True)    # Block=True is important to block other code execution until figure is closed
+
+            return sorted(bad_trials)
+
+        # Get trial IDs and absolute session path
+        trial_ids = (RawBehaviorFile() & key).fetch("trial_id")
+        session_path = (common_exp.Session() & key).get_absolute_path()
+
+        # Open GUI to manually select trials that should be exluded from analysis
+        bad_trials = plot_screening(key, session_path, trial_ids)
+        print("Session {}:\nThe following trials will be excluded from further analysis:")
+        print(*bad_trials)
+
+        # Insert trials into the table if they are not included in "bad_trials"
+        [self.insert1(dict(**key, trial_id=i)) for i in trial_ids if i not in bad_trials]
 
 
 @schema
@@ -487,6 +433,150 @@ class VRLog(dj.Imported):
                              'log_trial': self.fetch1('log_trial'),
                              'log_event': self.fetch1('log_event')})
 
+@schema
+class VRTrial(dj.Computed):
+    definition = """ # Aligned trials of VR behavioral data
+    -> VRSession
+    trial_id            : tinyint           # Counter of the trial in 
+    ---
+    -> CorridorPattern
+    tone                : bool              # bool flag whether the RZ tone during the trial was on or off
+    pos                 : longblob          # 1d array with VR position sampled every 8 ms
+    lick                : longblob          # 1d array with licks sampled every 8 ms
+    frame               : longblob          # 1d array with frame triggers sampled every 8 ms
+    enc                 : longblob          # 1d array with raw encoder ticks sampled every 8 ms
+    valve               : longblob          # 1d array with valve openings (reward) sampled every 8 ms
+    """
+
+    def enc2speed(self) -> np.ndarray:
+        """
+        Transform encoder ticks of the queried SINGLE trial to speed in cm/s.
+
+        Returns:
+            1D numpy array of encoder data transformed to cm/s
+        """
+        # Hard-coded constant properties of encoder wheel
+        D_WHEEL = 10.5  # wheel diameter in cm
+        N_TICKS = 1436  # number of ticks in a full wheel rotation
+        DEG_DIST = (D_WHEEL * np.pi) / N_TICKS  # distance in cm the band moves for each encoder tick
+
+        # TODO: How to deal with the encoder artifact of "catching up" ticks from the ITI?
+        # Query encoder data from queried trial and translate encoder data into velocity [cm/s]
+        speed = self.fetch1('enc') * DEG_DIST / SAMPLE
+        speed[speed == -0] = 0
+        return speed
+
+    def get_zone_borders(self) -> np.ndarray:
+        """
+        Return a deepcopy of the queried SINGLE trial's reward zone borders. The deepcopy is necessary to edit the
+        zone borders without changing the data in the database.
+
+        Returns:
+            A numpy array with dimensions (2, 4), start and end position of all four RZs
+        """
+        return deepcopy((self * CorridorPattern).fetch1('positions'))
+
+    def get_array(self, attr: Iterable[str] = None) -> np.ndarray:
+        """
+        Combine individual attribute data with reconstructed time stamp to a common array for processing.
+
+        Args:
+            attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
+
+        Returns:
+            A numpy array (# samples, # attributes + 1) with single attributes as columns, the common
+            time stamp as first column.
+        """
+        if attr is None:
+            attr = ['pos', 'lick', 'frame', 'enc', 'valve']
+
+        # Fetch behavioral data of the trial, add time scale and merge into np.array
+        data = self.fetch1(*attr)
+        # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
+        time = np.array(range(0, len(data[0]) * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
+        return np.vstack((time, *data)).T
+
+    def create_vrtrial_entries(self, key: dict) -> dict:
+        """
+        Find raw behavior files, load data, and align it. Return entry dicts for VRTrial(), RawEncFile(), RawTDTFile()
+        and RawTCPFile() in a dict, each entry corresponding to a list of trial dicts for each table.
+
+        The entry dict has to be returned instead of inserted here because DJ only lets you insert entries into Imported
+        or Computed tables inside the make() function call.
+
+        Args:
+            key: Primary keys to query each entry of VRSession() to be populated
+
+        Returns:
+            Each key ('trial', 'enc', 'pos' and 'trig') holds one list, which contains entry dicts for every trial of
+            the current session for tables VRTrial(), RawEncFile(), RawTCPFile(), and RawTDTFile() respectively.
+        """
+
+
+
+
+
+
+        counter = 0
+
+        # Initialize dict that holds all entries
+        data = {'trial': [], 'enc': [], 'pos': [], 'trig': []}
+
+        for enc_file in enc_files:
+
+            # Initialize relevant variables
+            trial_key = dict(key, trial_id=counter)  # dict containing the values of all trial attributes
+            frame_count = None  # frame count of the imaging file of that trial
+            if imaging:
+                frame_count = (common_img.RawImagingFile & trial_key).fetch1('nr_frames')
+
+            # Find out which condition this trial was
+            trial_key['pattern'], trial_key['tone'] = self.get_condition(trial_key, cond, cond_switch)
+
+            ### ALIGN BEHAVIOR ###
+            # Find the files of the same trial in the session folder
+            timestamp = int(
+                os.path.basename(enc_file).split('_')[1][:-4])  # here the 0 in front of early times is removed
+            pos_file = find_file(timestamp, pos_files)
+            trig_file = find_file(timestamp, trig_files)
+            if pos_file is None or trig_file is None:
+                print(f'Could not find all three files for timestamp {timestamp}!')
+                # return
+
+            print("Starting to align behavior files of {}".format(trial_key))
+            # Create array containing merged and time-aligned behavior data.
+            # Returns None if there was a problem with the data, and the trial will be skipped (like incomplete trials)
+            merge = behav_util.align_behavior_files(trial_key, enc_file, pos_file, trig_file,
+                                                    imaging=imaging, frame_count=frame_count)
+
+            if merge is not None:
+                print("Typecasting merged data into the Datajoint format.")
+                # parse columns into entry dict and typecast to int to save disk space
+                # TODO: make "frame" and "valve" to event-times rather than continuous sampling?
+                trial_key['pos'] = merge[:, 1]
+                trial_key['lick'] = merge[:, 2].astype(int)
+                trial_key['frame'] = merge[:, 3].astype(int)
+                trial_key['enc'] = -merge[:, 4].astype(int)  # encoder is installed upside down, so reverse sign
+                trial_key['valve'] = merge[:, 5].astype(int)
+
+                # Collect data of the current trial
+                data['trial'].append(trial_key)
+                data['enc'].append(dict(key, trial_id=counter, enc_filename=util.remove_session_path(key, enc_file)))
+                data['pos'].append(dict(key, trial_id=counter, tcp_filename=util.remove_session_path(key, pos_file)))
+                data['trig'].append(dict(key, trial_id=counter, tdt_filename=util.remove_session_path(key, trig_file)))
+
+                counter += 1
+            else:
+                print("Alignment returned None, skipping trial.")
+
+        return data
+
+    # Enter the single trial entries one by one
+    for i in range(len(data['trial'])):
+        VRSession.VRTrial().insert1(data['trial'][i])
+        RawEncFile().insert1(data['enc'][i])
+        RawTDTFile().insert1(data['trig'][i])
+        RawTCPFile().insert1(data['pos'][i])
 
 @schema
 class PerformanceParameters(dj.Lookup):
