@@ -901,6 +901,8 @@ class Segmentation(dj.Computed):
     target_dim                      : longblob    # Tuple (dim_y, dim_x) to reconstruct mask from linearized index
     s_background                    : longblob    # Spatial background component(s) weight mask (dim_y, dim_x, nb) 
     f_background                    : longblob    # Background fluorescence (nb, nr_frames)
+    traces                          : str         # Relative path (from session folder) to "raw" trace of each ROI (estimates.C + estimates.YrA)
+    residuals                       : str         # Relative path (from session folder) to residual fluorescence of each ROI (estimates.YrA)
     time_seg = CURRENT_TIMESTAMP    : timestamp   # automatic timestamp
     """
 
@@ -911,8 +913,7 @@ class Segmentation(dj.Computed):
         -----
         pixels   : longblob     # Linearized indices of non-zero values
         weights  : longblob     # Corresponding values at the index position
-        trace    : longblob     # Non-normalized fluorescence signal for this ROI (estimates.C + estimates.Yr)
-        residual : longblob     # Residual fluorescence (estimates.Yr)
+
         dff      : longblob     # Normalized deltaF/F fluorescence change
         perc     : float        # Percentile used for deltaF/F computation 
         snr      : float        # Signal-to-noise ratio of this ROI (evaluation criterion)
@@ -1096,19 +1097,27 @@ class Segmentation(dj.Computed):
 
         traces = cnm2.estimates.C + cnm2.estimates.YrA
         residual = cnm2.estimates.YrA
-        dff = cnm2.estimates.F_dff
+        dff = np.array(cnm2.estimates.F_dff, dtype=np.float32)  # save traces as float32 to save disk space
 
         # Inf SNR is possible, has to be replaced by a large number (100 is arbitrary, but should work
         snr = np.nan_to_num(cnm2.estimates.SNR_comp, posinf=100)
         r = cnm2.estimates.r_values
         cnn = cnm2.estimates.cnn_preds
 
+        # Save non-normalized traces (estimates.C) and residuals (estimates.YrA) externally to save server disk space
+        traces_filename = "traces.npy"
+        residuals_filename = "residuals.npy"
+        np.save(os.path.join(folder, traces_filename), np.array(traces, dtype=np.float32))
+        np.save(os.path.join(folder, residuals_filename), np.array(residual, dtype=np.float32))
+
         #### insert results in master table first
         new_master_entry = dict(**key,
                                 nr_masks=nr_masks,
                                 target_dim=np.array(dims),
-                                s_background=s_background,
-                                f_background=f_background)
+                                s_background=np.array(s_background, dtype=np.float32),
+                                f_background=np.array(f_background, dtype=np.float32),
+                                traces=traces_filename,
+                                residuals=residuals_filename)
         self.insert1(new_master_entry)
 
         #### insert the masks and traces in the part table
@@ -1116,9 +1125,7 @@ class Segmentation(dj.Computed):
             new_part = dict(**key,
                             mask_id=i,
                             pixels=masks[:, i].indices,
-                            weights=masks[:, i].data,
-                            trace=traces[i, :],
-                            residual=residual[i, :],
+                            weights=np.array(masks[:, i].data, dtype=np.float32),
                             dff=dff[i, :],
                             perc=perc[i],
                             snr=snr[i],
@@ -1285,8 +1292,11 @@ class Deconvolution(dj.Computed):
         cascade_path = os.path.dirname(inspect.getfile(cascade))
         model_folder = os.path.join(cascade_path, 'Pretrained_models')
 
-        decon_traces, trace_noise_levels = cascade.predict(model_name, traces, model_folder=model_folder,
-                                                           threshold=threshold, padding=0)
+        # Transform traces back to float64 to not confuse CASCADE
+        decon_traces, trace_noise_levels = cascade.predict(model_name, np.array(traces, dtype=np.float64),
+                                                           model_folder=model_folder, threshold=threshold, padding=0)
+        # Store traces in float32 to save disk space
+        decon_traces = np.array(decon_traces, dtype=np.float32)
 
         # enter results into database
         self.insert1(key)  # master entry
