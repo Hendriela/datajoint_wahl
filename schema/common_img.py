@@ -176,7 +176,7 @@ class Scan(dj.Manual):
 class RawImagingFile(dj.Imported):
     definition = """ # File names and stack size of the acquired .tif raw imaging files
     -> Scan
-    part        : tinyint                   # Counter for part files of the same scan (base 0)
+    part        : smallint                  # Counter for part files of the same scan (base 0)
     ---
     file_name   : varchar(512)              # File name with relative path compared to session directory
     nr_frames   : int                       # Number of frames in this file
@@ -186,6 +186,7 @@ class RawImagingFile(dj.Imported):
     def make(self, key: dict) -> None:
         """
         Automatically looks up file names for .tif files of a single Scan() entry.
+
         Args:
             key: Primary keys of the queried Scan() entry.
         """

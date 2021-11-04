@@ -11,7 +11,7 @@ import login
 
 login.connect()
 import datajoint as dj
-from schema import common_exp, common_img
+from schema import common_mice, common_exp, common_img
 from hheise_scripts import util, behav_util
 
 from datetime import datetime
@@ -192,7 +192,7 @@ class RawBehaviorFile(dj.Imported):
         Automatically looks up file names for behavior files of a single VRSession() entry.
 
         Args:
-            key: Primary keys of the queried Scan() entry.
+            key: Primary keys of the queried VRSession() entry.
         """
 
         print("Finding raw behavior files for session {}".format(key))
@@ -253,7 +253,7 @@ class RawBehaviorFile(dj.Imported):
         return data
 
 @schema
-class CuratedBehaviorFile(dj.Imported):
+class CuratedBehaviorFile(dj.Computed):
     definition = """ # Sets of behavioral files that have been manually accepted (safeguard against bad trials).
     -> VRSession
     trial_id            : smallint          # Counter for file sets (base 0)
@@ -262,7 +262,8 @@ class CuratedBehaviorFile(dj.Imported):
 
     def make(self, key: dict) -> None:
         """
-        Displays trials of a session to select bad trials.
+        Displays trials of a session to select bad trials. Only good trials are entered and used in downstream
+        processing.
 
         Args:
             key: Primary keys of the queried VRSession() entry.
@@ -360,12 +361,31 @@ class CuratedBehaviorFile(dj.Imported):
 
 
 @schema
-class VRLogFile(dj.Manual):
+class VRLogFile(dj.Imported):
     definition = """ # Filename of the unprocessed LOG file for each session
     -> VRSession
     ---
     log_filename        : varchar(128)      # filename of the LOG file (should be inside the session directory)
     """
+
+    def make(self, key: dict) -> None:
+        """
+        Automatically looks up file name for LOG file of a single VRSession() entry.
+
+        Args:
+            key: Primary keys of the queried VRSession() entry.
+        """
+        mouse_id = (common_mice.Mouse & key).fetch1('mouse_id')
+
+        # Get filename of this session's LOG file
+        log_name = glob(os.path.join((common_exp.Session & key).get_absolute_path(), 'TDT LOG_*.txt'))
+
+        if len(log_name) == 0:
+            raise Warning('No LOG file found for M{} session {}!'.format(mouse_id, key['day']))
+        elif len(log_name) > 1:
+            raise Warning('{} LOG files found for M{} session {}!'.format(len(log_name), mouse_id, key['day']))
+        else:
+            self.insert1(dict(**key, log_filename=log_name[0]))
 
 
 @schema
@@ -385,16 +405,7 @@ class VRLog(dj.Imported):
         Args:
             key: Primary keys of the current VRLogFile() entry.
         """
-        self.helper_insert1(key)
 
-    def helper_insert1(self, key: dict, skip_duplicates: bool) -> None:
-        """
-        Extract data from a LOG file and insert it column-wise into VRLog().
-
-        Args:
-            key:                Primary keys of the current VRLogFile() entry, passed down from self.make().
-            skip_duplicates:    Flag whether entries that already exist in VRLog() should be skipped or raise an error.
-        """
         # Load LOG file
         log = pd.read_csv(os.path.join(login.get_neurophys_data_directory(),
                                        (common_exp.Session & key).fetch1('session_path'), key['log_filename']),
@@ -420,7 +431,7 @@ class VRLog(dj.Imported):
         insert_dict['log_time'] = np.array(log['Date_Time'], dtype=str)  # str because DJ doesnt like datetime[ns]
         insert_dict['log_trial'] = np.array(log['Trial'])
         insert_dict['log_event'] = np.array(log['Event'])
-        self.insert1(insert_dict, allow_direct_insert=True, skip_duplicates=skip_duplicates)
+        self.insert1(insert_dict)
 
     def get_dataframe(self) -> pd.DataFrame:
         """
@@ -432,6 +443,7 @@ class VRLog(dj.Imported):
         return pd.DataFrame({'log_time': self.fetch1('log_time'),
                              'log_trial': self.fetch1('log_trial'),
                              'log_event': self.fetch1('log_event')})
+
 
 @schema
 class VRTrial(dj.Computed):
@@ -496,7 +508,7 @@ class VRTrial(dj.Computed):
         time = np.array(range(0, len(data[0]) * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
         return np.vstack((time, *data)).T
 
-    def create_vrtrial_entries(self, key: dict) -> dict:
+    def make(self, key: dict) -> None:
         """
         Find raw behavior files, load data, and align it. Return entry dicts for VRTrial(), RawEncFile(), RawTDTFile()
         and RawTCPFile() in a dict, each entry corresponding to a list of trial dicts for each table.
@@ -511,11 +523,6 @@ class VRTrial(dj.Computed):
             Each key ('trial', 'enc', 'pos' and 'trig') holds one list, which contains entry dicts for every trial of
             the current session for tables VRTrial(), RawEncFile(), RawTCPFile(), and RawTDTFile() respectively.
         """
-
-
-
-
-
 
         counter = 0
 
