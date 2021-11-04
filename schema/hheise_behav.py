@@ -62,7 +62,7 @@ class VRSession(dj.Imported):
     definition = """ # Info about the VR Session, mostly read from "behavioral evaluation" Excel file
     -> common_exp.Session
     ---
-    imaging_session     : bool              # bool flag whether imaging was performed during this session
+    imaging_session     : tinyint           # bool flag whether imaging was performed during this session
     condition_switch    : longblob          # List of ints indicating the first trial(s) of the new condition
     valve_duration      : smallint          # Duration of valve opening during reward in ms
     length              : smallint          # Track length in cm
@@ -213,6 +213,7 @@ class RawBehaviorFile(dj.Imported):
         position_files.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
         trigger_files.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
 
+        ### FILTER OUT BAD TRIALS ###
         # Catch an uneven number of files
         if not (len(encoder_files) == len(position_files)) & (len(encoder_files) == len(trigger_files)):
             raise ImportError(f'Uneven numbers of encoder, position and trigger files in folder {root}!')
@@ -220,6 +221,40 @@ class RawBehaviorFile(dj.Imported):
         # Catch different numbers of behavior files and raw imaging files
         if len(encoder_files) != len(common_img.RawImagingFile() & key):
             raise ImportError(f'Different numbers of behavior and imaging files in folder {root}!')
+
+        # Check some common bugs of individual trials
+        for i in range(len(encoder_files)):
+            position = np.loadtxt(position_files[i])
+            trigger = np.loadtxt(trigger_files[i])
+            data = [trigger, position]
+
+            # check if the trial might be incomplete (VR not run until the end or TDT file incomplete)
+            if max(position[:, 1]) < 110 or abs(position[-1, 0] - trigger[-1, 0]) > 2:
+                raise IndexError(f'Trial {trigger_files[i]} incomplete, please remove file!')
+
+            # Check if a file was copied from the previous one (bug in LabView), if the start time stamp differs by >2s
+            # transform the integer time stamps plus the date from the TDT file into datetime objects
+            time_format = '%Y%m%d%H%M%S%f'
+            date = trigger_files[i].split('_')[-2]
+            for f in data:
+                if str(int(f[0, 0]))[4:] == '60000':
+                    f[0, 0] -= 1
+            start_times = np.array([datetime.strptime(date + str(int(x[0, 0])), time_format) for x in data])
+
+            # calculate absolute difference in seconds between the start times
+            max_diff = np.max(np.abs(start_times[:, None] - start_times)).total_seconds()
+            if max_diff > 2:
+                raise ValueError(f'Faulty trial (TDT file copied from previous trial), time stamps differed by {int(max(max_diff))}s!')
+
+        # Manually curate sessions to weed out trials with e.g. buggy lick sensor
+        bad_trials = self.plot_screening(trigger_files, encoder_files, key)
+        print("Session {}:\nThe following trials will be excluded from further analysis.\nDELETE THE CORRESPONDING TIFF "
+              "FILES!!")
+        for index in sorted(bad_trials, reverse=True):
+            print(trigger_files[index])
+            del encoder_files[index]
+            del trigger_files[index]
+            del position_files[index]
 
         # If everything is fine, insert the behavioral file paths, relative to session folder, sorted by time
         session_path = (common_exp.Session() & key).get_absolute_path()
@@ -252,112 +287,91 @@ class RawBehaviorFile(dj.Imported):
         )
         return data
 
-@schema
-class CuratedBehaviorFile(dj.Computed):
-    definition = """ # Sets of behavioral files that have been manually accepted (safeguard against bad trials).
-    -> VRSession
-    trial_id            : smallint          # Counter for file sets (base 0)
-    ---
-    """
-
-    def make(self, key: dict) -> None:
+    @staticmethod
+    def plot_screening(tdt_list: List[str], enc_list: List[str], trial_key: dict) -> List[int]:
         """
-        Displays trials of a session to select bad trials. Only good trials are entered and used in downstream
-        processing.
+        Displays the running and licking data of all trials of one session in an interactive pyplot. Each subplot is
+        clickable, upon which it is marked red and added to a list of trials that should not be analysed further.
+        Clicking again will turn the plot white again and remove the trial from that list. The sorted list of bad
+        trial IDs is returned when the figure is closed.
 
         Args:
-            key: Primary keys of the queried VRSession() entry.
-        """
+            tdt_list: Absolute file names of TDT files for the current session
+            enc_list: Absolute file names of Encoder files for the current session
+            trial_key: Primary keys of the queried VRSession() entry.
 
-        def plot_screening(trial_key: dict, path: str, trial_id_list: List[int]) -> List[int]:
+        Returns:
+            List with trial IDs that should NOT be entered into CuratedBehaviorFile() and not be used further.
+        """
+        n_trials = len(tdt_list)
+        bad_trials = []
+
+        nrows = int(np.ceil(n_trials / 3))
+        ncols = 3
+
+        fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 8))
+        count = 0
+
+        for row in range(nrows):
+            for col in range(ncols):
+                if count < n_trials or (row == nrows and col == 0):
+                    curr_ax = ax[row, col]
+
+                    # Load the data of the current trial
+                    curr_enc = -np.loadtxt(enc_list[count])[1:, 1]  # Load encoder time series (ignore first time stamp)
+                    curr_lick = np.loadtxt(tdt_list[count])[1:, 1]  # Load licking time series (ignore first time stamp)
+
+                    # plot behavior
+                    curr_ax.plot(curr_enc, color='tab:red')  # plot running
+                    curr_ax.spines['top'].set_visible(False)
+                    curr_ax.spines['right'].set_visible(False)
+                    curr_ax.set_xticks([])
+                    ax2 = curr_ax.twinx().twiny()  # instantiate a second, independent axes in the same plot
+                    ax2.plot(curr_lick, color='tab:blue')  # plot licking
+                    ax2.set_ylim(-0.1, 1.1)
+                    ax2.set_ylabel(count)
+                    ax2.axis('off')
+
+                    # Make curr_ax (where axis is not turned off and you can see the background color) pickable
+                    curr_ax.set_picker(True)
+                    # Save the index of the current trial in the URL field of the axes to recall it later
+                    curr_ax.set_url(count)
+                    # Put curr_ax on top to make it reachable through clicking (only the top-most axes is pickable)
+                    curr_ax.set_zorder(ax2.get_zorder() + 1)
+                    # Make the background color of curr_ax completely transparent to keep ax2 visible
+                    curr_ax.set_facecolor((0, 0, 0, 0))
+
+                    count += 1
+
+        def onpick(event):
             """
-            Displays the running and licking data of all trials of one session in an interactive pyplot. Each subplot is
-            clickable, upon which it is marked red and added to a list of trials that should not be analysed further.
-            Clicking again will turn the plot white again and remove the trial from that list. The sorted list of bad
-            trial IDs is returned when the figure is closed.
+            When a subplot is selected/clicked, add the trial's index to the bad_trials list and shade the trial plot
+            red. If it is clicked again, clear plot and remove trial index from the list.
 
             Args:
-                trial_key: Primary keys of the queried VRSession() entry.
-                path: Absolute path to the session directory on the Neurophysiology-Wahl server
-                trial_id_list: List of trial IDs of the session, from RawBehaviorFile()
-
-            Returns:
-                List with trial IDs that should NOT be entered into CuratedBehaviorFile() and not be used further.
+                event: Event handler from the pick event
             """
-            n_trials = len(trial_id_list)
-            bad_trials = []
-            nrows = int(np.ceil(n_trials / 3))
-            ncols = 3
-            fig, ax = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 8))
-            count = 0
-            for row in range(nrows):
-                for col in range(ncols):
-                    if count < n_trials or (row == nrows and col == 0):
-                        curr_ax = ax[row, col]
+            clicked_ax = event.artist  # save artist (axis) where the pick was triggered
+            trial = clicked_ax.get_url()  # Get the picked trial from the URL field
+            if trial not in bad_trials:
+                # If the trial was not clicked before, add it to the list and make the background red
+                bad_trials.append(trial)
+                clicked_ax.set_facecolor((1, 0, 0, 0.2))
+                fig.canvas.draw()
+            else:
+                # If the trial was clicked before, remove it from the list and make the background transparent again
+                bad_trials.remove(trial)
+                clicked_ax.set_facecolor((0, 0, 0, 0))
+                fig.canvas.draw()
 
-                        # Query the file paths of the current trial and load the data
-                        enc_path = os.path.join(path, (RawBehaviorFile() & dict(**trial_key, trial_id=trial_id_list[count])).fetch1("enc_filename"))
-                        tdt_path = os.path.join(path, (RawBehaviorFile() & dict(**trial_key, trial_id=trial_id_list[count])).fetch1("tdt_filename"))
-                        curr_enc = -np.loadtxt(enc_path)[1:, 1]  # Load encoder time series (ignore first time stamp)
-                        curr_lick = np.loadtxt(tdt_path)[1:, 1]  # Load licking time series (ignore first time stamp)
+        # Connect the "Pick" event (Subplot is clicked/selected) with the function describing what happens then
+        fig.canvas.mpl_connect('pick_event', onpick)
+        fig.suptitle('Curate trials for mouse {}, session {}'.format(trial_key['mouse_id'], trial_key['day']),
+                     fontsize=14)
+        plt.tight_layout(rect=[0, 0, 1, 0.95])
+        plt.show(block=True)  # Block=True is important to block other code execution until figure is closed
 
-                        # plot behavior
-                        curr_ax.plot(curr_enc, color='tab:red')  # plot running
-                        curr_ax.spines['top'].set_visible(False)
-                        curr_ax.spines['right'].set_visible(False)
-                        curr_ax.set_xticks([])
-                        ax2 = curr_ax.twinx().twiny()  # instantiate a second, independent axes in the same plot
-                        ax2.plot(curr_lick, color='tab:blue')  # plot licking
-                        ax2.set_ylim(-0.1, 1.1)
-                        ax2.set_ylabel(count)
-                        ax2.axis('off')
-
-                        # Make curr_ax (where axis is not turned off and you can see the background color) pickable
-                        curr_ax.set_picker(True)
-                        # Save the index of the current trial in the URL field of the axes to recall it later
-                        curr_ax.set_url(trial_id_list[count])
-                        # Put curr_ax on top to make it reachable through clicking (only the top-most axes is pickable)
-                        curr_ax.set_zorder(ax2.get_zorder() + 1)
-                        # Make the background color of curr_ax completely transparent to keep ax2 visible
-                        curr_ax.set_facecolor((0, 0, 0, 0))
-
-                        count += 1
-
-            def onpick(event):
-                """ Define what happens when a subplot is selected/clicked. """
-                clicked_ax = event.artist           # save artist (axis) where the pick was triggered
-                trial = clicked_ax.get_url()        # Get the picked trial from the URL field
-                if trial not in bad_trials:
-                    # If the trial was not clicked before, add it to the list and make the background red
-                    bad_trials.append(trial)
-                    clicked_ax.set_facecolor((1, 0, 0, 0.2))
-                    fig.canvas.draw()
-                else:
-                    # If the trial was clicked before, remove it from the list and make the background transparent again
-                    bad_trials.remove(trial)
-                    clicked_ax.set_facecolor((0, 0, 0, 0))
-                    fig.canvas.draw()
-
-            # Connect the "Pick" event (Subplot is clicked/selected) with the function describing what happens then
-            fig.canvas.mpl_connect('pick_event', onpick)
-            fig.suptitle('Curate trials for mouse {}, session {}'.format(trial_key['mouse_id'], trial_key['day']),
-                         fontsize=14)
-            plt.tight_layout(rect=[0, 0, 1, 0.95])
-            plt.show(block=True)    # Block=True is important to block other code execution until figure is closed
-
-            return sorted(bad_trials)
-
-        # Get trial IDs and absolute session path
-        trial_ids = (RawBehaviorFile() & key).fetch("trial_id")
-        session_path = (common_exp.Session() & key).get_absolute_path()
-
-        # Open GUI to manually select trials that should be exluded from analysis
-        bad_trials = plot_screening(key, session_path, trial_ids)
-        print("Session {}:\nThe following trials will be excluded from further analysis:")
-        print(*bad_trials)
-
-        # Insert trials into the table if they are not included in "bad_trials"
-        [self.insert1(dict(**key, trial_id=i)) for i in trial_ids if i not in bad_trials]
+        return sorted(bad_trials)
 
 
 @schema
@@ -449,7 +463,7 @@ class VRLog(dj.Imported):
 class VRTrial(dj.Computed):
     definition = """ # Aligned trials of VR behavioral data
     -> VRSession
-    trial_id            : tinyint           # Counter of the trial in 
+    trial_id            : tinyint           # Counter of the trial in the session, same as RawBehaviorFile()
     ---
     -> CorridorPattern
     tone                : bool              # bool flag whether the RZ tone during the trial was on or off
@@ -529,7 +543,13 @@ class VRTrial(dj.Computed):
         # Initialize dict that holds all entries
         data = {'trial': [], 'enc': [], 'pos': [], 'trig': []}
 
-        for enc_file in enc_files:
+        # Get IDs of good trials
+        trial_ids = RawBehaviorFile().fetch('trial_id')
+
+        # Get flag if current session is an imaging session and frame trigger should be created
+        imaging = bool((VRSession & key).fetch1('imaging_session'))
+
+        for trial_id in trial_ids:
 
             # Initialize relevant variables
             trial_key = dict(key, trial_id=counter)  # dict containing the values of all trial attributes
