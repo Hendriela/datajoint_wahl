@@ -1,10 +1,14 @@
 import tifffile as tif
 import dcimg
 import numpy as np
-import tqdm
+from tqdm import tqdm, trange
 import pathlib
 import json
 from datetime import datetime
+from timeit import default_timer as timer
+from datetime import timedelta
+from tifffile import TiffWriter
+
 
 
 def mapping_date_from_dict(data_json):
@@ -61,19 +65,21 @@ def dcimg_to_tiff(path):
 
     return str(save_path)
 
-def dcimg_to_tiff_chunks(path, chunksize = 8000):
+
+def dcimg_to_tiff_chunks(path, chunk_size_GB = 4):
     """
-    Converts Hamamatsu .dcimg file to .tif file in chunks of ~4GB.
-    Much slower than normal dcimg_to_tiff, but useful if the entire file cannot fit into RAM.
+    Converts Hamamatsu .dcimg file to .tif file in chunks
+    For now only supports unsigned 16-bit integer (uint16) data type.
+    Supports arbitrary resolutions (tested on 512x512)
     Args:
         path: pathlib Path object containing path of .dcimg file
-        chunksize: stack size of an individual chunk. For uint16 data type, the default value yields ~4GB chunks
+        chunk_size_GB: approximate chunk size in GB. defaults to 4 gigabytes
     Returns: string containing path of new tif file
     """
     # check whether the file already exists or if the path given is already a tif
     if type("path") == str:
         path = pathlib.Path(path)
-    if (path.suffix == ".tif") or (path.suffix == ".tiff"):
+    if path.suffix == ".tif":
         print("%s is already a tif file!" % str(path))
         return str(path)
     save_path = path.with_suffix(".tif")
@@ -84,26 +90,28 @@ def dcimg_to_tiff_chunks(path, chunksize = 8000):
     #  open memory-mapped dcimg file
     wide = dcimg.DCIMGFile(path)
     n_frames = int(wide.shape[0])
-    n_chunks = int(np.ceil(n_frames/chunksize))
-    # create memory_mapped tif file
-    print("reserving space on disk...")
-    tif_memmap = tif.memmap(str(save_path), shape=tuple([int(j) for j in wide.shape]), dtype="uint16", bigtiff=True)
+    frame_size_bytes = 2*int(wide.shape[1])*int(wide.shape[2])
+    chunksize = int(chunk_size_GB*1e9/frame_size_bytes)
 
+    # compute number of chunks
+    n_chunks = int(np.ceil(n_frames/chunksize))
+    # create tif file writer
+    tif_file_out = TiffWriter(str(save_path), bigtiff=True)
+
+    print("Converting %s..." % str(path), flush=True)
     # loop over chunks
     for i in range(n_chunks):
         lim_1, lim_2 = i*chunksize, (i+1)*chunksize
         if lim_2 > n_frames:
             lim_2 = n_frames
         # load chunk and convert to C order
-        print("loading chunk %i/%i..." % (i+1, n_chunks), end = " ")
+        print("loading chunk %i/%i..." % (i+1, n_chunks), end=' ', flush=True)
         chunk = np.array(np.array(wide[lim_1:lim_2, :, :]).copy(order='C'), dtype=np.uint16)
+        print("done!", flush=True)
         # write to memory and clear chunk
-        print("writing to memory...", end = " ")
-        tif_memmap[lim_1:lim_2] = chunk
-        tif_memmap.flush()
-        del chunk
-        print("done!")
+        for frame in tqdm(chunk, desc="Writing chunk %i/%i" % (i+1, n_chunks)):
+            tif_file_out.write(frame, contiguous=True)
 
-    del tif_memmap
+    tif_file_out.close()
     print("file saved at %s" % str(save_path))
     return str(save_path)
