@@ -247,8 +247,9 @@ class RawBehaviorFile(dj.Imported):
         Returns:
             Data dict with keys "tdt", "tcp" and "enc", holding lists of np arrays of the respective data
         """
-        # Get the session of the current query (through restriction)
-        session_path = (common_exp.Session() & self.restriction).get_absolute_path()
+
+        # Get the session of the current query
+        session_path = (common_exp.Session() & self).get_absolute_path()
 
         # Load data into a dict
         data = dict(
