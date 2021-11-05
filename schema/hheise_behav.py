@@ -14,9 +14,10 @@ import datajoint as dj
 from schema import common_mice, common_exp, common_img
 from hheise_scripts import util, behav_util
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Iterable, List, Optional, Tuple, Dict
 import os
+import ast
 from glob import glob
 import numpy as np
 import pandas as pd
@@ -85,95 +86,45 @@ class VRSession(dj.Imported):
             return
 
         print(f'Start to populate key: {key}')
-        # First, create entries of VRSession and VRLogFile and insert them
-        vrsession_entry = behav_util.create_vrsession_entry(key)
-        self.insert1(vrsession_entry)
 
-        vrlogfile_entry = behav_util.create_vrlogfile_entry(key)
-        VRLogFile().insert1(row=vrlogfile_entry, skip_duplicates=True)
-        VRLog().helper_insert1(key=vrlogfile_entry, skip_duplicates=True)  # Load the LOG file into the other table
+        # Save original key
+        new_key = key.copy()
 
+        # Get current mouse
+        mouse = (common_mice.Mouse & key).fetch1()
 
-        # TODO Manually curate session (show it to the user to select possible bad trials) before entering it in the DB
+        # Load info from the Excel file
+        excel_path = os.path.join(login.get_neurophys_data_directory(),
+                                  (BatchData & {"batch_id": mouse['batch']}).fetch1('behav_excel'))
+        excel = pd.read_excel(excel_path, sheet_name="M{}".format(mouse['mouse_id']))
+        # Day is returned as date, has to be cast as datetime for pandas comparison
+        sess_entry = excel.loc[excel['Date'] == datetime(key['day'].year, key['day'].month, key['day'].day)]
 
+        # Fill in info from Excel entry
+        new_key['valve_duration'] = sess_entry['Water'].values[0].split()[1][:3]
+        new_key['length'] = sess_entry['Track length'].values[0]
+        new_key['running'] = sess_entry['Running'].values[0]
+        new_key['licking'] = sess_entry['Licking'].values[0]
+        new_key['deprivation'] = sess_entry['Deprivation'].values[0]
+        new_key['vr_notes'] = sess_entry['Notes'].values[0]
 
+        # Enter weight if given
+        if not pd.isna(sess_entry['weight [g]'].values[0]):
+            common_mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
+                                          'date_of_weight': key['day'], 'weight': sess_entry['weight [g]'].values[0]})
 
-    def is_session_novel(self, sess_key: dict) -> bool:
-        """
-        Checks whether the session of 'sess_key' is in the novel corridor (from VR zone borders)
-        Args:
-            sess_key: Primary keys to query entry of VRLog()
+        # Get block and condition switch from session_notes string
+        note_dict = ast.literal_eval((common_exp.Session & key).fetch1('session_notes'))
+        new_key['block'] = note_dict['block']
+        new_key['condition_switch'] = eval(note_dict['switch'])  # eval turns string into list
 
-        Returns:
-            Boolean flag whether the queried session is in the novel (True) or training (False) corridor
-        """
-        # Get event log
-        log_events = (VRLog & sess_key).get_dataframe()['log_event']
-        # Get the rounded position of the first reward zone
-        rz_pos = int(
-            np.round(float(log_events[log_events.str.contains('VR enter Reward Zone:')].iloc[0].split(':')[1])))
-        if rz_pos == -6:
-            return False
-        elif rz_pos == 9:
-            return True
+        # Check if this is an imaging session (session has to be inserted into common_img.Scan() first)
+        if len((common_img.Scan & key).fetch()) == 1:
+            new_key['imaging_session'] = 1
         else:
-            print(f'Could not determine context in session {self.key}!\n')
+            new_key['imaging_session'] = 0
 
-    def get_condition(self, key: dict, task: str, condition_switch: Iterable[int]) -> Tuple[str, int]:
-        """
-        Returns condition (RZ position, corridor pattern, tone) of a single trial.
-        Args:
-            key: Primary keys of the queried trial
-            task: Type of task, manually entered in common_exp.Session
-            condition_switch: Trial ID(s) at which the new condition in this session appears. [-1] for no change.
-
-        Returns:
-            Corridor pattern at that trial (corresponds to CorridorPattern()), and if the tone was on (1) or off (0).
-        """
-
-        # No condition switches in novel corridor
-        if self.is_session_novel(key):
-            return 'novel', 1
-
-        # No condition switch or before first switch
-        if (condition_switch == [-1]) or key['trial_id'] < condition_switch[0]:
-            if ((task == 'Active') or (task == 'Passive')) or key['trial_id'] < condition_switch[0]:
-                pattern = 'training'
-                tone = 1
-            else:
-                raise Exception(f'Error at {key}:\nTask is not Active or Passive, but no condition switch given.')
-
-        # One condition switch in this session, and the current trial is after the switch
-        elif (len(condition_switch) == 1) and key['trial_id'] >= condition_switch[0]:
-            if task == 'No tone':
-                pattern = 'training'
-                tone = 0
-            elif task == 'No pattern':
-                pattern = 'none'
-                tone = 1
-            elif task == 'Changed distances':
-                pattern = 'training_shifted'
-                tone = 1
-            elif task == 'No reward at RZ3':
-                pattern = 'training'
-                tone = 1
-            else:
-                raise Exception('Error at {}:\n'
-                                'Task condition could not be determined for trial nb {}.'.format(key, key['trial_id']))
-
-        # Two condition switches, and the trial is after the first but before the second, or after the second switch
-        elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (
-                key['trial_id'] >= condition_switch[1]):
-            pattern = 'none'
-            tone = 0
-        elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (key['trial_id'] < condition_switch[1]):
-            pattern = 'none'
-            tone = 1
-        else:
-            raise Exception('Error at {}:\n'
-                            'Task condition could not be determined for trial nb {}.'.format(key, key['trial_id']))
-
-        return pattern, tone
+        self.insert1(new_key)
 
 
 @schema
@@ -226,7 +177,11 @@ class RawBehaviorFile(dj.Imported):
         for i in range(len(encoder_files)):
             position = np.loadtxt(position_files[i])
             trigger = np.loadtxt(trigger_files[i])
+            encoder = np.loadtxt(encoder_files[i])
             data = [trigger, position]
+
+            if (len(position) == 0) or len(trigger) == 0 or len(encoder) == 0:
+                raise ImportError("File in trial {} seems to be empty.".format(position_files[i]))
 
             # check if the trial might be incomplete (VR not run until the end or TDT file incomplete)
             if max(position[:, 1]) < 110 or abs(position[-1, 0] - trigger[-1, 0]) > 2:
@@ -244,32 +199,48 @@ class RawBehaviorFile(dj.Imported):
             # calculate absolute difference in seconds between the start times
             max_diff = np.max(np.abs(start_times[:, None] - start_times)).total_seconds()
             if max_diff > 2:
-                raise ValueError(f'Faulty trial (TDT file copied from previous trial), time stamps differed by {int(max(max_diff))}s!')
+                raise ValueError(
+                    f'Faulty trial (TDT file copied from previous trial), time stamps differed by {int(max(max_diff))}s!')
 
         # Manually curate sessions to weed out trials with e.g. buggy lick sensor
         bad_trials = self.plot_screening(trigger_files, encoder_files, key)
-        print("Session {}:\nThe following trials will be excluded from further analysis.\nDELETE THE CORRESPONDING TIFF "
-              "FILES!!")
-        for index in sorted(bad_trials, reverse=True):
-            print(trigger_files[index])
-            del encoder_files[index]
-            del trigger_files[index]
-            del position_files[index]
+
+        if len(bad_trials) > 0:
+            print("Session {}:\nThe following trials will be excluded from further analysis.\n"
+                  "DELETE THE CORRESPONDING TIFF FILES!!".format(key))
+            for index in sorted(bad_trials, reverse=True):
+                print(trigger_files[index])
+                del encoder_files[index]
+                del trigger_files[index]
+                del position_files[index]
 
         # If everything is fine, insert the behavioral file paths, relative to session folder, sorted by time
         session_path = (common_exp.Session() & key).get_absolute_path()
         for idx in range(len(encoder_files)):
             new_entry = dict(
+                **key,
                 trial_id=idx,
                 tdt_filename=os.path.relpath(trigger_files[idx], session_path),
                 tcp_filename=os.path.relpath(position_files[idx], session_path),
                 enc_filename=os.path.relpath(encoder_files[idx], session_path)
             )
+
+            # Last sanity check: Time stamps of the three files should not differ more than 2 seconds
+            time_format = '%H%M%S'
+            times = [datetime.strptime(new_entry['tdt_filename'].split('_')[-1][:-4], time_format),
+                     datetime.strptime(new_entry['tcp_filename'].split('_')[-1][:-4], time_format),
+                     datetime.strptime(new_entry['enc_filename'].split('_')[-1][:-4], time_format)]
+
+            import itertools
+            for subset in itertools.combinations(times, 2):
+                if (subset[0] - subset[1]).seconds > 2:
+                    raise ValueError("Files for trial {} do not have matching time stamps!".format(new_entry))
+
             self.insert1(new_entry)
 
         print("Done!")
 
-    def load_data(self) -> Dict[List[np.ndarray]]:
+    def load_data(self) -> Dict[str, List[np.ndarray]]:
         """
         Loads data of queried trials and returns it in dict form.
 
@@ -317,20 +288,26 @@ class RawBehaviorFile(dj.Imported):
                 if count < n_trials or (row == nrows and col == 0):
                     curr_ax = ax[row, col]
 
-                    # Load the data of the current trial
-                    curr_enc = -np.loadtxt(enc_list[count])[1:, 1]  # Load encoder time series (ignore first time stamp)
-                    curr_lick = np.loadtxt(tdt_list[count])[1:, 1]  # Load licking time series (ignore first time stamp)
+                    # Load the data, (ignore first time stamp)
+                    curr_enc = -np.loadtxt(enc_list[count])[1:, 1]
+                    curr_lick = np.loadtxt(tdt_list[count])[1:, 1]
+
+                    # only plot every 5th sample for performance
+                    curr_enc = curr_enc[::5]
+                    curr_lick = curr_lick[::5]
+
+                    # Rescale speed to fit on y-axis
+                    curr_enc = curr_enc/max(curr_enc)
 
                     # plot behavior
                     curr_ax.plot(curr_enc, color='tab:red')  # plot running
                     curr_ax.spines['top'].set_visible(False)
                     curr_ax.spines['right'].set_visible(False)
                     curr_ax.set_xticks([])
-                    ax2 = curr_ax.twinx().twiny()  # instantiate a second, independent axes in the same plot
+                    ax2 = curr_ax.twiny()   # make new plot with independent x axis in the same subplot
                     ax2.plot(curr_lick, color='tab:blue')  # plot licking
                     ax2.set_ylim(-0.1, 1.1)
-                    ax2.set_ylabel(count)
-                    ax2.axis('off')
+                    ax2.axis('off')         # Turn of axis spines for both new axes
 
                     # Make curr_ax (where axis is not turned off and you can see the background color) pickable
                     curr_ax.set_picker(True)
@@ -420,10 +397,10 @@ class VRLog(dj.Imported):
             key: Primary keys of the current VRLogFile() entry.
         """
 
+        path = os.path.join((common_exp.Session & key).get_absolute_path(), (VRLogFile & key).fetch1('log_filename'))
+
         # Load LOG file
-        log = pd.read_csv(os.path.join(login.get_neurophys_data_directory(),
-                                       (common_exp.Session & key).fetch1('session_path'), key['log_filename']),
-                          sep='\t', parse_dates=[[0, 1]])
+        log = pd.read_csv(path, sep='\t', parse_dates=[[0, 1]])
 
         # Validate mouse and track length info
         line = log['Event'].loc[log['Event'].str.contains("VR Task start, Animal:")].values[0]
@@ -437,9 +414,7 @@ class VRLog(dj.Imported):
             raise Warning('Session {}: Mouse ID M{} in LOG file does not correspond to ID in '
                           'database M{}'.format(key['day'], log_mouse, key['mouse_id']))
 
-        # Remove "log_filename" keyword that is not needed for this table (from an untouched copy of 'key')
-        insert_dict = dict(key)
-        insert_dict.pop('log_filename')
+        insert_dict = dict(**key)
 
         # Parse fields as separate np.arrays
         insert_dict['log_time'] = np.array(log['Date_Time'], dtype=str)  # str because DJ doesnt like datetime[ns]
