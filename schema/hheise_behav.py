@@ -12,7 +12,6 @@ import login
 login.connect()
 import datajoint as dj
 from schema import common_mice, common_exp, common_img
-from hheise_scripts import util, behav_util
 
 from datetime import datetime, timedelta
 from typing import Iterable, List, Optional, Tuple, Dict

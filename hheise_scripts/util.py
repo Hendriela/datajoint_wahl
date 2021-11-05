@@ -8,7 +8,6 @@ Utility functions for Hendriks DataJoint section
 """
 import os
 from pathlib import Path
-from copy import deepcopy
 import re
 from typing import List, Any, Type, Optional
 
@@ -35,11 +34,14 @@ def alphanumerical_sort(x: List[str]) -> List[str]:
     Returns:
         Sorted list.
     """
-    x_sort = x.copy()
+    x_sort = x[:]
+
     def atoi(text):
         return int(text) if text.isdigit() else text
+
     def natural_keys(text):
         return [atoi(c) for c in re.split('(\d+)', text)]
+
     x_sort.sort(key=natural_keys)
     return x_sort
 
@@ -76,7 +78,7 @@ def get_autopath(info: dict) -> str:
     """
     mouse = str(info['mouse_id'])
     batch = str((common_mice.Mouse & "username = '{}'".format(login.get_user())
-                                   & "mouse_id = {}".format(mouse)).fetch1('batch'))
+                 & "mouse_id = {}".format(mouse)).fetch1('batch'))
     if batch == 0:
         raise Exception('Mouse {} has no batch (batch 0). Cannot create session path.\n'.format(mouse))
     path = os.path.join(login.get_neurophys_data_directory(),
@@ -119,7 +121,7 @@ def add_many_sessions(date: str, mice: List[str], block: Optional[List[int]] = N
     # Set default values for attributes
     session_dict = dict(username='hheise',
                         day=date,
-                        session_num=1,
+                        session_num=0,
                         anesthesia='Awake',
                         setup='VR',
                         task='Active',
@@ -127,7 +129,7 @@ def add_many_sessions(date: str, mice: List[str], block: Optional[List[int]] = N
                         session_notes='')
 
     if block is None:
-        block = [1]*len(mice)
+        block = [1] * len(mice)
     if switch is None:
         switch = [[-1]] * len(mice)
 
@@ -139,8 +141,7 @@ def add_many_sessions(date: str, mice: List[str], block: Optional[List[int]] = N
     for idx, mouse in enumerate(mice):
 
         # Expand dict for mouse-specific values
-        mouse_session_dict = deepcopy(session_dict)
-        mouse_session_dict['mouse_id'] = mouse
+        mouse_session_dict = dict(**session_dict, mouse_id=mouse)
 
         # Set values for each mouse if multiple were provided
         for key, value in session_dict.items():
@@ -148,7 +149,9 @@ def add_many_sessions(date: str, mice: List[str], block: Optional[List[int]] = N
                 mouse_session_dict[key] = session_dict[key][idx]
         # Enter block and switch values in session_notes
         mouse_session_dict['session_notes'] = "{" + "'block':'{}', " \
-        "'switch':'{}', 'notes':'{}'".format(block[idx], switch[idx], mouse_session_dict['session_notes']) + "}"
+                                                    "'switch':'{}', 'notes':'{}'".format(block[idx], switch[idx],
+                                                                                         mouse_session_dict[
+                                                                                             'session_notes']) + "}"
 
         # Create session folder path
         mouse_session_dict['session_path'] = Path(get_autopath(mouse_session_dict))
