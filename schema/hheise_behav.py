@@ -147,6 +147,11 @@ class RawBehaviorFile(dj.Imported):
 
         print("Finding raw behavior files for session {}".format(key))
 
+        # Check if RawImagingFile has already been filled for this session
+        if len(common_img.RawImagingFile() & key) == 0:
+            raise ImportError("No entries for session {} in common_img.RawImagingFile. Fill table before populating "
+                              "RawBehaviorFile.")
+
         # Get complete path of the current session
         root = os.path.join(login.get_neurophys_data_directory(), (common_exp.Session & key).fetch1('session_path'))
 
