@@ -207,6 +207,13 @@ class AffineRegistration(dj.Manual):
         """
         return (RawImagingFile & AffineRegistration).get_paths()
 
+
+@schema
+class SmoothingKernel(dj.Manual):
+    definition = """ # Integration of opencv-based smoothing kernels
+    kernel_name             : varchar(128)  # name of the kernel
+    kernel_id               : int           # integer for counting different 
+    """
     # def generate_aligned_file(self):
     #     """
     #     Generates a spatially registered file in the location of the original file.
