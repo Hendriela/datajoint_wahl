@@ -15,7 +15,7 @@ import login
 
 # Only import Caiman-specific modules if code is run inside a caiman environment
 try:
-    from util import scanimage, motion_correction, helper
+    from util import scanimage, motion_correction
     import caiman as cm
     from caiman.motion_correction import MotionCorrect
     from caiman.source_extraction.cnmf import params as params
@@ -25,6 +25,7 @@ except ModuleNotFoundError:
     print('Skipping caiman-specific imports because code is not run in CaImAn environment.\nYou can view the tables, '
           'but CaImAn-specific functions will not work.')
 
+from util import helper
 from schema import common_exp, common_mice
 import os
 import numpy as np
@@ -149,7 +150,7 @@ class Scan(dj.Manual):
     -> Layer
     -> CaIndicator
     objective = '16x' : varchar(64)  # Used objective for the scan
-    nr_channels = 1   : int          # Number of recorded channels (1 or 2)
+    nr_channels = 1   : tinyint      # Number of recorded channels (1 or 2)
     network_id = 1    : tinyint      # Network ID if several networks were recorded in the same day. This would count as separate exp.Session entries (incrementing session_num)
     """
 
@@ -191,11 +192,20 @@ class RawImagingFile(dj.Imported):
             key: Primary keys of the queried Scan() entry.
         """
 
+        print('Finding raw imaging files for entry {}'.format(key))
+
         # Get session path
         path = (common_exp.Session() & key).get_absolute_path()
 
+        if os.path.isfile('.\\gui_params.yaml'):
+            gui_param_path = '.\\gui_params.yaml'
+        elif os.path.isfile('..\\gui_params.yaml'):
+            gui_param_path = '..\\gui_params.yaml'
+        else:
+            raise FileNotFoundError('Cannot find gui_params.yaml file.')
+
         # Get the file pattern for the current user from the YAML file
-        with open(r'.\gui_params.yaml') as file:
+        with open(gui_param_path) as file:
             # The FullLoader parameter handles the conversion from YAML scalar values to Python's dictionary format
             default_params = yaml.load(file, Loader=yaml.FullLoader)
 
@@ -289,7 +299,7 @@ class ScanInfo(dj.Computed):
             key: Primary keys of the current Scan() entry.
         """
 
-        # print('Populating ScanInfo for key: {}'.format(key))
+        print('Populating ScanInfo for key: {}'.format(key))
 
         if (Scan & key).fetch1('microscope') == 'Scientifica':
             # Extract meta-information from imaging .tif file
@@ -898,13 +908,13 @@ class Segmentation(dj.Computed):
     -> MotionCorrection
     -> CaimanParameter
     ------
-    nr_masks                        : int         # Number of total detected masks in this FOV (includes rejected masks)
-    target_dim                      : longblob    # Tuple (dim_y, dim_x) to reconstruct mask from linearized index
-    s_background                    : longblob    # Spatial background component(s) weight mask (dim_y, dim_x, nb) 
-    f_background                    : longblob    # Background fluorescence (nb, nr_frames)
-    traces                          : str         # Relative path (from session folder) to "raw" trace of each ROI (estimates.C + estimates.YrA)
-    residuals                       : str         # Relative path (from session folder) to residual fluorescence of each ROI (estimates.YrA)
-    time_seg = CURRENT_TIMESTAMP    : timestamp   # automatic timestamp
+    nr_masks                        : int           # Number of total detected masks in this FOV (includes rejected masks)
+    target_dim                      : longblob      # Tuple (dim_y, dim_x) to reconstruct mask from linearized index
+    s_background                    : longblob      # Spatial background component(s) weight mask (dim_y, dim_x, nb) 
+    f_background                    : longblob      # Background fluorescence (nb, nr_frames)
+    traces                          : varchar(128)  # Relative path (from session folder) to "raw" trace of each ROI (estimates.C + estimates.YrA)
+    residuals                       : varchar(128)  # Relative path (from session folder) to residual fluorescence of each ROI (estimates.YrA)
+    time_seg = CURRENT_TIMESTAMP    : timestamp     # automatic timestamp
     """
 
     class ROI(dj.Part):
