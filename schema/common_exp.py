@@ -87,7 +87,7 @@ class Session(dj.Manual):
     """
 
     @staticmethod
-    def create_id(investigator_name: str, mouse_id: int, date: datetime, session_num: int) -> str:
+    def create_id(investigator_name: str, mouse_id: int, date: Union[datetime, str], session_num: int) -> str:
         """
         Create unique session id with the format inv_MXXX_YYYY-MM-DD_ZZ:
         inv: investigator shortname (called 'experimenter' in Adrians GUI)
@@ -102,7 +102,7 @@ class Session(dj.Manual):
         Args:
             investigator_name:  Shortname of the investigator for this session (from common_mice.Investigator)
             mouse_id:           Investigator-specific mouse ID (from common_mice.Mice)
-            date:               Datetime object of the session date
+            date:               Datetime object of the session date, or string with format YYYY-MM-DD
             session_num:        Iterator for number of sessions on that day
 
         Returns:
@@ -115,7 +115,10 @@ class Session(dj.Manual):
         first_part = 'session_' + investigator_name + '_' + mouse_id_str
 
         # second: Transform datetime object to string, while removing the time stamp
-        date_str = date.strftime('%Y-%m-%d')
+        if type(date) == datetime:
+            date_str = date.strftime('%Y-%m-%d')
+        else:
+            date_str = date
 
         # third: trial with leading zeros
         trial_str = '{:02d}'.format(session_num)
