@@ -217,9 +217,13 @@ class RawBehaviorFile(dj.Imported):
                 del encoder_files[index]
                 del trigger_files[index]
                 del position_files[index]
+        else:
+            print("All trials accepted.")
 
         # If everything is fine, insert the behavioral file paths, relative to session folder, sorted by time
         session_path = (common_exp.Session() & key).get_absolute_path()
+        import itertools
+
         for idx in range(len(encoder_files)):
             new_entry = dict(
                 **key,
@@ -235,9 +239,8 @@ class RawBehaviorFile(dj.Imported):
                      datetime.strptime(new_entry['tcp_filename'].split('_')[-1][:-4], time_format),
                      datetime.strptime(new_entry['enc_filename'].split('_')[-1][:-4], time_format)]
 
-            import itertools
             for subset in itertools.combinations(times, 2):
-                if (subset[0] - subset[1]).seconds > 2:
+                if abs(subset[0] - subset[1]).seconds > 2:
                     raise ValueError("Files for trial {} do not have matching time stamps!".format(new_entry))
 
             self.insert1(new_entry)
@@ -521,8 +524,10 @@ class VRTrial(dj.Computed):
             key: Primary keys of current VRSession() entry
         """
 
+        print('Starting to align trials for session {}'.format(key))
+
         # Fetch data about the session
-        trial_ids = RawBehaviorFile().fetch('trial_id')  # Trial IDs (should be regularly counting up)
+        trial_ids = (RawBehaviorFile() & key).fetch('trial_id')  # Trial IDs (should be regularly counting up)
         imaging = bool((VRSession & key).fetch1('imaging_session'))  # Flag if frame trigger should be created
         cond = (common_exp.Session & key).fetch1('task')  # Task condition
         cond_switch = (VRSession & key).fetch1('condition_switch')  # First trial of new condition
@@ -680,7 +685,10 @@ class VRTrial(dj.Computed):
 
         # transform the integer time stamps plus the date of the session into datetime objects
         time_format = '%Y%m%d%H%M%S%f'
-        date = datetime.strftime(trial_key['day'], '%Y%m%d')
+        if not type(trial_key['day']) == str:
+            date = datetime.strftime(trial_key['day'], '%Y%m%d')
+        else:
+            date = trial_key['day'].replace('-', '')
         for f in data:
             if str(int(f[0, 0]))[4:] == '60000':
                 f[0, 0] -= 1
@@ -784,10 +792,10 @@ class VRTrial(dj.Computed):
 
         ### Resample data to encoder sampling rate (125 Hz, every 8 ms), as encoder data is difficult to extrapolate
 
-        # 1 if any of grouped values are 1 avoids loosing frame. Sometimes, even downsampling can create NaNs.
+        # 1 if any of grouped values are 1 avoids loosing frames. Sometimes, even downsampling can create NaNs.
         # They are forward filled for now, which will fail (create an unwanted frame trigger) if the timepoint before
         # the NaN happens to be a frame trigger. Lets hope that never happens.
-        df_list[0] = df_list[0].resample("8L").max().fillna(method='pad').astype(int)
+        df_list[0] = df_list[0].resample("8L").max().fillna(0).astype(int)
         df_list[1] = (df_list[1].resample("8L").mean() > 0.5).astype(int)  # 1 if half of grouped values are 1
         df_list[2] = df_list[2].resample("8L").sum().astype(int)  # sum encoder, a summed rotation value
         df_list[3] = df_list[3].resample("8L").ffill()  # Forward fill missing position values
@@ -836,7 +844,7 @@ class VRTrial(dj.Computed):
         # check frame count again
         merge_trig = np.sum(merge_filt['trigger'])
         if imaging and merge_trig != frame_count:
-            raise ValueError(f'Frame count matching unsuccessful: \n{merge_trig} frames in merge, should be {frame_count} frames.')
+            raise ValueError(f'Frame count matching unsuccessful: {merge_trig} frames in merge, should be {frame_count} frames.')
 
         # transform back to numpy array for saving
         time_passed = merge_filt.index - merge_filt.index[0]  # transfer timestamps to
