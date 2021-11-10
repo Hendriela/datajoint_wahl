@@ -774,6 +774,10 @@ class QualityControl(dj.Computed):
         new_entry['cor_image'] = motion_correction.parallel_all_neighbor_correlations(stack)
 
         self.insert1(new_entry)
+
+        # Remove mmap file again
+        (MemoryMappedFile & key).delete_mmap_file()
+
         # log('Finished populating QualityControl for key: {}.'.format(key))
 
     # Commented out for now until we implement blood vessel alignments
