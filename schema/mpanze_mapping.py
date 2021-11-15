@@ -4,6 +4,7 @@ import datajoint as dj
 import login
 login.connect()
 from schema import common_exp
+import pathlib
 
 schema = dj.schema('mpanze_mapping', locals(), create_tables=True)
 
@@ -48,6 +49,37 @@ class RawSynchronisationFile(dj.Manual):
     filename_sync                : varchar(512)  # name of the sync file, relative to the session folder
     """
 
+    def get_paths(self):
+        """Construct full paths to raw synchronisation file"""
+        path_neurophys = login.get_working_directory()  # get data directory path on local machine
+        # find sessions corresponding to current files
+        sessions = (self * common_exp.Session())
+
+        # iterate over sessions
+        paths = []
+        for session in sessions:
+            # obtain full path
+            path_session = session["session_path"]
+            path_file = session["filename_sync"]
+            paths.append(pathlib.Path(path_neurophys, path_session, path_file))
+        return paths
+
+    def get_path(self, check_existence=False):
+        """
+        Construct full path to a raw synchronisation file.
+        Method only works for single-element query.
+        Args:
+            check_existence: is True, method throws an exception if the file does not exist
+        """
+        if len(self) == 1:
+            p = self.get_paths()[0]
+            if check_existence:
+                if not p.exists():
+                    raise Exception("The file was not found at %s" % str(p))
+            return p
+        else:
+            raise Exception("This method only works for a single entry! For multiple entries use get_paths")
+
 
 @schema
 class RawParameterFile(dj.Manual):
@@ -56,6 +88,37 @@ class RawParameterFile(dj.Manual):
     ---
     filename_params              : varchar(512)  # name of the sync file, relative to the session folder
     """
+
+    def get_paths(self):
+        """Construct full paths to raw parameter files"""
+        path_neurophys = login.get_working_directory()  # get data directory path on local machine
+        # find sessions corresponding to current files
+        sessions = (self * common_exp.Session())
+
+        # iterate over sessions
+        paths = []
+        for session in sessions:
+            # obtain full path
+            path_session = session["session_path"]
+            path_file = session["filename_params"]
+            paths.append(pathlib.Path(path_neurophys, path_session, path_file))
+        return paths
+
+    def get_path(self, check_existence=False):
+        """
+        Construct full path to a raw parameter file.
+        Method only works for single-element query.
+        Args:
+            check_existence: is True, method throws an exception if the file does not exist
+        """
+        if len(self) == 1:
+            p = self.get_paths()[0]
+            if check_existence:
+                if not p.exists():
+                    raise Exception("The file was not found at %s" % str(p))
+            return p
+        else:
+            raise Exception("This method only works for a single entry! For multiple entries use get_paths")
 
 
 @schema
