@@ -23,6 +23,18 @@ def mapping_date_from_dict(data_json):
     datetime_object = datetime.strptime(datetime_json, '%Y%m%d_%H%M')
     return datetime_object.strftime("%Y-%m-%d")
 
+def mapping_datetime_from_dict(data_json):
+    """
+    Coverts the datetime timestamp into a datetime_object
+    Args:
+        data_json: dict containing mapping parameters
+    Returns:
+        datetime string, in the format YYYY-MM-DD
+    """
+    datetime_json = data_json["Date_Time"]
+    datetime_object = datetime.strptime(datetime_json, '%Y%m%d_%H%M')
+    return datetime_object
+
 
 def mapping_date_from_json(path_json):
     """
