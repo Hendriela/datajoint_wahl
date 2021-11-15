@@ -115,7 +115,7 @@ class Session(dj.Manual):
         first_part = 'session_' + investigator_name + '_' + mouse_id_str
 
         # second: Transform datetime object to string, while removing the time stamp
-        if type(date) == datetime:
+        if type(date) == datetime or type(date) == datetime.date:
             date_str = date.strftime('%Y-%m-%d')
         else:
             date_str = date
