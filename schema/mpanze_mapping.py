@@ -1,10 +1,13 @@
 """Schema for processing sensory mapping data"""
+import json
 
 import datajoint as dj
 import login
 login.connect()
 from schema import common_exp
 import pathlib
+import json
+from mpanze_scripts.widefield import utils
 
 schema = dj.schema('mpanze_mapping', locals(), create_tables=True)
 
@@ -133,21 +136,44 @@ class MappingInfo(dj.Computed):
     stim_timestamps                 : longblob  # stimulation timestamps in seconds
     sampling_rate                   : int       # Vi sampling rate
     stop_time                       : float     # total duration of the session, in seconds
-    session                         : int       # counter for repeated sessions with the same body part
+    stim_session_count              : int       # counter for repeated sessions with the same body part
+    file_timestamp                  : datetime  # timestamp generated while saving the file
     """
+    def make(self, key):
+        """
+        Loads session parameters from the mapping .json file. Raises an exception if the file is not found
+        """
+        # find mapping file. get_path already catches most likely exceptions
+        p_json = (RawParameterFile & key).get_path(check_existence=True)
+        with open(p_json) as f:
+            data_json = json.load(f)
+        key["pre_stim"] = data_json["Pre_stim (s)"]
+        key["stim_duration"] = data_json["Stimulus Duration (s)"]
+        key["post_stim"] = data_json["Post_stim (s)"]
+        key["repeats"] = data_json["Repeats"]
+        if data_json["Stim Type"] == "Sensory":
+            key["stim_timestamps"] = data_json["Sensory Timestamps"]
+        else:
+            raise Exception("Invalid or unimplemented stiumuls type: %s" % data_json["Stim Type"])
+        key["sampling_rate"] = data_json["Sampling Rate"]
+        key["stop_time"] = data_json["Stop Time"]
+        key["stim_session_count"] = data_json["Session"]
+        key["file_timestamp"] = utils.mapping_datetime_from_dict(data_json).strftime("%Y-%m-%d %H:%M:%S")
+        self.insert1(key)
 
 
-class ProcessedMappingFile(dj.Computed):
-    definition = """ # Computes and saves aligned,smoothed, pixelwise DF/F as a tiff file.
-    -> MappingInfo
-    ---
-    n_frames_pre                    : int        # number of pre stim (baseline) frames
-    n_frames_stim                   : int        # number of frames while the stimulus is active
-    n_frames_post                   : int        # number of frames post stimulation
-    n_frames_trial                  : int        # total number of frames in a trial
-    -> mpanze_widefield.SmoothingKernel
-    imaging_fps                     : float      # detected frames per second from sync path
-    frame_timestamps                : longblob   # (repeats x n_frames_trial) matrix of frame timestamps in seconds
-    frames_indices                  : longblob   # (repeats x n_frames_trial) matrix of frame indices in tiff file
-    filename_processed              : varchar(512)  # name of the pre-processed file, relative to the session folder
-    """
+
+# class ProcessedMappingFile(dj.Computed):
+#     definition = """ # Computes and saves aligned,smoothed, pixelwise DF/F as a tiff file.
+#     -> MappingInfo
+#     ---
+#     n_frames_pre                    : int        # number of pre stim (baseline) frames
+#     n_frames_stim                   : int        # number of frames while the stimulus is active
+#     n_frames_post                   : int        # number of frames post stimulation
+#     n_frames_trial                  : int        # total number of frames in a trial
+#     -> mpanze_widefield.SmoothingKernel
+#     imaging_fps                     : float      # detected frames per second from sync path
+#     frame_timestamps                : longblob   # (repeats x n_frames_trial) matrix of frame timestamps in seconds
+#     frames_indices                  : longblob   # (repeats x n_frames_trial) matrix of frame indices in tiff file
+#     filename_processed              : varchar(512)  # name of the pre-processed file, relative to the session folder
+#     """
