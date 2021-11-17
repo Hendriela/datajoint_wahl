@@ -8,6 +8,7 @@ from mpanze_scripts.widefield import utils
 import matplotlib.pyplot as plt
 import numpy as np
 import tifffile as tif
+import cv2
 
 schema = dj.schema('mpanze_widefield', locals(), create_tables=True)
 
@@ -192,34 +193,50 @@ class AffineRegistration(dj.Manual):
     affine_matrix           : longblob      # affine transformation matrix
     """
 
-    # def quality_control(self, mask=True):
-    #     """
-    #     Make quality control plots to check affine registration quality
-    #     Args:
-    #         mask: optional, if True, ReferenceImage mask will be applied
-    #     Returns: none
-    #     """
+    def load_registered_stack(self, start, end):
+        """
+        Loads a stack delimited by start, end and performs the affine transform
+        Returns: registered stack
+        """
+        if len(self) != 1:
+            raise Exception("A single file must be selected!")
 
-    def get_paths(self):
-        """
-        Return the path to the raw imaging file
-        Returns: str, path
-        """
-        return (RawImagingFile & AffineRegistration).get_paths()
+        p_file = (RawImagingFile & self).get_path()
+        affine_matrix = self.fetch1()["affine_matrix"]
+        # open file in memory mapped mode
+        memmap_file = tif.memmap(str(p_file))
+        # load chunk we need and close file
+        chunk = np.copy(memmap_file[start:end])
+        h, w = chunk.shape[1], chunk.shape[2]
+        del memmap_file
+        # spatial registration
+        for i, frame in enumerate(chunk):
+            chunk[i] = cv2.warpAffine(frame, affine_matrix, (h, w))
+        return chunk
 
 
 # @schema
-# class SmoothingKernel(dj.Manual):
-#     definition = """ # Integration of opencv-based smoothing kernels
-#     kernel_name             : varchar(128)  # name of the kernel
+# class Smoothing(dj.Manual):
+#     definition = """ # Class that implements various image processing methods
+#     kernel_name             : varchar(128)  # name of the kernel in the smoothing file. must adhere to python function naming conventions
 #     kernel_id               : int           # integer for counting different kernel parameters
-#
+#     ---
+#     kernel_params           : varchar(1024) # kernel parameters, should be a dict formatted as a .json style string
+#     kernel_description      : varchar(1024) # long description of what the smoothing function does
 #     """
-    # def generate_aligned_file(self):
-    #     """
-    #     Generates a spatially registered file in the location of the original file.
-    #     Returns: str, path to the registered file
-    #     """
+#     def smooth_stack(self, stack):
+#         """
+#         Performs smoothing on a stack of the form (N_frames, pixels_x, pixels_y), as a numpy array
+#         Each kernel has a corresponding function in mpanze_scripts/widefield/smoothing_functions.py
+#         Args:
+#             stack: input stack to be smoothed. numpy array of dtype uin16 or float32, with shape (frames, x, y)
+#         Returns: smoothed stack, of the same shape and dtype as stack
+#         """
+#         # check that a single kernel is selected
+#         if len(self) != 1:
+#             raise Exception("A single smoothing kernel must be selected!")
+
+
 # @schema
 # class SpatialAlignmentParameters(dj.Manual):
 #     definition = """ # Contains transformation matrix for spatially registering different imaging sessions
