@@ -26,8 +26,9 @@ schema = dj.schema('hheise_placecell', locals(), create_tables=True)
 @schema
 class PlaceCellParameter(dj.Manual):
     definition = """ # Parameters for place cell classification
-    place_cell_id   : smallint  # index for unique parameter set, base 0
+    place_cell_id       : smallint              # index for unique parameter set, base 0
     ----
+    description         : varchar(1024)         # Short description of the effect of this parameter set
     encoder_unit = 'raw': enum('raw', 'speed')  # Which value to use to determine resting frames (encoder data or cm/s)
     running_thresh = 3.0: float     # Running speed threshold under which a frame counts as "resting", calculated from
                                     # time points between the previous to the current frame.
@@ -62,7 +63,7 @@ class PlaceCellParameter(dj.Manual):
         # TODO: remove hard-coding of folder location
         REL_BACKUP_PATH = "Datajoint/manual_submissions"
 
-        identifier = f"placecell_{full_entry['place_cell_id']}_{full_entry['username']}_M{full_entry['mouse_id']}"
+        identifier = f"placecell_{full_entry['place_cell_id']}_{login.get_user()}"
 
         # save dictionary in a backup YAML file for faster re-population
         filename = os.path.join(login.get_neurophys_wahl_directory(), REL_BACKUP_PATH, identifier + '.yaml')
@@ -156,7 +157,7 @@ class TransientOnly(dj.Computed):
 
 @schema
 class Synchronization (dj.Computed):
-    definition = """ # Synchronized frame times binned to VR position
+    definition = """ # Synchronized frame times binned to VR position, one entry per trial
     -> hheise_behav.VRTrial
     -> PlaceCellParameter
     ------
@@ -171,6 +172,8 @@ class Synchronization (dj.Computed):
         Args:
             key: Primary keys of the current Segmentation() entry.
         """
+
+        # print('Populating Synchronization for {}'.format(key))
 
         # Load and calculate necessary parameters
         params = (PlaceCellParameter & key).fetch1()
@@ -227,20 +230,23 @@ class Synchronization (dj.Computed):
 
         # check that every bin has at least one frame in it
         if np.any(bin_frame_count == 0):
-            all_zero_idx = np.where(bin_frame_count == 0)
+            all_zero_idx = np.where(bin_frame_count == 0)[0]
             # if not, take a frame of the next bin. If the mouse is running that fast, the recorded calcium will lag
             # behind the actual activity in terms of mouse position, so spikes from a later time point will probably be
             # related to an earlier actual position. (or the previous bin in case its the last bin)
-            for i in range(len(all_zero_idx[0])):
-                zero_idx = (all_zero_idx[0][i], all_zero_idx[1][i])
-                if zero_idx[0] == 79 and bin_frame_count[78, zero_idx[1]] > 1:
-                    bin_frame_count[78, zero_idx[1]] -= 1
-                    bin_frame_count[79, zero_idx[1]] += 1
-                elif zero_idx[0] < 79 and bin_frame_count[zero_idx[0]+1, zero_idx[1]] > 1:
-                    bin_frame_count[zero_idx[0]+1, zero_idx[1]] -= 1
-                    bin_frame_count[zero_idx[0], zero_idx[1]] += 1
+            for zero_idx in all_zero_idx:
+                # If the bin with no frames is the last bin, take one frame from the second-last bin
+                if zero_idx == 79 and bin_frame_count[78] > 1:
+                    bin_frame_count[78] -= 1
+                    bin_frame_count[79] += 1
+                # Otherwise, take it from the next bin, but only if the next bin has more than 1 frame itself
+                elif zero_idx < 79 and bin_frame_count[zero_idx+1] > 1:
+                    bin_frame_count[zero_idx+1] -= 1
+                    bin_frame_count[zero_idx] += 1
+                # This error is raised if two consecutive bins have no frames
                 else:
-                    raise ValueError('No frame in these bins (#bin, #trial): {}'.format(*zip(zero_idx[0], zero_idx[1])))
+                    raise ValueError('Error in {}:\nNo frame in this bin, could not be corrected: {}'.format(key,
+                                                                                                             zero_idx))
 
         # Enter data into table
         self.insert1(dict(**key, running_mask=running_mask, aligned_frames=bin_frame_count))
