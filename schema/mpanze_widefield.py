@@ -134,13 +134,16 @@ class RawImagingFile(dj.Manual):
             paths.append(pathlib.Path(path_neurophys, path_session, path_file))
         return paths
 
-    def get_path(self):
+    def get_path(self, check_existence=False):
         """
         Construct full path to a raw imaging file.
         Method only works for single-element query.
         """
-        if len(self) == 1:
-            return self.get_paths()[0]
+        p = self.get_paths()[0]
+        if check_existence:
+            if not p.exists():
+                raise Exception("The file was not found at %s" % str(p))
+            return p
         else:
             raise Exception("This method only works for a single entry! For multiple entries use get_paths")
 
