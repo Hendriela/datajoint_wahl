@@ -6,6 +6,7 @@ from schema import common_mice
 from pathlib import Path
 import os
 from datetime import datetime
+from datetime import date as datetime_date
 from typing import Union
 
 schema = dj.schema('common_exp', locals(), create_tables=True)
@@ -115,7 +116,7 @@ class Session(dj.Manual):
         first_part = 'session_' + investigator_name + '_' + mouse_id_str
 
         # second: Transform datetime object to string, while removing the time stamp
-        if type(date) == datetime:
+        if type(date) == datetime or type(date) == datetime_date:
             date_str = date.strftime('%Y-%m-%d')
         else:
             date_str = date
@@ -138,7 +139,7 @@ class Session(dj.Manual):
             Relative path with the machine-specific Neurophysiology-DATA-Path removed
         """
 
-        cwd = Path(login.get_neurophys_data_directory())
+        cwd = Path(login.get_working_directory())
 
         # Typecast absolute path to a Path object to easily get parents
         if type(abs_path) == str:
