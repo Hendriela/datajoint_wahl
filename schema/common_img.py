@@ -775,8 +775,13 @@ class QualityControl(dj.Computed):
 
         self.insert1(new_entry)
 
-        # Remove mmap file again
-        (MemoryMappedFile & key).delete_mmap_file()
+        # delete MemoryMappedFile to save storage
+        try:
+            # Clean up movie variables to close mmap file for deletion
+            stack = None
+            (MemoryMappedFile & key).delete_mmap_file()
+        except PermissionError:
+            print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
 
         # log('Finished populating QualityControl for key: {}.'.format(key))
 
