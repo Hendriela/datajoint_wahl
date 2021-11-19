@@ -46,6 +46,8 @@ class PlaceCellParameter(dj.Manual):
     trans_time = 0.2    : float     # fraction of the (unbinned) signal while the mouse is located in the place field 
                                     # that should consist of significant transients
     split_size = 50     : int       # Number of frames in bootstrapping segments
+    min_bin_size        : int       # Min_pf_size transformed into number of bins (rounded up). Calculated before 
+                                    # insertion and raises an error if given by user.
     """
 
     def helper_insert1(self, entry: dict) -> None:
@@ -55,6 +57,16 @@ class PlaceCellParameter(dj.Manual):
         Args:
             entry: Content of the new PlaceCellParameter() entry.
         """
+
+        if (170 % entry['bin_length'] != 0) or (400 % entry['bin_length'] != 0):
+            print("Warning:\n\tParameter 'bin_length' = {} cm is not a divisor of common track lengths 170 and 400 cm."
+                  "\n\tProblems might occur in downstream analysis.".format(entry['bin_length']))
+
+        if not 'min_bin_size' in entry:
+            entry['min_bin_size'] = int(np.ceil(entry['min_pf_size'] / entry['bin_length']))
+        else:
+            raise KeyError("Parameter 'min_bin_size' will be calculated before insertion and should not be given by the"
+                           "user!")
 
         self.insert1(entry)
 
@@ -72,18 +84,60 @@ class PlaceCellParameter(dj.Manual):
 
 
 @schema
-class TransientOnly(dj.Computed):
-    definition = """ # Transient-only thresholded traces of dF/F traces
+class PCAnalysis(dj.Computed):
+    definition = """ # Session-wide parameters for combined VR and imaging analysis, like place cell analysis.  
     -> common_img.Segmentation
     -> PlaceCellParameter
     ------    
+    n_bins      : tinyint   # Number of VR position bins to combine data. Calculated from track length and bin length.
+    trial_mask  : longblob  # 1D bool array with length (nr_session_frames) holding the trial ID for each frame. 
+    """
+
+    def make(self, key: dict) -> None:
+        """
+        Compute metrics and parameters that are common for a whole session of combined VR imaging data.
+
+        Args:
+            key: Primary keys of the current Session() entry.
+        """
+
+        # Get current parameter set
+        params = (PlaceCellParameter & key).fetch1()
+
+        # Compute number of bins, depends on the track length and user-parameter bin_length
+        track_length = (hheise_behav.VRSession & key).fetch1('length')
+        if track_length % params['bin_length'] == 0:
+            n_bins = int(track_length / params['bin_length'])
+        else:
+            raise Exception('Bin_length has to be a divisor of track_length!')
+
+        ### Create trial_mask to split session-wide activity traces into trials
+
+        # Get frame counts for all trials of the current session
+        frame_count = (common_img.RawImagingFile & key).fetch('nr_frames')
+
+        # Make arrays of the trial's length with the trial's ID and concatenate them to one mask for the whole session
+        trial_masks = []
+        for idx, n_frame in enumerate(frame_count):
+            trial_masks.append(np.full(n_frame, idx))
+        trial_mask = np.concatenate(trial_masks)
+
+        # Enter data into table
+        self.insert1(dict(**key, n_bins=n_bins, trial_mask=trial_mask))
+
+
+@schema
+class TransientOnly(dj.Computed):
+    definition = """ # Transient-only thresholded traces of dF/F traces
+    -> PCAnalysis
+    ------
     time_transient = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
     """
 
     class ROI(dj.Part):
         definition = """ # Data of single neurons
         -> TransientOnly
-        mask_id : int        #  Mask index (as in Segmentation.ROI, base 0)
+        mask_id : smallint   #  Mask index (as in Segmentation.ROI, base 0)
         -----
         sigma   : float      # Noise level of dF/F determined by FWHM of Gaussian KDE (from Koay et al. 2019)
         trans   : longblob   # 1d array with shape (n_frames,) with transient-only thresholded dF/F
@@ -94,7 +148,7 @@ class TransientOnly(dj.Computed):
         Automatically threshold dF/F for all traces of Segmentation.ROI() using FWHM from Koay et al. (2019)
 
         Args:
-            key: Primary keys of the current Segmentation() entry.
+            key: Primary keys of the current PCAnalysis() (and by inheritance common_img.Segmentation()) entry.
         """
 
         print('Populating TransientOnly for {}'.format(key))
@@ -177,7 +231,6 @@ class Synchronization (dj.Computed):
 
         # Load and calculate necessary parameters
         params = (PlaceCellParameter & key).fetch1()
-        track_length = (hheise_behav.VRSession & key).fetch1('length')
         frame_count = (common_img.RawImagingFile & dict(**key, part=key['trial_id'])).fetch1('nr_frames')
 
         # The given attributes will be columns in the array, next to time stamp in col 0
@@ -185,11 +238,6 @@ class Synchronization (dj.Computed):
 
         if params['encoder_unit'] == 'speed':
             curr_speed = (hheise_behav.VRTrial & key).enc2speed()
-
-        if track_length % params['bin_length'] == 0:
-            params['n_bins'] = int(track_length / params['bin_length'])
-        else:
-            raise Exception('Bin_length has to be a divisor of track_length!')
 
         # Make mask with length n_frames that is False for frames where the mouse was stationary (or True everywhere if
         # exclude_rest = 0).

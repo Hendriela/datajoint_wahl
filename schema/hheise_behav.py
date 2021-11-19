@@ -446,7 +446,7 @@ class VRLog(dj.Imported):
 class VRTrial(dj.Computed):
     definition = """ # Aligned trials of VR behavioral data
     -> VRSession
-    trial_id            : tinyint           # Counter of the trial in the session, same as RawBehaviorFile()
+    trial_id            : tinyint           # Counter of the trial in the session, same as RawBehaviorFile(), base 0
     ---
     timestamp           : time              # Start time of the trial
     -> CorridorPattern
