@@ -4,7 +4,7 @@ import datajoint as dj
 import login
 import pathlib
 from schema import common_mice, common_exp
-from mpanze_scripts.widefield import utils
+from mpanze_scripts.widefield import utils, smoothing_functions
 import matplotlib.pyplot as plt
 import numpy as np
 import tifffile as tif
@@ -134,13 +134,17 @@ class RawImagingFile(dj.Manual):
             paths.append(pathlib.Path(path_neurophys, path_session, path_file))
         return paths
 
-    def get_path(self):
+    def get_path(self, check_existence=False):
         """
         Construct full path to a raw imaging file.
         Method only works for single-element query.
         """
+        p = self.get_paths()[0]
         if len(self) == 1:
-            return self.get_paths()[0]
+            if check_existence:
+                if not p.exists():
+                    raise Exception("The file was not found at %s" % str(p))
+            return p
         else:
             raise Exception("This method only works for a single entry! For multiple entries use get_paths")
 
@@ -215,26 +219,41 @@ class AffineRegistration(dj.Manual):
         return chunk
 
 
-# @schema
-# class Smoothing(dj.Manual):
-#     definition = """ # Class that implements various image processing methods
-#     kernel_name             : varchar(128)  # name of the kernel in the smoothing file. must adhere to python function naming conventions
-#     kernel_id               : int           # integer for counting different kernel parameters
-#     ---
-#     kernel_params           : varchar(1024) # kernel parameters, should be a dict formatted as a .json style string
-#     kernel_description      : varchar(1024) # long description of what the smoothing function does
-#     """
-#     def smooth_stack(self, stack):
-#         """
-#         Performs smoothing on a stack of the form (N_frames, pixels_x, pixels_y), as a numpy array
-#         Each kernel has a corresponding function in mpanze_scripts/widefield/smoothing_functions.py
-#         Args:
-#             stack: input stack to be smoothed. numpy array of dtype uin16 or float32, with shape (frames, x, y)
-#         Returns: smoothed stack, of the same shape and dtype as stack
-#         """
-#         # check that a single kernel is selected
-#         if len(self) != 1:
-#             raise Exception("A single smoothing kernel must be selected!")
+@schema
+class Smoothing(dj.Lookup):
+    definition = """ # Class that implements various image processing methods
+    kernel_name             : varchar(128)  # name of the kernel in the smoothing file. must adhere to python function naming conventions
+    kernel_id               : int           # integer for counting different kernel parameters
+    ---
+    kernel_params           : varchar(1024) # kernel parameters, should be a dict formatted as a .json style string
+    kernel_description      : varchar(1024) # long description of what the smoothing function does
+    """
+    contents = [{"kernel_name": "gaussian_blur_2d", "kernel_id": 0, "kernel_params": '{"size_x": 5, "size_y": 5}',
+                 "kernel_description": "applies gaussian blur in x and y axis frame by frame"}]
+
+    def smooth_stack(self, stack):
+        """
+        Performs smoothing on a stack of the form (N_frames, pixels_x, pixels_y), as a numpy array
+        Each kernel has a corresponding function in mpanze_scripts/widefield/smoothing_functions.py
+        Args:
+            stack: input stack to be smoothed. numpy array of dtype uin16 or float32, with shape (frames, x, y)
+        Returns: smoothed stack, of the same shape and dtype as stack
+        """
+        # check that a single kernel is selected
+        if len(self) != 1:
+            raise Exception("A single smoothing kernel must be selected!")
+        kernel = self.fetch1()
+        if kernel["kernel_name"] == "gaussian_blur_2d":
+            stack_blur = smoothing_functions.gaussian_blur_2d(stack, kernel["kernel_params"])
+        return stack_blur
+
+    def to_string(self):
+        # utility function for generating filenames
+        if len(self) != 1:
+            raise Exception("A single smoothing kernel must be selected!")
+        kernel = self.fetch1()
+        return kernel["kernel_name"] + "_" + "{:02d}".format(kernel["kernel_id"])
+
 
 
 # @schema
