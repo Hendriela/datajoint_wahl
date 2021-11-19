@@ -1204,10 +1204,12 @@ class Segmentation(dj.Computed):
 
         selected_rois = Segmentation.ROI() & self
 
-        if trace_type in ['dff', 'trace']:
+        if trace_type == 'dff':
             traces_list = selected_rois.fetch(trace_type, order_by='mask_id')
+        elif trace_type == 'trace':
+            # Todo: Implement fetch of raw traces stored externally in npy files
+            raise NotImplementedError("Fetching of raw traces not implemented yet.")
         else:  # decon
-
             # if no decon_id is given, check if there is a single correct one, otherwise error
             if decon_id is None:
                 decon_ids = (Deconvolution & self).fetch('decon_id')
