@@ -252,7 +252,7 @@ class Smoothing(dj.Lookup):
         if len(self) != 1:
             raise Exception("A single smoothing kernel must be selected!")
         kernel = self.fetch1()
-        return kernel["kernel_name"] + "{:02d}".format(kernel["kernel_id"])
+        return kernel["kernel_name"] + "_" + "{:02d}".format(kernel["kernel_id"])
 
 
 
