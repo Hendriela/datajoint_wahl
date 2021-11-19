@@ -139,7 +139,7 @@ class Session(dj.Manual):
             Relative path with the machine-specific Neurophysiology-DATA-Path removed
         """
 
-        cwd = Path(login.get_working_directory())
+        cwd = Path(login.get_neurophys_data_directory())
 
         # Typecast absolute path to a Path object to easily get parents
         if type(abs_path) == str:

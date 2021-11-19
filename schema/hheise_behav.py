@@ -495,7 +495,7 @@ class VRTrial(dj.Computed):
 
         Returns:
             A numpy array (# samples, # attributes + 1) with single attributes as columns, the common
-            time stamp as first column.
+                time stamp as first column.
         """
         if attr is None:
             attr = ['pos', 'lick', 'frame', 'enc', 'valve']
@@ -504,6 +504,24 @@ class VRTrial(dj.Computed):
         data = self.fetch1(*attr)
         time = self.get_timestamps()
         return np.vstack((time, *data)).T
+
+    def get_arrays(self, attr: Iterable[str] = None) -> List[np.ndarray]:
+        """
+        Wrapper function of self.get_array() for more than one trial. Returns list of arrays of queried entries.
+
+        Args:
+            attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
+
+        Returns:
+            A list of ndarrays (# samples, # attributes + 1) with single attributes as columns, the common
+                time stamp as first column.
+        """
+
+        trial_ids = self.fetch('trial_id')
+        data = [(self & {'trial_id': trial_id}).get_array(attr) for trial_id in trial_ids]
+
+        return data
+
 
     def get_timestamps(self) -> np.ndarray:
         """
