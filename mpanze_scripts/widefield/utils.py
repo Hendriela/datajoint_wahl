@@ -127,3 +127,32 @@ def dcimg_to_tiff_chunks(path, chunk_size_GB = 4):
     tif_file_out.close()
     print("file saved at %s" % str(save_path))
     return str(save_path)
+
+
+def frame_timestamps_from_txt_file(path_sync):
+    data_sync = np.loadtxt(path_sync, skiprows=1, delimiter='\t')
+    t_sample = data_sync[:, 0]
+    widefield = data_sync[:, 1]
+
+    # convert trigger trace to nice square wave
+    widefield_thresh = (widefield > 0).astype(np.float64)
+    diff = np.diff(widefield_thresh)
+
+    # identify frame timestamps, by averaging timestamps when camera has active exposure
+    frames = []
+    sequence = []
+    for i in range(len(t_sample[1:])):
+        if diff[i] == -1:
+            sequence = np.array(sequence)
+            frames.append(np.mean(sequence[sequence != 0]))
+            sequence = []
+        sequence.append(widefield_thresh[1:][i] * t_sample[1:][i])
+
+    # discard first 2 "frames", which are due to camera starting up, not actual data acquisition
+    frames_widefield = np.array(frames[2:])
+    diff = np.diff(frames_widefield)
+    diff_mean = np.mean(diff)
+    diff_std = np.std(diff)
+    fps = 1/diff_mean
+
+    return frames_widefield, diff_mean, diff_std, fps
