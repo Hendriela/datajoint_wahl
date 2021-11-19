@@ -280,17 +280,37 @@ class ProcessedMappingFile(dj.Computed):
             raise Exception("This method only works for a single entry! For multiple entries use get_paths")
 
 
-# class ProcessedMappingFile(dj.Computed):
-#     definition = """ # Computes and saves aligned,smoothed, pixelwise DF/F as a tiff file.
-#     -> MappingInfo
-#     ---
-#     n_frames_pre                    : int        # number of pre stim (baseline) frames
-#     n_frames_stim                   : int        # number of frames while the stimulus is active
-#     n_frames_post                   : int        # number of frames post stimulation
-#     n_frames_trial                  : int        # total number of frames in a trial
-#     -> mpanze_widefield.SmoothingKernel
-#     imaging_fps                     : float      # detected frames per second from sync path
-#     frame_timestamps                : longblob   # (repeats x n_frames_trial) matrix of frame timestamps in seconds
-#     frames_indices                  : longblob   # (repeats x n_frames_trial) matrix of frame indices in tiff file
-#     filename_processed              : varchar(512)  # name of the pre-processed file, relative to the session folder
-#     """
+@schema
+class AverageMappingTrial(dj.Computed):
+    definition = """ # Averages the processed mapping files over trials
+    -> ProcessedMappingFile
+    ---
+    filename_mapping_average        : varchar(512)      # name of the pre-processed file, relative to the session folder
+    """
+    def make(self, key):
+        # get path
+        p_file = (ProcessedMappingFile & key).get_path(check_existence=True)
+        # retrieve processing info
+        proc = (ProcessedMappingFile & key).fetch1()
+        # load memmaped processed file
+        tif_memmap = memmap(str(p_file))
+        # create variable to store sum of dff
+        n_frames_trial, n_trials = proc["n_frames_trial"], proc["n_trials"]
+        sum_dff = np.zeros((n_frames_trial, tif_memmap.shape[2], tif_memmap.shape[3]), dtype=np.float32)
+
+        # iterate over trials
+        for i in range(n_trials):
+            sum_dff += tif_memmap[i]
+        sum_dff = sum_dff/n_trials
+        del tif_memmap
+
+        # save file as .tif
+        new_p_file = str(p_file.with_suffix("")) + "_mean.tif"
+        filename_processed = str(pathlib.Path(new_p_file).stem) + ".tif"
+        tif_file_out = TiffWriter(new_p_file, bigtiff=True)
+        tif_file_out.write(sum_dff)
+        tif_file_out.close()
+
+        # new key
+        key["filename_mapping_average"] = filename_processed
+        self.insert1(key)
