@@ -432,8 +432,8 @@ class MotionCorrection(dj.Computed):
     shifts               : longblob     # 2d array (xy, nr_frames) of shift
     x_std                : float        # Standard deviation of shifts in x (left/right)
     y_std                : float        # Standard deviation of shifts in y (top/bottom)
-    x_max                : int          # Maximal shift in x
-    y_max                : int          # Maximal shift in y
+    x_max                : smallint     # Maximal shift in x
+    y_max                : smallint     # Maximal shift in y
     template             : longblob     # 2d image of used template
     template_correlation : longblob     # 1d array (nr_frames) with correlations with the template
     outlier_frames       : longblob     # 1d array with detected outlier in motion correction
@@ -762,16 +762,16 @@ class QualityControl(dj.Computed):
         stack = cm.load(mmap_file)
 
         new_entry = dict(**key,
-                         avg_image=np.mean(stack, axis=0),
-                         std_image=np.std(stack, axis=0),
-                         min_image=np.min(stack, axis=0),
-                         max_image=np.max(stack, axis=0),
-                         percentile_999_image=np.percentile(stack, 99.9, axis=0),
-                         mean_time=np.mean(stack, axis=(1, 2)),
+                         avg_image=np.mean(stack, axis=0, dtype=np.float16),
+                         std_image=np.std(stack, axis=0, dtype=np.float16),
+                         min_image=np.min(stack, axis=0, dtype=np.float16),
+                         max_image=np.max(stack, axis=0, dtype=np.float16),
+                         percentile_999_image=np.percentile(stack, 99.9, axis=0, dtype=np.float16),
+                         mean_time=np.mean(stack, axis=(1, 2), dtype=np.float16),
                          )
 
         # calculate correlation with 8 neighboring pixels in parallel
-        new_entry['cor_image'] = motion_correction.parallel_all_neighbor_correlations(stack)
+        new_entry['cor_image'] = np.array(motion_correction.parallel_all_neighbor_correlations(stack), dtype=np.float16)
 
         self.insert1(new_entry)
 
@@ -917,7 +917,7 @@ class Segmentation(dj.Computed):
     -> MotionCorrection
     -> CaimanParameter
     ------
-    nr_masks                        : int           # Number of total detected masks in this FOV (includes rejected masks)
+    nr_masks                        : smallint      # Number of total detected masks in this FOV (includes rejected masks)
     target_dim                      : longblob      # Tuple (dim_y, dim_x) to reconstruct mask from linearized index
     s_background                    : longblob      # Spatial background component(s) weight mask (dim_y, dim_x, nb) 
     f_background                    : longblob      # Background fluorescence (nb, nr_frames)
@@ -929,7 +929,7 @@ class Segmentation(dj.Computed):
     class ROI(dj.Part):
         definition = """ # Data from mask created by Caiman
         -> Segmentation
-        mask_id : int           #  Mask index, per area (base 0)
+        mask_id  : smallint     #  Mask index (base 0)
         -----
         pixels   : longblob     # Linearized indices of non-zero values
         weights  : longblob     # Corresponding values at the index position
@@ -1236,7 +1236,6 @@ class Segmentation(dj.Computed):
             return traces
 
         else:  # include mask_id as well
-            # TODO: return area as well if this is requested
             mask_ids = selected_rois.fetch('mask_id', order_by='mask_id')
             return traces, mask_ids
 
