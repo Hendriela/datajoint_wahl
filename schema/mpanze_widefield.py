@@ -140,9 +140,10 @@ class RawImagingFile(dj.Manual):
         Method only works for single-element query.
         """
         p = self.get_paths()[0]
-        if check_existence:
-            if not p.exists():
-                raise Exception("The file was not found at %s" % str(p))
+        if len(self) == 1:
+            if check_existence:
+                if not p.exists():
+                    raise Exception("The file was not found at %s" % str(p))
             return p
         else:
             raise Exception("This method only works for a single entry! For multiple entries use get_paths")
@@ -246,7 +247,12 @@ class Smoothing(dj.Lookup):
             stack_blur = smoothing_functions.gaussian_blur_2d(stack, kernel["kernel_params"])
         return stack_blur
 
-
+    def to_string(self):
+        # utility function for generating filenames
+        if len(self) != 1:
+            raise Exception("A single smoothing kernel must be selected!")
+        kernel = self.fetch1()
+        return kernel["kernel_name"] + "{:02d}".format(kernel["kernel_id"])
 
 
 
