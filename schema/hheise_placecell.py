@@ -206,7 +206,7 @@ class TransientOnly(dj.Computed):
             part_entries.append(new_part)
 
         # Enter part-table entries
-        self.ROI.insert(part_entries)
+        self.ROI().insert(part_entries)
 
 
 @schema
@@ -298,4 +298,95 @@ class Synchronization (dj.Computed):
 
         # Enter data into table
         self.insert1(dict(**key, running_mask=running_mask, aligned_frames=bin_frame_count))
+
+
+@schema
+class BinnedActivity(dj.Computed):
+    definition = """ # Spatially binned dF/F traces to VR position, one entry per trial
+    -> Synchronization
+    ------
+    time_bin_act = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
+    """
+
+    class ROI(dj.Part):
+        definition = """ # Data of single neurons
+        -> BinnedActivity
+        mask_id         : int       # Mask index (as in Segmentation.ROI, base 0)
+        -----
+        bin_activity   : longblob   # Array with shape (n_bins), spatially binned single-trial dF/F trace
+        bin_spikes     : longblob   # Same as bin_activity, but with estimated CASCADE spike probabilities
+        bin_spikerate  : longblob   # Same as bin_activity, but with estimated CASCADE spikerates 
+        """
+
+    def make(self, key: dict) -> None:
+        """
+        Spatially bin dF/F trace of every trial for each neuron and thus align it to VR position.
+
+        Args:
+            key: Primary keys of the current Synchronization() entry (one per trial).
+        """
+
+        # from scipy.ndimage.filters import gaussian_filter1d
+
+        print('Populating BinnedActivity for {}'.format(key))
+
+        # Fetch activity traces and parameter sets
+        traces, unit_ids = (common_img.Segmentation & key).get_traces(include_id=True)
+        spikes = (common_img.Segmentation & key).get_traces(trace_type='decon')
+        n_bins = (PCAnalysis & key).fetch1('n_bins')
+        trial_mask = (PCAnalysis & key).fetch1('trial_mask')
+        running_mask = (Synchronization & key).fetch1('running_mask')
+        bin_frame_count = (Synchronization & key).fetch1('aligned_frames')
+
+        # Create bin mask from frame counts
+        bin_masks = []
+        for idx, n_frames in enumerate(bin_frame_count):
+            bin_masks.append(np.full(n_frames, idx))
+        bin_mask = np.concatenate(bin_masks)
+
+        # Enter master table entry
+        self.insert1(key)
+
+        # Create part table entries
+        part_entries = []
+        for unit_id, trace, spike in zip(unit_ids, traces, spikes):
+
+            # Get section of current trial from the trace
+            trial_trace = trace[trial_mask == key['trial_id']]
+            trial_spike = spike[trial_mask == key['trial_id']]
+
+            # Filter out non-running frames
+            trial_trace = trial_trace[running_mask]
+            trial_spike = trial_spike[running_mask]
+
+            # Iteratively for all bins, average trace and sum spike probabilities
+            binned_trace = np.zeros(n_bins)
+            binned_spike = np.zeros(n_bins)
+            for bin_idx in range(n_bins):
+                bin_trace = trial_trace[bin_mask == bin_idx]
+                bin_spike = trial_spike[bin_mask == bin_idx]
+
+                if len(bin_trace):       # Test if there is data for the current bin, otherwise raise error
+                    binned_trace[bin_idx] = np.mean(bin_trace)
+                    # sum instead of mean (CASCADE's spike probability is cumulative)
+                    binned_spike[bin_idx] = np.nansum(bin_spike)
+                else:
+                    raise IndexError("Entry {}:\n\tNeuron {}, in {} returned empty array, "
+                                     "could not bin trace.".format(key, unit_id, bin_idx))
+
+            # Smooth average spike rate and transform values into mean firing rates by dividing by the time in s
+            # occupied by the bin (from number of samples * sampling rate)
+
+            # Todo: Discuss if smoothing the binned spikes across spatial bins (destroying temporal resolution) is
+            #  actually necessary
+            # smooth_binned_spike = gaussian_filter1d(binned_spike, 1)
+            binned_spikerate = binned_spike/(bin_frame_count / (common_img.ScanInfo & key).fetch1('fr'))
+
+            part_entries.append(dict(**key, mask_id=unit_id,
+                                     bin_activity=np.array(binned_trace, dtype=np.float32),
+                                     bin_spikes=np.array(binned_spike, dtype=np.float32),
+                                     bin_spikerate=np.array(binned_spikerate, dtype=np.float32)))
+
+        self.ROI().insert(part_entries)
+
 
