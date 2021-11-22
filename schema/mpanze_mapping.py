@@ -287,6 +287,36 @@ class AverageMappingTrial(dj.Computed):
     ---
     filename_mapping_average        : varchar(512)      # name of the pre-processed file, relative to the session folder
     """
+
+    def get_paths(self):
+        """Construct full paths to average processed imaging files"""
+        path_neurophys = login.get_working_directory()  # get data directory path on local machine
+        # find sessions corresponding to current files
+        sessions = (self * common_exp.Session())
+
+        # iterate over sessions
+        paths = []
+        for session in sessions:
+            # obtain full path
+            path_session = session["session_path"]
+            path_file = session["filename_mapping_average"]
+            paths.append(pathlib.Path(path_neurophys, path_session, path_file))
+        return paths
+
+    def get_path(self, check_existence=False):
+        """
+        Construct full path to a processed average imaging file.
+        Method only works for single-element query.
+        """
+        p = self.get_paths()[0]
+        if len(self) == 1:
+            if check_existence:
+                if not p.exists():
+                    raise Exception("The file was not found at %s" % str(p))
+            return p
+        else:
+            raise Exception("This method only works for a single entry! For multiple entries use get_paths")
+
     def make(self, key):
         # get path
         p_file = (ProcessedMappingFile & key).get_path(check_existence=True)
