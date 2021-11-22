@@ -46,6 +46,8 @@ class PlaceCellParameter(dj.Manual):
     trans_time = 0.2    : float     # fraction of the (unbinned) signal while the mouse is located in the place field 
                                     # that should consist of significant transients
     split_size = 50     : int       # Number of frames in bootstrapping segments
+    min_bin_size        : int       # Min_pf_size transformed into number of bins (rounded up). Calculated before 
+                                    # insertion and raises an error if given by user.
     """
 
     def helper_insert1(self, entry: dict) -> None:
@@ -55,6 +57,16 @@ class PlaceCellParameter(dj.Manual):
         Args:
             entry: Content of the new PlaceCellParameter() entry.
         """
+
+        if (170 % entry['bin_length'] != 0) or (400 % entry['bin_length'] != 0):
+            print("Warning:\n\tParameter 'bin_length' = {} cm is not a divisor of common track lengths 170 and 400 cm."
+                  "\n\tProblems might occur in downstream analysis.".format(entry['bin_length']))
+
+        if not 'min_bin_size' in entry:
+            entry['min_bin_size'] = int(np.ceil(entry['min_pf_size'] / entry['bin_length']))
+        else:
+            raise KeyError("Parameter 'min_bin_size' will be calculated before insertion and should not be given by the"
+                           "user!")
 
         self.insert1(entry)
 
@@ -72,18 +84,60 @@ class PlaceCellParameter(dj.Manual):
 
 
 @schema
-class TransientOnly(dj.Computed):
-    definition = """ # Transient-only thresholded traces of dF/F traces
+class PCAnalysis(dj.Computed):
+    definition = """ # Session-wide parameters for combined VR and imaging analysis, like place cell analysis.  
     -> common_img.Segmentation
     -> PlaceCellParameter
     ------    
+    n_bins      : tinyint   # Number of VR position bins to combine data. Calculated from track length and bin length.
+    trial_mask  : longblob  # 1D bool array with length (nr_session_frames) holding the trial ID for each frame. 
+    """
+
+    def make(self, key: dict) -> None:
+        """
+        Compute metrics and parameters that are common for a whole session of combined VR imaging data.
+
+        Args:
+            key: Primary keys of the current Session() entry.
+        """
+
+        # Get current parameter set
+        params = (PlaceCellParameter & key).fetch1()
+
+        # Compute number of bins, depends on the track length and user-parameter bin_length
+        track_length = (hheise_behav.VRSession & key).fetch1('length')
+        if track_length % params['bin_length'] == 0:
+            n_bins = int(track_length / params['bin_length'])
+        else:
+            raise Exception('Bin_length has to be a divisor of track_length!')
+
+        ### Create trial_mask to split session-wide activity traces into trials
+
+        # Get frame counts for all trials of the current session
+        frame_count = (common_img.RawImagingFile & key).fetch('nr_frames')
+
+        # Make arrays of the trial's length with the trial's ID and concatenate them to one mask for the whole session
+        trial_masks = []
+        for idx, n_frame in enumerate(frame_count):
+            trial_masks.append(np.full(n_frame, idx))
+        trial_mask = np.concatenate(trial_masks)
+
+        # Enter data into table
+        self.insert1(dict(**key, n_bins=n_bins, trial_mask=trial_mask))
+
+
+@schema
+class TransientOnly(dj.Computed):
+    definition = """ # Transient-only thresholded traces of dF/F traces
+    -> PCAnalysis
+    ------
     time_transient = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
     """
 
     class ROI(dj.Part):
         definition = """ # Data of single neurons
         -> TransientOnly
-        mask_id : int        #  Mask index (as in Segmentation.ROI, base 0)
+        mask_id : smallint   #  Mask index (as in Segmentation.ROI, base 0)
         -----
         sigma   : float      # Noise level of dF/F determined by FWHM of Gaussian KDE (from Koay et al. 2019)
         trans   : longblob   # 1d array with shape (n_frames,) with transient-only thresholded dF/F
@@ -94,7 +148,7 @@ class TransientOnly(dj.Computed):
         Automatically threshold dF/F for all traces of Segmentation.ROI() using FWHM from Koay et al. (2019)
 
         Args:
-            key: Primary keys of the current Segmentation() entry.
+            key: Primary keys of the current PCAnalysis() (and by inheritance common_img.Segmentation()) entry.
         """
 
         print('Populating TransientOnly for {}'.format(key))
@@ -152,7 +206,7 @@ class TransientOnly(dj.Computed):
             part_entries.append(new_part)
 
         # Enter part-table entries
-        self.ROI.insert(part_entries)
+        self.ROI().insert(part_entries)
 
 
 @schema
@@ -177,7 +231,6 @@ class Synchronization (dj.Computed):
 
         # Load and calculate necessary parameters
         params = (PlaceCellParameter & key).fetch1()
-        track_length = (hheise_behav.VRSession & key).fetch1('length')
         frame_count = (common_img.RawImagingFile & dict(**key, part=key['trial_id'])).fetch1('nr_frames')
 
         # The given attributes will be columns in the array, next to time stamp in col 0
@@ -185,11 +238,6 @@ class Synchronization (dj.Computed):
 
         if params['encoder_unit'] == 'speed':
             curr_speed = (hheise_behav.VRTrial & key).enc2speed()
-
-        if track_length % params['bin_length'] == 0:
-            params['n_bins'] = int(track_length / params['bin_length'])
-        else:
-            raise Exception('Bin_length has to be a divisor of track_length!')
 
         # Make mask with length n_frames that is False for frames where the mouse was stationary (or True everywhere if
         # exclude_rest = 0).
@@ -250,4 +298,95 @@ class Synchronization (dj.Computed):
 
         # Enter data into table
         self.insert1(dict(**key, running_mask=running_mask, aligned_frames=bin_frame_count))
+
+
+@schema
+class BinnedActivity(dj.Computed):
+    definition = """ # Spatially binned dF/F traces to VR position, one entry per trial
+    -> Synchronization
+    ------
+    time_bin_act = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
+    """
+
+    class ROI(dj.Part):
+        definition = """ # Data of single neurons
+        -> BinnedActivity
+        mask_id         : int       # Mask index (as in Segmentation.ROI, base 0)
+        -----
+        bin_activity   : longblob   # Array with shape (n_bins), spatially binned single-trial dF/F trace
+        bin_spikes     : longblob   # Same as bin_activity, but with estimated CASCADE spike probabilities
+        bin_spikerate  : longblob   # Same as bin_activity, but with estimated CASCADE spikerates 
+        """
+
+    def make(self, key: dict) -> None:
+        """
+        Spatially bin dF/F trace of every trial for each neuron and thus align it to VR position.
+
+        Args:
+            key: Primary keys of the current Synchronization() entry (one per trial).
+        """
+
+        # from scipy.ndimage.filters import gaussian_filter1d
+
+        print('Populating BinnedActivity for {}'.format(key))
+
+        # Fetch activity traces and parameter sets
+        traces, unit_ids = (common_img.Segmentation & key).get_traces(include_id=True)
+        spikes = (common_img.Segmentation & key).get_traces(trace_type='decon')
+        n_bins = (PCAnalysis & key).fetch1('n_bins')
+        trial_mask = (PCAnalysis & key).fetch1('trial_mask')
+        running_mask = (Synchronization & key).fetch1('running_mask')
+        bin_frame_count = (Synchronization & key).fetch1('aligned_frames')
+
+        # Create bin mask from frame counts
+        bin_masks = []
+        for idx, n_frames in enumerate(bin_frame_count):
+            bin_masks.append(np.full(n_frames, idx))
+        bin_mask = np.concatenate(bin_masks)
+
+        # Enter master table entry
+        self.insert1(key)
+
+        # Create part table entries
+        part_entries = []
+        for unit_id, trace, spike in zip(unit_ids, traces, spikes):
+
+            # Get section of current trial from the trace
+            trial_trace = trace[trial_mask == key['trial_id']]
+            trial_spike = spike[trial_mask == key['trial_id']]
+
+            # Filter out non-running frames
+            trial_trace = trial_trace[running_mask]
+            trial_spike = trial_spike[running_mask]
+
+            # Iteratively for all bins, average trace and sum spike probabilities
+            binned_trace = np.zeros(n_bins)
+            binned_spike = np.zeros(n_bins)
+            for bin_idx in range(n_bins):
+                bin_trace = trial_trace[bin_mask == bin_idx]
+                bin_spike = trial_spike[bin_mask == bin_idx]
+
+                if len(bin_trace):       # Test if there is data for the current bin, otherwise raise error
+                    binned_trace[bin_idx] = np.mean(bin_trace)
+                    # sum instead of mean (CASCADE's spike probability is cumulative)
+                    binned_spike[bin_idx] = np.nansum(bin_spike)
+                else:
+                    raise IndexError("Entry {}:\n\tNeuron {}, in {} returned empty array, "
+                                     "could not bin trace.".format(key, unit_id, bin_idx))
+
+            # Smooth average spike rate and transform values into mean firing rates by dividing by the time in s
+            # occupied by the bin (from number of samples * sampling rate)
+
+            # Todo: Discuss if smoothing the binned spikes across spatial bins (destroying temporal resolution) is
+            #  actually necessary
+            # smooth_binned_spike = gaussian_filter1d(binned_spike, 1)
+            binned_spikerate = binned_spike/(bin_frame_count / (common_img.ScanInfo & key).fetch1('fr'))
+
+            part_entries.append(dict(**key, mask_id=unit_id,
+                                     bin_activity=np.array(binned_trace, dtype=np.float32),
+                                     bin_spikes=np.array(binned_spike, dtype=np.float32),
+                                     bin_spikerate=np.array(binned_spikerate, dtype=np.float32)))
+
+        self.ROI().insert(part_entries)
+
 
