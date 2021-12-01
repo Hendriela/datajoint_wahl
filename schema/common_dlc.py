@@ -1,14 +1,18 @@
-""" Schema for processing video files using deeplabcut"""
+"""
+Schema for processing video files using deeplabcut
+Adapted from Adrain Hoffmann's pipeline
+"""
 
 import datajoint as dj
-from . import common_exp as exp #, img
-
-# from .utils.common import log    # standardized logging
-# from .utils import analysis
-
-import login
+import deeplabcut
 import os
 import numpy as np
+import login
+import pathlib
+from schema import common_exp
+import cv2
+login.connect()
+
 
 schema = dj.schema('common_dlc', locals(), create_tables=True)
 
@@ -22,43 +26,23 @@ class CameraPosition(dj.Lookup):
     definition = """ # Lookup table for camera positions
     camera_position : varchar(128)
     ---
-    details : varchar(1048)
+    position_details : varchar(1048)
     """
     contents = [
-        ['Closeup_Face', '12mm objective with closeup of the face'],
-        ['Far_Whole_Mouse', '50mm objective from far with the whole mouse in frame'],
-        ['Face_and_Body', 'Face in focus with part of the body slightly defocussed, pupil also visible'],
+        ['Right_Forelimb_Side_View', 'camera placed orthogonally, with view of right forelimb from hand to shoulder'],
+        ['Right_Forelimb_Front_View',
+         'camera recording the mouse front-on, with focus between the resting position and the joystick']
     ]
 
 
 @schema
 class Video(dj.Manual):
     definition = """ # Info about the acquired video
-    -> exp.Session
-    camera_nr = 0 : int          # Additional key for multiple cameras at once
-    ---
+    -> common_exp.Session
     -> CameraPosition
-    frame_rate : int             # Selected frame rate of the recording
+    ---
     """
 
-    # def get_video_object(self, with_time=True):
-    #     """ Returns an object of utils.video.BodyVideo to access frames from videos
-    #     To get a specific frame, use video_object.get_frame(frame_nr)
-    #     Adrian 2020-12-14 """
-    #
-    #     video_paths = (RawVideoFile & self).get_paths()
-    #
-    #     # optional include video time
-    #     if with_time:
-    #         video_time = (VideoTime & self).fetch1('video_time')
-    #     else:
-    #         video_time = None
-    #
-    #     # create the BodyVideo object to hide multiple part files from user
-    #     from .utils import video
-    #     video_object = video.BodyVideo(video_paths=video_paths, video_time=video_time)
-    #
-    #     return video_object
 
 @schema
 class RawVideoFile(dj.Manual):
@@ -66,228 +50,130 @@ class RawVideoFile(dj.Manual):
     -> Video
     part = 0   : int           # Counter of video parts, base 0
     ---
-    file_name  : varchar(256)  # Name of the video file
+    filename_video  : varchar(256)  # Name of the video file, relative to session folder
     """
 
-    def get_path(self):
-        """Return the absolute path of the file on the current system"""
-
-        if len(self) != 1:
-            raise Exception('Only videos with a single part can use the get_path(), ' +\
-                            'not with {} parts. Use get_paths instead.'.format(len(self)) )
-
-        base_directory = login.get_neurophys_directory()
-        folder = ( exp.Session() & self).fetch1('id')
-        file = self.fetch1('file_name')
-
-        return os.path.join( base_directory, folder, file )
-
     def get_paths(self):
-        """Returns list of paths from multiple video parts from the same recording """
+        """Construct full paths to raw video files"""
+        path_neurophys = login.get_working_directory()  # get data directory path on local machine
+        # find sessions corresponding to current files
+        sessions = (self * common_exp.Session())
 
-        # sanity check that all video parts are from the same session
-        if len( exp.Session() & self ) != 1:
-            raise Warning('This call of RawVideoFiles.get_paths resulted in videos ' +\
-                          'from not exactly one session, but {}'.format(len( exp.Session() & self )))
+        # iterate over sessions
+        paths = []
+        for session in sessions:
+            # obtain full path
+            path_session = session["session_path"]
+            path_file = session["filename_video"]
+            paths.append(pathlib.Path(path_neurophys, path_session, path_file))
+        return paths
 
-        path_list = list()
-        for part_key in self.fetch('KEY', order_by='part'):
-            path_list.append( (RawVideoFile & part_key).get_path() )
-
-        return path_list
-
-    # def get_raw_data(self):
-    #     """Return the video data as numpy array (frames, height, width)
-    #     Returns
-    #     -------
-    #     video_frames : 3d numpy array
-    #         All frames in shape (frames, height, width)
-    #     # TODO: select only a subset of frames
-    #     # TODO: write better ways to access the video with new table
-    #     Adrian 2019-08-19
-    #     """
-    #
-    #     # load video
-    #     import pims    # if this throws error: pip install pims
-    #     path = self.get_path()
-    #     video = pims.Video( path )
-    #
-    #     # prepare numpy array to hold the video data
-    #     nr_frames = video.reader.get_length()
-    #     example_frame = np.array(video.get_frame( 0 ))[:,:,0]   # only gray scale
-    #     height, width = example_frame.shape
-    #
-    #     video_frames = np.zeros( (nr_frames, height, width), dtype=np.uint8 )
-    #
-    #     for i in range( nr_frames ):
-    #         video_frames[i,:,:] = np.array( video.get_frame( i ))[:,:,0]   # only gray scale
-    #
-    #     return video_frames
+    def get_path(self, check_existence=False):
+        """
+        Construct full path to a raw video file.
+        Method only works for single-element query.
+        Args:
+            check_existence: is True, method throws an exception if the file does not exist
+        """
+        if len(self) == 1:
+            p = self.get_paths()[0]
+            if check_existence:
+                if not p.exists():
+                    raise Exception("The file was not found at %s" % str(p))
+            return p
+        else:
+            raise Exception("This method only works for a single entry! For multiple entries use get_paths")
 
 
 @schema
 class VideoInfo(dj.Computed):
-    definition = """ # Additional automatically generated information about the video
+    definition = """ # Info about video from file metadata
     -> Video
     ---
-    nr_frames      : int     # Number of frames in the video
-    width          : int     # Width of frame in pixel
-    height         : int     # Height of each frame in pixel
-    # Add: dropped_frames : int     # Number of dropped frames
+    nr_frames      : int        # Number of frames in the video
+    width          : int        # Width of frame in pixel
+    height         : int        # Height of each frame in pixel
+    fps            : float      # Recording's frames per second
+    bitrate        : float      # Video bitrate in kb/s
+    first_frame    : longblob   # first frame of the video
     """
-
-    class ExampleFrame(dj.Part):
-        definition = """ # Example frames of the video in external storage
-        -> master
-        ---
-        example_frame : longblob    # (width, height) example frame
-        """
 
     def make(self, key):
         """ Populate the VideoInfo and ExampleFrame tables
         Adrian 2019-08-19
         """
-        # Todo: set up logging for us
-        # log('Populating VideoInfo for key: {}'.format(key))
+        # open file
+        video_path = (RawVideoFile & key).get_path(check_existence=True)
+        cap = cv2.VideoCapture(str(video_path))
 
-        video_obj = (RawVideoFile() & key).get_video_object()
+        # get properties from cv2 video object
+        nr_frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        bitrate = cap.get(cv2.CAP_PROP_BITRATE)
+        ret, first_frame = cap.read()
+        cap.release()
 
-        # get info about video
-        nr_frames = video_obj.nr_frames
-        example_frame = video_obj.get_frame(100)
-        height, width = example_frame.shape
-
-        entry_info = dict( **key,
-                            nr_frames = nr_frames,
-                            width = width,
-                            height = height)
-
-        entry_example = dict( **key,
-                                example_frame = example_frame)
+        # insert new entries into dict
+        entry_info = {**key, "nr_frames": nr_frames, "width": width, "height": height, "fps": fps, "bitrate": bitrate,
+                      "first_frame": first_frame}
 
         # insert the entries in the table (master first, then part)
-        self.insert1( entry_info )
-        VideoInfo.ExampleFrame.insert1( entry_example )
+        self.insert1(entry_info)
 
-        # log('Finished populating VideoInfo for key: {}'.format(key))
 
 @schema
-class LEDLocation(dj.Manual):
-    definition = """ # Location of the synchronization LED in the video
+class FrameCountVideoTimeFile(dj.Manual):
+    definition = """ # Binary file (.bin) containing time-stamped frame counts for synchronisation
     -> Video
     -----
-    led_left  : int    # LED position from the left side of the frame in pixel (dim 2)
-    led_top   : int    # LED position from the top of the frame in pixel (dim 1)
-    led_width : int    # Width of LED in pixel
+    filename_binary : varchar(128)        # filename of synchronisation file relative to session folder
     """
 
-    # to enter the location of the LED, use the GUI provided in:
-    #                pipeline_populate_behvior.ipynb
+    def get_paths(self):
+        """Construct full paths to raw synchronisation files"""
+        path_neurophys = login.get_working_directory()  # get data directory path on local machine
+        # find sessions corresponding to current files
+        sessions = (self * common_exp.Session())
 
-@schema
-class RawVideoTimeFile(dj.Manual):
-    definition = """ # File name of the recorded exposure on signal from camera (only for recordings > 2020-10-20)
-    -> Video
-    -----
-    file_name : varchar(128)        # File name, use function get_path for path on your machine
-    """
+        # iterate over sessions
+        paths = []
+        for session in sessions:
+            # obtain full path
+            path_session = session["session_path"]
+            path_file = session["filename_binary"]
+            paths.append(pathlib.Path(path_neurophys, path_session, path_file))
+        return paths
 
-    def get_path(self):
-        """Return the absolute path of the file on the current system"""
-        return os.path.join( (exp.Session & self).get_folder(), self.fetch1('file_name') )
-    def get_raw_data(self):
-        """ Return data of the file (1d array) """
-        # Signal sampled at 1kHz with onset together with other behavioral variables
-        path = self.get_path()
-        return np.fromfile( path, dtype='>d')
-
-
-@schema
-class VideoTime(dj.Computed):
-    definition = """ # Time of the video recording from blinking LED
-    -> Video
-    --------
-    avg_frame_rate  : float         # Measured average frame rate
-    video_time      : longblob      # 1d array, time of each frame in seconds of behavior PC
-    """
-
-    def make(self, key):
-        """Automatically populate the VideoTime (old: from LED, new: from exposure times file)
-        Adrian 2019-08-22
+    def get_path(self, check_existence=False):
         """
-        # log('Populating VideoTime for key: {}'.format(key))
-
-        if len( LEDLocation & key ) > 0:
-            type = "LED"
-            # extract timing from blinking LED every 5 seconds
-            video = (RawVideoFile() & key).get_raw_data()  # (frames, height, width)
-
-            led_x = (LEDLocation & key).fetch1('led_top')  # x ... top to bottom
-            led_y = (LEDLocation & key).fetch1('led_left') # y ... left to right
-            d = int( (LEDLocation & key).fetch1('led_width') / 2 )  # half LED width
-
-            roi_x = slice( led_x-d, led_x+d)
-            roi_y = slice( led_y-d, led_y+d)
-
-            nr_frames = video.shape[0]
-
-            # extract intensity of LED over time
-            intensity = np.zeros( nr_frames )
-            for i in range( nr_frames ):
-                intensity[i] = np.mean( video[i, roi_x, roi_y] )
-
-        elif len( RawVideoTimeFile & key ) > 0:
-            type = "FILE"
-            nr_frames = (VideoInfo & key).fetch1('nr_frames')
-            intensity = (RawVideoTimeFile & key).get_raw_data()
+        Construct full path to a raw video file.
+        Method only works for single-element query.
+        Args:
+            check_existence: is True, method throws an exception if the file does not exist
+        """
+        if len(self) == 1:
+            p = self.get_paths()[0]
+            if check_existence:
+                if not p.exists():
+                    raise Exception("The file was not found at %s" % str(p))
+            return p
         else:
-            raise Exception('Either a LED location or RawVideoTimeFile must be given.')
+            raise Exception("This method only works for a single entry! For multiple entries use get_paths")
 
-        # detect threshold crossing
-        thres = (np.min(intensity) + np.max(intensity) ) / 2  # threshold value between min and max
+    def get_raw_data(self):
+        """ Read data from file, return two arrays: one of timestamps and one of frame counts """
+        path_file = self.get_path()
+        data = np.fromfile(path_file)
+        return data[::2], data[1::2]
 
-        cross = (intensity[:-1] < thres) & (intensity[1:] > thres)  # True/False with threshold crossing
-        cross_index = np.where( cross )[0]
 
-        if type == 'LED':
-            # calculate average frame rate (one blink every 5 seconds)
-            avg_frame_rate = np.mean( np.diff(cross_index)) / 5
-
-            # Calculate the time of the frames based on the detected blink times
-            # The LED blinks every 5 seconds and the first blink occurs directly when
-            # the recording of the wheel position is started on the behavior PC (time 0)
-            nr_blinks = len( cross_index )
-            blink_time = np.arange( nr_blinks ) * 5     # blinking times in seconds
-
-            # linearly interpolate between known timepoints of the blinks
-            # this function transforms frame indicies to seconds of the wheel/galvo recording
-            import scipy
-            frames_to_seconds = scipy.interpolate.interp1d(cross_index, blink_time, fill_value='extrapolate')
-
-            video_time = frames_to_seconds( np.arange( nr_frames) )
-
-        else:
-            avg_frame_rate = np.mean( 1000 / np.diff(cross_index) )
-            video_time = cross_index / 1000   # time in seconds
-
-            # remove additional few frames at the end that were not saved anymore
-            l = len(video_time)
-            if l == nr_frames:
-                pass  # everything fine
-            elif ( l > nr_frames ) and ( l <= nr_frames+2 ):
-                # accept 1 or 2 difference
-                print("Warning: Removed 1 or 2 frames in the VideoTime. Nothing to worry about.")
-                video_time = video_time[:nr_frames]
-            elif ( l < nr_frames ) and ( l >= nr_frames-2 ):
-                # accept 1 or 2 difference
-                print("Warning: VideoTime too short by 1 or 2 frames. Nothing to worry about?")
-            else:
-                raise Exception('Mismatch between recorded frames ({}) and detected ({})'.format(nr_frames,l))
-
-        # insert variables into this table
-        new_entry = dict( **key,
-                          avg_frame_rate = avg_frame_rate,
-                          video_time = video_time)
-        self.insert1( new_entry )
-
-        # log('Inserted VideoTime entry for key: {}'.format(key))
+# @schema
+# class VideoTime(dj.Computed):
+#     definition = """ # Compute frame timestamps from synchronisation file
+#     -> Video
+#     --------
+#     avg_frame_rate  : float         # Measured average frame rate
+#     video_time      : longblob      # 1d array, time of each frame in seconds of behavior PC
+#     """
