@@ -24,9 +24,9 @@ schema = dj.schema('common_dlc', locals(), create_tables=True)
 @schema
 class CameraPosition(dj.Lookup):
     definition = """ # Lookup table for camera positions
-    camera_position : varchar(128)
+    camera_position : varchar(128)      # attribute for distinguishing between separate camera angles
     ---
-    position_details : varchar(1048)
+    position_details : varchar(1048)    # longer description of camera position and properties
     """
     contents = [
         ['Right_Forelimb_Side_View', 'camera placed orthogonally, with view of right forelimb from hand to shoulder'],
