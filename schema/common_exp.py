@@ -67,6 +67,7 @@ class Task(dj.Lookup):
         # Todo: enter Matteos wheel tasks
         # Matteos tasks
         ['Sensory mapping', 'mpanze', 0, 'Various stimuli are presented to the anesthetized mouse'],
+        ["Joystick_with_cue", "mpanze", 1, "Mouse pulls joystick when auditory cue is presented"],
     ]
 
 
