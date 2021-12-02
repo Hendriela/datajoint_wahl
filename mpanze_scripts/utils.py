@@ -156,3 +156,20 @@ def frame_timestamps_from_txt_file(path_sync):
     fps = 1/diff_mean
 
     return frames_widefield, diff_mean, diff_std, fps
+
+def session_from_filename(filename):
+    # parse filename to obtain session details
+    if not isinstance(filename, pathlib.Path):
+        f = pathlib.Path(filename)
+    else:
+        f = filename
+
+    stem = str(f.stem)
+    parts = stem.split("_")
+    assert len(parts) == 4
+    mouse_id = int(parts[0][1:])
+    date_str = parts[1]
+    session_num = int(parts[2])
+    suffix = f.suffix
+    file_desc = parts[3]
+    return mouse_id, date_str, session_num, suffix, file_desc
