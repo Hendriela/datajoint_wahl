@@ -105,7 +105,7 @@ class PCAnalysis(dj.Computed):
         params = (PlaceCellParameter & key).fetch1()
 
         # Compute number of bins, depends on the track length and user-parameter bin_length
-        track_length = (hheise_behav.VRSession & key).fetch1('length')
+        track_length = (hheise_behav.VRSessionInfo & key).fetch1('length')
         if track_length % params['bin_length'] == 0:
             n_bins = int(track_length / params['bin_length'])
         else:

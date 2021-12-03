@@ -58,7 +58,7 @@ class CorridorPattern(dj.Lookup):
 
 
 @schema
-class VRSession(dj.Imported):
+class VRSessionInfo(dj.Imported):
     definition = """ # Info about the VR Session, mostly read from "behavioral evaluation" Excel file
     -> common_exp.Session
     ---
@@ -75,7 +75,7 @@ class VRSession(dj.Imported):
 
     def make(self, key: dict) -> None:
         """
-        Populates VRSession() for every entry of common_exp.Session().
+        Populates VRSessionInfo() for every entry of common_exp.Session().
 
         Args:
             key: Primary keys to query each entry of common_exp.Session() to be populated
@@ -129,7 +129,7 @@ class VRSession(dj.Imported):
 @schema
 class RawBehaviorFile(dj.Imported):
     definition = """ # File names (relative to session folder) of raw VR behavior files (3 separate files per trial)
-    -> VRSession
+    -> VRSessionInfo
     trial_id            : smallint          # Counter for file sets (base 0)
     ---
     tdt_filename        : varchar(256)      # filename of the TDT file (licking and frame trigger)
@@ -139,10 +139,10 @@ class RawBehaviorFile(dj.Imported):
 
     def make(self, key: dict) -> None:
         """
-        Automatically looks up file names for behavior files of a single VRSession() entry.
+        Automatically looks up file names for behavior files of a single VRSessionInfo() entry.
 
         Args:
-            key: Primary keys of the queried VRSession() entry.
+            key: Primary keys of the queried VRSessionInfo() entry.
         """
 
         print("Finding raw behavior files for session {}".format(key))
@@ -277,7 +277,7 @@ class RawBehaviorFile(dj.Imported):
         Args:
             tdt_list: Absolute file names of TDT files for the current session
             enc_list: Absolute file names of Encoder files for the current session
-            trial_key: Primary keys of the queried VRSession() entry.
+            trial_key: Primary keys of the queried VRSessionInfo() entry.
 
         Returns:
             List with trial IDs that should NOT be entered into CuratedBehaviorFile() and not be used further.
@@ -362,17 +362,17 @@ class RawBehaviorFile(dj.Imported):
 @schema
 class VRLogFile(dj.Imported):
     definition = """ # Filename of the unprocessed LOG file for each session
-    -> VRSession
+    -> VRSessionInfo
     ---
     log_filename        : varchar(128)      # filename of the LOG file (should be inside the session directory)
     """
 
     def make(self, key: dict) -> None:
         """
-        Automatically looks up file name for LOG file of a single VRSession() entry.
+        Automatically looks up file name for LOG file of a single VRSessionInfo() entry.
 
         Args:
-            key: Primary keys of the queried VRSession() entry.
+            key: Primary keys of the queried VRSessionInfo() entry.
         """
         mouse_id = (common_mice.Mouse & key).fetch1('mouse_id')
 
@@ -414,7 +414,7 @@ class VRLog(dj.Imported):
         line = log['Event'].loc[log['Event'].str.contains("VR Task start, Animal:")].values[0]
         log_length = int(line.split('_')[1])
         log_mouse = int(line.split('_')[0].split()[-1][1:])
-        tab_length = (VRSession & key).fetch1('length')
+        tab_length = (VRSessionInfo & key).fetch1('length')
         if log_length != tab_length:
             raise Warning('Session {}:\nTrack length {} in LOG file does not correspond to length {} in '
                           'database.'.format(key, log_length, tab_length))
@@ -445,7 +445,7 @@ class VRLog(dj.Imported):
 @schema
 class VRTrial(dj.Computed):
     definition = """ # Aligned trials of VR behavioral data
-    -> VRSession
+    -> VRSessionInfo
     trial_id            : tinyint           # Counter of the trial in the session, same as RawBehaviorFile(), base 0
     ---
     timestamp           : time              # Start time of the trial
@@ -536,19 +536,19 @@ class VRTrial(dj.Computed):
 
     def make(self, key: dict) -> None:
         """
-        Fills VRTrial with temporally aligned behavior parameters for all trials of one queried VRSession() entry.
+        Fills VRTrial with temporally aligned behavior parameters for all trials of one queried VRSessionInfo() entry.
 
         Args:
-            key: Primary keys of current VRSession() entry
+            key: Primary keys of current VRSessionInfo() entry
         """
 
         print('Starting to align trials for session {}'.format(key))
 
         # Fetch data about the session
         trial_ids = (RawBehaviorFile() & key).fetch('trial_id')  # Trial IDs (should be regularly counting up)
-        imaging = bool((VRSession & key).fetch1('imaging_session'))  # Flag if frame trigger should be created
+        imaging = bool((VRSessionInfo & key).fetch1('imaging_session'))  # Flag if frame trigger should be created
         cond = (common_exp.Session & key).fetch1('task')  # Task condition
-        cond_switch = (VRSession & key).fetch1('condition_switch')  # First trial of new condition
+        cond_switch = (VRSessionInfo & key).fetch1('condition_switch')  # First trial of new condition
 
         for trial_id in trial_ids:
 
@@ -1009,7 +1009,7 @@ class VRTrial(dj.Computed):
         # Get mean speed by taking track length / max time stamp. Slightly more accurate than mean(vel) because ITI
         # running is ignored, but included in vel
         time = max(self.get_timestamps())
-        length = (VRSession & self.restriction[0]).fetch1('length')
+        length = (VRSessionInfo & self.restriction[0]).fetch1('length')
         mean_speed = length / time
 
         # Get mean running speed by filtering out time steps where mouse is stationary
@@ -1041,7 +1041,7 @@ class PerformanceParameters(dj.Lookup):
 @schema
 class VRPerformance(dj.Computed):
     definition = """ # Performance analysis data of VR behavior, one list per attribute/session with individ. trial data
-    -> VRSession
+    -> VRSessionInfo
     -> PerformanceParameters
     ---
     binned_lick_ratio           : longblob          # np.array of binned lick performance (how many positions bins, 
@@ -1058,7 +1058,7 @@ class VRPerformance(dj.Computed):
         """
         Computes general performance metrics from individual trials of a session with a certain set of parameters.
         Args:
-            key: Primary keys of the union of the current VRSession and PerformanceParameters entry.
+            key: Primary keys of the union of the current VRSessionInfo and PerformanceParameters entry.
         """
 
         # Get current set of parameters
