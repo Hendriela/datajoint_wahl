@@ -443,100 +443,107 @@ class VRLog(dj.Imported):
 
 
 @schema
-class VRTrial(dj.Computed):
-    definition = """ # Aligned trials of VR behavioral data
+class VRSession(dj.Computed):
+    definition = """ # Session-specific table holding part-tables with trials of aligned VR behavioral data
     -> VRSessionInfo
-    trial_id            : tinyint           # Counter of the trial in the session, same as RawBehaviorFile(), base 0
     ---
-    timestamp           : time              # Start time of the trial
-    -> CorridorPattern
-    tone                : tinyint           # bool flag whether the RZ tone during the trial was on or off
-    pos                 : longblob          # 1d array with VR position sampled every 8 ms
-    lick                : longblob          # 1d array with licks sampled every 8 ms
-    frame               : longblob          # 1d array with frame triggers sampled every 8 ms
-    enc                 : longblob          # 1d array with raw encoder ticks sampled every 8 ms
-    valve               : longblob          # 1d array with valve openings (reward) sampled every 8 ms
+    time_vr_align = CURRENT_TIMESTAMP    : timestamp     # automatic timestamp
     """
 
-    def enc2speed(self) -> np.ndarray:
-        """
-        Transform encoder ticks of the queried SINGLE trial to speed in cm/s.
-
-        Returns:
-            1D numpy array of encoder data transformed to cm/s
-        """
-        # Hard-coded constant properties of encoder wheel
-        D_WHEEL = 10.5  # wheel diameter in cm
-        N_TICKS = 1436  # number of ticks in a full wheel rotation
-        DEG_DIST = (D_WHEEL * np.pi) / N_TICKS  # distance in cm the band moves for each encoder tick
-
-        # TODO: How to deal with the encoder artifact of "catching up" ticks from the ITI?
-        # Query encoder data from queried trial and translate encoder data into velocity [cm/s]
-        speed = self.fetch1('enc') * DEG_DIST / SAMPLE
-        speed[speed == -0] = 0
-        return speed
-
-    def get_zone_borders(self) -> np.ndarray:
-        """
-        Return a deepcopy of the queried SINGLE trial's reward zone borders. The deepcopy is necessary to edit the
-        zone borders without changing the data in the database.
-
-        Returns:
-            A numpy array with dimensions (2, 4), start and end position of all four RZs
-        """
-        return deepcopy((self * CorridorPattern).fetch1('positions'))
-
-    def get_array(self, attr: Iterable[str] = None) -> np.ndarray:
-        """
-        Combine individual attribute data with reconstructed time stamp to a common array for processing.
-
-        Args:
-            attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
-
-        Returns:
-            A numpy array (# samples, # attributes + 1) with single attributes as columns, the common
-                time stamp as first column.
-        """
-        if attr is None:
-            attr = ['pos', 'lick', 'frame', 'enc', 'valve']
-
-        # Fetch behavioral data of the trial, add time scale and merge into np.array
-        data = self.fetch1(*attr)
-        time = self.get_timestamps()
-        return np.vstack((time, *data)).T
-
-    def get_arrays(self, attr: Iterable[str] = None) -> List[np.ndarray]:
-        """
-        Wrapper function of self.get_array() for more than one trial. Returns list of arrays of queried entries.
-
-        Args:
-            attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
-
-        Returns:
-            A list of ndarrays (# samples, # attributes + 1) with single attributes as columns, the common
-                time stamp as first column.
+    class VRTrial(dj.Part):
+        definition = """ # Aligned trials of VR behavioral data
+        -> VRSession
+        trial_id            : tinyint           # Counter of the trial in the session, same as RawBehaviorFile(), base 0
+        ---
+        timestamp           : time              # Start time of the trial
+        -> CorridorPattern
+        tone                : tinyint           # bool flag whether the RZ tone during the trial was on or off
+        pos                 : longblob          # 1d array with VR position sampled every 8 ms
+        lick                : longblob          # 1d array with licks sampled every 8 ms
+        frame               : longblob          # 1d array with frame triggers sampled every 8 ms
+        enc                 : longblob          # 1d array with raw encoder ticks sampled every 8 ms
+        valve               : longblob          # 1d array with valve openings (reward) sampled every 8 ms
         """
 
-        trial_ids = self.fetch('trial_id')
-        data = [(self & {'trial_id': trial_id}).get_array(attr) for trial_id in trial_ids]
+        def enc2speed(self) -> np.ndarray:
+            """
+            Transform encoder ticks of the queried SINGLE trial to speed in cm/s.
 
-        return data
+            Returns:
+                1D numpy array of encoder data transformed to cm/s
+            """
+            # Hard-coded constant properties of encoder wheel
+            D_WHEEL = 10.5  # wheel diameter in cm
+            N_TICKS = 1436  # number of ticks in a full wheel rotation
+            DEG_DIST = (D_WHEEL * np.pi) / N_TICKS  # distance in cm the band moves for each encoder tick
 
+            # TODO: How to deal with the encoder artifact of "catching up" ticks from the ITI?
+            # Query encoder data from queried trial and translate encoder data into velocity [cm/s]
+            speed = self.fetch1('enc') * DEG_DIST / SAMPLE
+            speed[speed == -0] = 0
+            return speed
 
-    def get_timestamps(self) -> np.ndarray:
-        """
-        Returns np.array of time stamps in seconds for behavioral data points.
+        def get_zone_borders(self) -> np.ndarray:
+            """
+            Return a deepcopy of the queried SINGLE trial's reward zone borders. The deepcopy is necessary to edit the
+            zone borders without changing the data in the database.
 
-        Returns:
-            Np.ndarray with shape (n_datapoints,) of time stamps in seconds
-        """
-        n_samples = len(self.fetch1('lick'))
-        # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
-        return np.array(range(0, n_samples * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
+            Returns:
+                A numpy array with dimensions (2, 4), start and end position of all four RZs
+            """
+            return deepcopy((self * CorridorPattern).fetch1('positions'))
+
+        def get_array(self, attr: Iterable[str] = None) -> np.ndarray:
+            """
+            Combine individual attribute data with reconstructed time stamp to a common array for processing.
+
+            Args:
+                attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
+
+            Returns:
+                A numpy array (# samples, # attributes + 1) with single attributes as columns, the common
+                    time stamp as first column.
+            """
+            if attr is None:
+                attr = ['pos', 'lick', 'frame', 'enc', 'valve']
+
+            # Fetch behavioral data of the trial, add time scale and merge into np.array
+            data = self.fetch1(*attr)
+            time = self.get_timestamps()
+            return np.vstack((time, *data)).T
+
+        def get_arrays(self, attr: Iterable[str] = None) -> List[np.ndarray]:
+            """
+            Wrapper function of self.get_array() for more than one trial. Returns list of arrays of queried entries.
+
+            Args:
+                attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
+
+            Returns:
+                A list of ndarrays (# samples, # attributes + 1) with single attributes as columns, the common
+                    time stamp as first column.
+            """
+
+            trial_ids = self.fetch('trial_id')
+            data = [(self & {'trial_id': trial_id}).get_array(attr) for trial_id in trial_ids]
+
+            return data
+
+        def get_timestamps(self) -> np.ndarray:
+            """
+            Returns np.array of time stamps in seconds for behavioral data points.
+
+            Returns:
+                Np.ndarray with shape (n_datapoints,) of time stamps in seconds
+            """
+            n_samples = len(self.fetch1('lick'))
+            # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
+            return np.array(range(0, n_samples * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
 
     def make(self, key: dict) -> None:
         """
-        Fills VRTrial with temporally aligned behavior parameters for all trials of one queried VRSessionInfo() entry.
+        Fills VRSession and VRSession.VRTrial with temporally aligned behavior parameters for all trials of each
+        VRSessionInfo() entry.
 
         Args:
             key: Primary keys of current VRSessionInfo() entry
@@ -550,8 +557,9 @@ class VRTrial(dj.Computed):
         cond = (common_exp.Session & key).fetch1('task')  # Task condition
         cond_switch = (VRSessionInfo & key).fetch1('condition_switch')  # First trial of new condition
 
-        for trial_id in trial_ids:
+        trial_entries = []
 
+        for trial_id in trial_ids:
             # Initialize relevant variables
             trial_key = dict(**key, trial_id=trial_id)  # dict containing the values of all trial attributes
             frame_count = None  # frame count of the imaging file of that trial
@@ -588,10 +596,16 @@ class VRTrial(dj.Computed):
             else:
                 raise ValueError("Alignment returned None, check trial!")
 
-            # Insert entry of the trial into the database
-            self.insert1(trial_key)
+            # Add entry to entry list
+            trial_entries.append(trial_key)
 
-    def get_condition(self, key: dict, task: str, condition_switch: Iterable[int]) -> Tuple[str, int]:
+        # Insert entry of the master table into the database
+        self.insert1(key)
+
+        # Insert trial entries into the part table
+        self.insert(trial_entries)
+
+    def get_condition(self, key: dict, task: str, condition_switch: List[int]) -> Tuple[str, int]:
         """
         Returns condition (RZ position, corridor pattern, tone) of a single trial.
         Args:
