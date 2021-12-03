@@ -389,4 +389,37 @@ class BinnedActivity(dj.Computed):
 
         self.ROI().insert(part_entries)
 
+    def get_trial_avg(self, trace: str) -> np.array:
+        """
+        Compute trial-averaged VR position bin values for a given trace of one queried session.
+
+        Args:
+            trace: Trace type. Has to be attr of BinnedActivity.ROI(): bin_activity (dF/F), bin_spikes, bin_spikerate.
+
+        Returns:
+            Numpy array with shape (n_neurons, n_bins) with traces averaged over queried trials (one session).
+        """
+
+        # Check that only one session has been queried
+        n_sess = len(np.unique(self.fetch('session_num')))
+        if n_sess > 1:
+            raise dj.errors.QueryError('You have to query a single session when computing trial averages. '
+                                       f'{n_sess} sessions queried.')
+
+        # Check that only one parameter set has been queried
+        try:
+            n_bins = (PCAnalysis & self.restriction).fetch1('n_bins')
+        except dj.errors.DataJointError as ex:
+            raise dj.errors.QueryError(str(ex) + "\nMultiple values for 'n_bins' found in queried PCAnalysis. Check "
+                                                 "that you queried only one session and one parameter set.")
+
+        roi_ids = np.unique(self.ROI().fetch('mask_id'))        # np.unique to remove duplicate IDs from multiple trials
+
+        trial_avg = np.zeros((len(roi_ids), n_bins)) * np.nan   # Initialize array that will hold trial-averaged data
+        for i, roi_id in enumerate(roi_ids):
+            # Fetch traces of all trials of each mask and stack them to a (n_trials, n_bins) array
+            traces = np.vstack((self.ROI() & f'mask_id={roi_id}').fetch(trace))
+            trial_avg[i] = np.mean(traces, axis=0)     # Average binned data across trials (axis 0)
+
+
 
