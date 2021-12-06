@@ -441,6 +441,26 @@ class VRLog(dj.Imported):
                              'log_trial': self.fetch1('log_trial'),
                              'log_event': self.fetch1('log_event')})
 
+    def is_session_novel(self) -> bool:
+        """
+        Checks whether the queried session is in the novel corridor (from VR zone borders)
+
+        Returns:
+            Boolean flag whether the queried session is in the novel (True) or training (False) corridor
+        """
+        # Get event log
+        log_events = self.get_dataframe()['log_event']
+
+        # Get the rounded position of the first reward zone
+        rz_pos = int(
+            np.round(float(log_events[log_events.str.contains('VR enter Reward Zone:')].iloc[0].split(':')[1])))
+        if rz_pos == -6:
+            return False
+        elif rz_pos == 9:
+            return True
+        else:
+            print(f'Could not determine context in session {self.fetch1("KEY")}!\n')
+
 
 @schema
 class VRSession(dj.Computed):
@@ -688,7 +708,8 @@ class VRSession(dj.Computed):
 
             return mean_speed, mean_running_speed, time
 
-        def get_condition(self, key: dict, task: str, condition_switch: List[int]) -> Tuple[str, int]:
+        @staticmethod
+        def get_condition(key: dict, task: str, condition_switch: List[int]) -> Tuple[str, int]:
             """
             Returns condition (RZ position, corridor pattern, tone) of a single trial.
             Args:
@@ -701,7 +722,7 @@ class VRSession(dj.Computed):
             """
 
             # No condition switches in novel corridor
-            if self.is_session_novel(key):
+            if (VRLog & key).is_session_novel(key):
                 return 'novel', 1
 
             # No condition switch or before first switch
@@ -810,27 +831,6 @@ class VRSession(dj.Computed):
 
         # Insert trial entries into the part table
         self.VRTrial().insert(trial_entries)
-
-    def is_session_novel(self, sess_key: dict) -> bool:
-        """
-        Checks whether the session of 'sess_key' is in the novel corridor (from VR zone borders)
-        Args:
-            sess_key: Primary keys to query entry of VRLog()
-
-        Returns:
-            Boolean flag whether the queried session is in the novel (True) or training (False) corridor
-        """
-        # Get event log
-        log_events = (VRLog & sess_key).get_dataframe()['log_event']
-        # Get the rounded position of the first reward zone
-        rz_pos = int(
-            np.round(float(log_events[log_events.str.contains('VR enter Reward Zone:')].iloc[0].split(':')[1])))
-        if rz_pos == -6:
-            return False
-        elif rz_pos == 9:
-            return True
-        else:
-            print(f'Could not determine context in session {self.key}!\n')
 
     @staticmethod
     def align_behavior_files(trial_key: dict, encoder: np.ndarray, position: np.ndarray, trigger: np.ndarray,
