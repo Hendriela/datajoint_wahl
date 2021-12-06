@@ -478,11 +478,11 @@ class VRSession(dj.Computed):
         timestamp           : time              # Start time of the trial
         -> CorridorPattern
         tone                : tinyint           # bool flag whether the RZ tone during the trial was on or off
-        pos                 : longblob          # 1d array with VR position sampled every 8 ms
-        lick                : longblob          # 1d array with licks sampled every 8 ms
-        frame               : longblob          # 1d array with frame triggers sampled every 8 ms
-        enc                 : longblob          # 1d array with raw encoder ticks sampled every 8 ms
-        valve               : longblob          # 1d array with valve openings (reward) sampled every 8 ms
+        pos                 : longblob          # 1d array with VR position sampled every 8 ms (125 Hz)
+        lick                : longblob          # 1d array with binary licks sampled every 8 ms (125 Hz)
+        frame               : longblob          # 1d array with binary frame trigger sampled every 8 ms (125 Hz)
+        enc                 : longblob          # 1d array with raw encoder ticks sampled every 8 ms (125 Hz)
+        valve               : longblob          # 1d array with binary valve openings (reward) sampled at 125 Hz
         """
 
         def enc2speed(self) -> np.ndarray:
@@ -524,11 +524,38 @@ class VRSession(dj.Computed):
                 A numpy array (# samples, # attributes + 1) with single attributes as columns, the common
                     time stamp as first column.
             """
+            #
+            # def idx2arr(indices: Iterable[int], length: int) -> np.ndarray:
+            #     """
+            #     Transform a list of array of indices into a 1D binary array with 1 at these indices.
+            #
+            #     Args:
+            #         indices: Indices in final array at which positions the value will be 1
+            #         length: Length of the final array. Has to be larger than the largest value in indices
+            #
+            #     Returns:
+            #         1D binary array with 1 at specified indices and 0 everywhere else.
+            #     """
+            #
+            #     if max(indices) >= length:
+            #         raise IndexError(f"Error in VRSession.VRTrial().get_array() of entry {self.fetch1('KEY')}:\n"
+            #                          f"Highest index {max(indices)} cannot fit into an array of length {length}!")
+            #     else:
+            #         bin_array = np.zeros(length, dtype=np.int8)
+            #         bin_array[indices] = 1
+            #
+            #         return bin_array
+
             if attr is None:
                 attr = ['pos', 'lick', 'frame', 'enc', 'valve']
 
             # Fetch behavioral data of the trial, add time scale and merge into np.array
             data = self.fetch1(*attr)
+            #
+            # # If queried, transform lick and valve indices into an continuously sampled array
+            # if 'lick' in attr:
+            #     data[attr.index('lick')] = data[attr.index('lick')]
+
             time = self.get_timestamps()
             return np.vstack((time, *data)).T
 
@@ -722,7 +749,7 @@ class VRSession(dj.Computed):
             """
 
             # No condition switches in novel corridor
-            if (VRLog & key).is_session_novel(key):
+            if (VRLog & key).is_session_novel():
                 return 'novel', 1
 
             # No condition switch or before first switch
@@ -794,7 +821,7 @@ class VRSession(dj.Computed):
                 frame_count = (common_img.RawImagingFile & dict(**key, part=trial_id)).fetch1('nr_frames')
 
             # Find out which condition this trial was
-            trial_key['pattern'], trial_key['tone'] = self.get_condition(trial_key, cond, cond_switch)
+            trial_key['pattern'], trial_key['tone'] = self.VRTrial().get_condition(trial_key, cond, cond_switch)
 
             # Get time stamp from filename
             time_format = '%H%M%S'
@@ -812,9 +839,22 @@ class VRSession(dj.Computed):
             merge = self.align_behavior_files(trial_key, data['enc'], data['tcp'], data['tdt'],
                                               imaging=imaging, frame_count=frame_count)
 
+            # Transform lick and valve to event-time indices instead of continuous sampling to save disk space
+            # lick_idx = np.where(merge[:, 2] == 1)[0]
+            # frame_idx = np.where(merge[:, 3] == 1)[0]
+            # valve_idx = np.where(merge[:, 5] == 1)[0]
+
+            # Disk usages for sample session M93, 20210708: (with dj.size_on_disk)
+            # All continuous, int8: 65536
+            # All continuous, int: 65536
+            # All idx, int32: 98304
+            # Frame continuous, rest idx: 65536
+            # Valve continuous, rest idx: 98304
+            # Lick continuous, rest idx: 81920
+            # -> Datajoint stores small integers more efficiently than large integers, so continuous sampling is better
+
             if merge is not None:
                 # parse columns into entry dict and typecast to int to save disk space
-                # TODO: make "frame" and "valve" to event-times rather than continuous sampling?
                 trial_key['pos'] = merge[:, 1].astype(np.float32)
                 trial_key['lick'] = merge[:, 2].astype(int)
                 trial_key['frame'] = merge[:, 3].astype(int)
@@ -993,7 +1033,7 @@ class VRSession(dj.Computed):
         merge = pd.merge_asof(merge, df_list[data_times[3]], left_index=True, right_index=True)
 
         ### Get valve opening times from LOG file
-        # Load LOG file TODO maybe make another boolean column with "being in reward zone"
+        # Load LOG file
         log = (VRLog & trial_key).get_dataframe()
         if log is not None:
             # Filter out bad lines if Datetime column could not be parsed
