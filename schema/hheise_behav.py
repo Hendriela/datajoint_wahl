@@ -1190,8 +1190,9 @@ class PerformanceTrend(dj.Computed):
     definition = """ # Trend analysis metrics of performance across trials of a session. LinReg via statsmodels.OLS()
     -> VRPerformance
     ---
-    p_normality = NULL    : float           # p-value of stats.normaltest (D'Agostino + Pearson's omnibus test)
-                                            # (can only be reliably determined for >20 trials, otherwise p=1).
+    p_normality = NULL    : float           # p-value whether single-trial performance datapoints are normal distributed
+                                            # (D'Agostino + Pearson's omnibus test). Can only be reliably determined for 
+                                            # >20 trials, otherwise p=1 and assumed non-normality.
     perf_corr = NULL      : float           # Correlation coefficient, through Pearson or Spearman (dep. on p_normality)
     p_perf_corr = NULL    : float           # p-value of correlation coefficient (strongly depends on sample size)
     perf_r2 = NULL        : float           # R-squared value of the OLS model (how much is y explained by x?)
