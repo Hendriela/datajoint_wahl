@@ -540,7 +540,7 @@ class VRSession(dj.Computed):
             # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
             return np.array(range(0, n_samples * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
 
-        def compute_performances(self, params: dict) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        def compute_performances(self, params: dict) -> Tuple[float, float, float]:
             """
             Computes lick, binned lick and stop performance of a single trial. Called by VRPerformance.make().
 
@@ -1092,25 +1092,19 @@ class VRPerformance(dj.Computed):
             # Store query of current trial
             trial = (VRSession.VRTrial & key & 'trial_id={}'.format(trial_id))
 
-            # # Fetch behavioral data of the current trial, add time scale and merge into np.array
-            # lick, pos, enc = trial.fetch1('lick', 'pos', 'enc')
-            # # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
-            # time = np.array(range(0, len(lick) * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
-            # data = np.vstack((time, lick, pos, enc)).T
-
             # Compute lick and stop performances
             binned_lick_ratio, lick_count_ratio, stop_ratio = trial.compute_performances(params)
 
             # Compute time metrics
             mean_speed, mean_running_speed, trial_duration = trial.compute_time_metrics(params)
 
-            # Add trial metrics to data dict
-            trial_data['binned_lick_ratio'].append(binned_lick_ratio)
-            trial_data['lick_count_ratio'].append(lick_count_ratio)
-            trial_data['stop_ratio'].append(stop_ratio)
-            trial_data['mean_speed'].append(mean_speed)
-            trial_data['mean_running_speed'].append(mean_running_speed)
-            trial_data['trial_duration'].append(trial_duration)
+            # Add trial metrics to data dict, convert to float32 before to save disk space
+            trial_data['binned_lick_ratio'].append(np.float32(binned_lick_ratio))
+            trial_data['lick_count_ratio'].append(np.float32(lick_count_ratio))
+            trial_data['stop_ratio'].append(np.float32(stop_ratio))
+            trial_data['mean_speed'].append(np.float32(mean_speed))
+            trial_data['mean_running_speed'].append(np.float32(mean_running_speed))
+            trial_data['trial_duration'].append(np.float32(trial_duration))
 
         # Combine primary dict "key" with attributes "trial_data" and insert entry
         self.insert1({**key, **trial_data})
