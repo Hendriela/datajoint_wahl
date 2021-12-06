@@ -1151,7 +1151,7 @@ class Segmentation(dj.Computed):
                             snr=snr[i],
                             r=r[i],
                             cnn=cnn[i])
-            Segmentation.ROI().insert1(new_part)
+            self.ROI().insert1(new_part)
 
         # delete MemoryMappedFile to save storage
         try:
