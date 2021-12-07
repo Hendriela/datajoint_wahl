@@ -318,125 +318,126 @@ class Synchronization (dj.Computed):
         self.VRTrial().insert(trial_entries)
 
 
-# @schema
-# class BinnedActivity(dj.Computed):
-#     definition = """ # Spatially binned dF/F traces to VR position, one entry per session
-#     -> Synchronization
-#     ------
-#     time_bin_act = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
-#     """
-#
-#     class ROI(dj.Part):
-#         definition = """ # Data of single neurons, trials stacked as axis 1 (columns) in np.array
-#         -> BinnedActivity
-#         mask_id         : int       # Mask index (as in Segmentation.ROI, base 0)
-#         -----
-#         bin_activity   : longblob   # Array with shape (n_bins, n_trials), spatially binned single-trial dF/F trace
-#         bin_spikes     : longblob   # Same as bin_activity, but with estimated CASCADE spike probabilities
-#         bin_spikerate  : longblob   # Same as bin_activity, but with estimated CASCADE spikerates
-#         """
-#
-#     def make(self, key: dict) -> None:
-#         """
-#         Spatially bin dF/F trace of every trial for each neuron and thus align it to VR position.
-#
-#         Args:
-#             key: Primary keys of the current Synchronization() entry (one per trial).
-#         """
-#
-#         # from scipy.ndimage.filters import gaussian_filter1d
-#
-#         print('Populating BinnedActivity for {}'.format(key))
-#
-#         # Fetch activity traces and parameter sets
-#         traces, unit_ids = (common_img.Segmentation & key).get_traces(include_id=True)
-#         spikes = (common_img.Segmentation & key).get_traces(trace_type='decon')
-#         n_bins, trial_mask = (PCAnalysis & key).fetch1('n_bins', 'trial_mask')
-#         running_masks, bin_frame_counts = (Synchronization & key).fetch('running_mask', 'aligned_frames')
-#         bin_frame_counts = (Synchronization & key).fetch('aligned_frames')
-#
-#         # Create bin mask from frame counts
-#         bin_masks = []
-#         for idx, n_frames in enumerate(bin_frame_count):
-#             bin_masks.append(np.full(n_frames, idx))
-#         bin_mask = np.concatenate(bin_masks)
-#
-#         # Enter master table entry
-#         self.insert1(key)
-#
-#         # Create part table entries
-#         part_entries = []
-#         for unit_id, trace, spike in zip(unit_ids, traces, spikes):
-#
-#             # Get section of current trial from the trace
-#             trial_trace = trace[trial_mask == key['trial_id']]
-#             trial_spike = spike[trial_mask == key['trial_id']]
-#
-#             # Filter out non-running frames
-#             trial_trace = trial_trace[running_mask]
-#             trial_spike = trial_spike[running_mask]
-#
-#             # Iteratively for all bins, average trace and sum spike probabilities
-#             binned_trace = np.zeros(n_bins)
-#             binned_spike = np.zeros(n_bins)
-#             for bin_idx in range(n_bins):
-#                 bin_trace = trial_trace[bin_mask == bin_idx]
-#                 bin_spike = trial_spike[bin_mask == bin_idx]
-#
-#                 if len(bin_trace):       # Test if there is data for the current bin, otherwise raise error
-#                     binned_trace[bin_idx] = np.mean(bin_trace)
-#                     # sum instead of mean (CASCADE's spike probability is cumulative)
-#                     binned_spike[bin_idx] = np.nansum(bin_spike)
-#                 else:
-#                     raise IndexError("Entry {}:\n\tNeuron {}, in {} returned empty array, "
-#                                      "could not bin trace.".format(key, unit_id, bin_idx))
-#
-#             # Smooth average spike rate and transform values into mean firing rates by dividing by the time in s
-#             # occupied by the bin (from number of samples * sampling rate)
-#
-#             # Todo: Discuss if smoothing the binned spikes across spatial bins (destroying temporal resolution) is
-#             #  actually necessary
-#             # smooth_binned_spike = gaussian_filter1d(binned_spike, 1)
-#             binned_spikerate = binned_spike/(bin_frame_count / (common_img.ScanInfo & key).fetch1('fr'))
-#
-#             part_entries.append(dict(**key, mask_id=unit_id,
-#                                      bin_activity=np.array(binned_trace, dtype=np.float32),
-#                                      bin_spikes=np.array(binned_spike, dtype=np.float32),
-#                                      bin_spikerate=np.array(binned_spikerate, dtype=np.float32)))
-#
-#         self.ROI().insert(part_entries)
-#
-#     def get_trial_avg(self, trace: str) -> np.array:
-#         """
-#         Compute trial-averaged VR position bin values for a given trace of one queried session.
-#
-#         Args:
-#             trace: Trace type. Has to be attr of BinnedActivity.ROI(): bin_activity (dF/F), bin_spikes, bin_spikerate.
-#
-#         Returns:
-#             Numpy array with shape (n_neurons, n_bins) with traces averaged over queried trials (one session).
-#         """
-#
-#         # Check that only one session has been queried
-#         n_sess = len(np.unique(self.fetch('session_num')))
-#         if n_sess > 1:
-#             raise dj.errors.QueryError('You have to query a single session when computing trial averages. '
-#                                        f'{n_sess} sessions queried.')
-#
-#         # Check that only one parameter set has been queried
-#         try:
-#             n_bins = (PCAnalysis & self.restriction).fetch1('n_bins')
-#         except dj.errors.DataJointError as ex:
-#             raise dj.errors.QueryError(str(ex) + "\nMultiple values for 'n_bins' found in queried PCAnalysis. Check "
-#                                                  "that you queried only one session and one parameter set.")
-#
-#         roi_ids = np.unique(self.ROI().fetch('mask_id'))        # np.unique to remove duplicate IDs from multiple trials
-#
-#         trial_avg = np.zeros((len(roi_ids), n_bins)) * np.nan   # Initialize array that will hold trial-averaged data
-#         for i, roi_id in enumerate(roi_ids):
-#             # Fetch traces of all trials of each mask and stack them to a (n_trials, n_bins) array
-#             traces = np.vstack((self.ROI() & f'mask_id={roi_id}').fetch(trace))
-#             trial_avg[i] = np.mean(traces, axis=0)     # Average binned data across trials (axis 0)
+@schema
+class BinnedActivity(dj.Computed):
+    definition = """ # Spatially binned dF/F traces to VR position, one entry per session
+    -> Synchronization
+    ------
+    time_bin_act = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
+    """
+
+    class ROI(dj.Part):
+        definition = """ # Data of single neurons, trials stacked as axis 1 (columns) in np.array
+        -> BinnedActivity
+        mask_id         : int       # Mask index (as in Segmentation.ROI, base 0)
+        -----
+        bin_activity   : longblob   # Array with shape (n_bins, n_trials), spatially binned single-trial dF/F trace
+        bin_spikes     : longblob   # Same as bin_activity, but with estimated CASCADE spike probabilities
+        bin_spikerate  : longblob   # Same as bin_activity, but with estimated CASCADE spikerates
+        """
+
+    def make(self, key: dict) -> None:
+        """
+        Spatially bin dF/F trace of every trial for each neuron and thus align it to VR position.
+
+        Args:
+            key: Primary keys of the current Synchronization() entry (one per trial).
+        """
+
+        # from scipy.ndimage.filters import gaussian_filter1d
+
+        print('Populating BinnedActivity for {}'.format(key))
+
+        # Fetch activity traces and parameter sets
+        traces, unit_ids = (common_img.Segmentation & key).get_traces(include_id=True)
+        spikes = (common_img.Segmentation & key).get_traces(trace_type='decon')
+        n_bins, trial_mask = (PCAnalysis & key).fetch1('n_bins', 'trial_mask')
+        running_masks, bin_frame_counts = (Synchronization.VRTrial & key).fetch('running_mask', 'aligned_frames')
+        n_trials = len(running_masks)
+
+        # Create part table entries
+        part_entries = []   # Store entries for each neuron in a list
+        for unit_id, trace, spike in zip(unit_ids, traces, spikes):
+
+            binned_trace = np.zeros((n_bins, n_trials))
+            binned_spike = np.zeros((n_bins, n_trials))
+            binned_spikerate = np.zeros((n_bins, n_trials))
+
+            for trial_idx, (running_mask, bin_frame_count) in enumerate(zip(running_masks, bin_frame_counts)):
+                # Create bin mask from frame counts
+                bin_masks = []
+                for idx, n_frames in enumerate(bin_frame_count):
+                    bin_masks.append(np.full(n_frames, idx))
+                bin_mask = np.concatenate(bin_masks)
+
+                # Get section of current trial from the session-wide trace and filter out non-running frames
+                trial_trace = trace[trial_mask == trial_idx][running_mask]
+                trial_spike = spike[trial_mask == trial_idx][running_mask]
+
+                # Iteratively for all bins, average trace and sum spike probabilities
+                for bin_idx in range(n_bins):
+                    bin_trace = trial_trace[bin_mask == bin_idx]
+                    bin_spike = trial_spike[bin_mask == bin_idx]
+
+                    if len(bin_trace):       # Test if there is data for the current bin, otherwise raise error
+                        binned_trace[bin_idx, trial_idx] = np.mean(bin_trace)
+                        # sum instead of mean (CASCADE's spike probability is cumulative)
+                        binned_spike[bin_idx, trial_idx] = np.nansum(bin_spike)
+                    else:
+                        raise IndexError("Entry {}:\n\tNeuron {}, in {} returned empty array, "
+                                         "could not bin trace.".format(key, unit_id, bin_idx))
+
+                # Smooth average spike rate and transform values into mean firing rates by dividing by the time in s
+                # occupied by the bin (from number of samples * sampling rate)
+
+                # Todo: Discuss if smoothing the binned spikes across spatial bins (destroying temporal resolution) is
+                #  actually necessary
+                # smooth_binned_spike = gaussian_filter1d(binned_spike, 1)
+                bin_times = bin_frame_count / (common_img.ScanInfo & key).fetch1('fr')
+                binned_spikerate[:, trial_idx] = binned_spike[:, trial_idx]/bin_times
+
+            part_entries.append(dict(**key, mask_id=unit_id,
+                                     bin_activity=np.array(binned_trace, dtype=np.float32),
+                                     bin_spikes=np.array(binned_spike, dtype=np.float32),
+                                     bin_spikerate=np.array(binned_spikerate, dtype=np.float32)))
+
+        # Enter master table entry
+        self.insert1(key)
+        
+        # Enter part table entries
+        self.ROI().insert(part_entries)
+
+    def get_trial_avg(self, trace: str) -> np.array:
+        """
+        Compute trial-averaged VR position bin values for a given trace of one queried session.
+
+        Args:
+            trace: Trace type. Has to be attr of self.ROI(): bin_activity (dF/F), bin_spikes (spikes, decon),
+                    bin_spikerate (spikerate).
+
+        Returns:
+            Numpy array with shape (n_neurons, n_bins) with traces averaged over queried trials (one session).
+        """
+
+        # Accept multiple inputs
+        if trace in ['bin_activity', 'dff']:
+            trace = 'bin_activity'
+        elif trace in ['bin_spikes', 'spikes', 'decon']:
+            trace = 'bin_spikes'
+        elif trace in ['bin_spikerate', 'spikerate']:
+            trace = 'bin_spikerate'
+        else:
+            raise ValueError('Trace has invalid value.\nUse bin_activity, bin_spikes or bin_spikerate.')
+
+        # Check that only one entry has been queried
+        if len(self) > 1:
+            raise dj.errors.QueryError('You have to query a single session when computing trial averages. '
+                                       f'{len(self)} sessions queried.')
+
+        data = self.ROI().fetch(trace)          # Fetch requested data arrays from all neurons
+
+        # Take average across trials (axis 1) and return array with shape (n_neurons, n_bins)
+        return np.vstack([np.mean(x, axis=1) for x in data])
 
 
 
