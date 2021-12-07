@@ -213,6 +213,7 @@ class TransientOnly(dj.Computed):
 class Synchronization (dj.Computed):
     definition = """ # Synchronized frame times binned to VR position of this session, trial data in part table
     -> PCAnalysis
+    -> hheise_behav.VRSession
     ------
     time_sync = CURRENT_TIMESTAMP    : timestamp     # automatic timestamp
     """
@@ -403,7 +404,7 @@ class BinnedActivity(dj.Computed):
 
         # Enter master table entry
         self.insert1(key)
-        
+
         # Enter part table entries
         self.ROI().insert(part_entries)
 
