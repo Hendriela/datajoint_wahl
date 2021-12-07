@@ -58,7 +58,7 @@ class CorridorPattern(dj.Lookup):
 
 
 @schema
-class VRSession(dj.Imported):
+class VRSessionInfo(dj.Imported):
     definition = """ # Info about the VR Session, mostly read from "behavioral evaluation" Excel file
     -> common_exp.Session
     ---
@@ -75,7 +75,7 @@ class VRSession(dj.Imported):
 
     def make(self, key: dict) -> None:
         """
-        Populates VRSession() for every entry of common_exp.Session().
+        Populates VRSessionInfo() for every entry of common_exp.Session().
 
         Args:
             key: Primary keys to query each entry of common_exp.Session() to be populated
@@ -129,7 +129,7 @@ class VRSession(dj.Imported):
 @schema
 class RawBehaviorFile(dj.Imported):
     definition = """ # File names (relative to session folder) of raw VR behavior files (3 separate files per trial)
-    -> VRSession
+    -> VRSessionInfo
     trial_id            : smallint          # Counter for file sets (base 0)
     ---
     tdt_filename        : varchar(256)      # filename of the TDT file (licking and frame trigger)
@@ -139,10 +139,10 @@ class RawBehaviorFile(dj.Imported):
 
     def make(self, key: dict) -> None:
         """
-        Automatically looks up file names for behavior files of a single VRSession() entry.
+        Automatically looks up file names for behavior files of a single VRSessionInfo() entry.
 
         Args:
-            key: Primary keys of the queried VRSession() entry.
+            key: Primary keys of the queried VRSessionInfo() entry.
         """
 
         print("Finding raw behavior files for session {}".format(key))
@@ -277,7 +277,7 @@ class RawBehaviorFile(dj.Imported):
         Args:
             tdt_list: Absolute file names of TDT files for the current session
             enc_list: Absolute file names of Encoder files for the current session
-            trial_key: Primary keys of the queried VRSession() entry.
+            trial_key: Primary keys of the queried VRSessionInfo() entry.
 
         Returns:
             List with trial IDs that should NOT be entered into CuratedBehaviorFile() and not be used further.
@@ -362,17 +362,17 @@ class RawBehaviorFile(dj.Imported):
 @schema
 class VRLogFile(dj.Imported):
     definition = """ # Filename of the unprocessed LOG file for each session
-    -> VRSession
+    -> VRSessionInfo
     ---
     log_filename        : varchar(128)      # filename of the LOG file (should be inside the session directory)
     """
 
     def make(self, key: dict) -> None:
         """
-        Automatically looks up file name for LOG file of a single VRSession() entry.
+        Automatically looks up file name for LOG file of a single VRSessionInfo() entry.
 
         Args:
-            key: Primary keys of the queried VRSession() entry.
+            key: Primary keys of the queried VRSessionInfo() entry.
         """
         mouse_id = (common_mice.Mouse & key).fetch1('mouse_id')
 
@@ -414,7 +414,7 @@ class VRLog(dj.Imported):
         line = log['Event'].loc[log['Event'].str.contains("VR Task start, Animal:")].values[0]
         log_length = int(line.split('_')[1])
         log_mouse = int(line.split('_')[0].split()[-1][1:])
-        tab_length = (VRSession & key).fetch1('length')
+        tab_length = (VRSessionInfo & key).fetch1('length')
         if log_length != tab_length:
             raise Warning('Session {}:\nTrack length {} in LOG file does not correspond to length {} in '
                           'database.'.format(key, log_length, tab_length))
@@ -441,117 +441,379 @@ class VRLog(dj.Imported):
                              'log_trial': self.fetch1('log_trial'),
                              'log_event': self.fetch1('log_event')})
 
+    def is_session_novel(self) -> bool:
+        """
+        Checks whether the queried session is in the novel corridor (from VR zone borders)
+
+        Returns:
+            Boolean flag whether the queried session is in the novel (True) or training (False) corridor
+        """
+        # Get event log
+        log_events = self.get_dataframe()['log_event']
+
+        # Get the rounded position of the first reward zone
+        rz_pos = int(
+            np.round(float(log_events[log_events.str.contains('VR enter Reward Zone:')].iloc[0].split(':')[1])))
+        if rz_pos == -6:
+            return False
+        elif rz_pos == 9:
+            return True
+        else:
+            print(f'Could not determine context in session {self.fetch1("KEY")}!\n')
+
 
 @schema
-class VRTrial(dj.Computed):
-    definition = """ # Aligned trials of VR behavioral data
-    -> VRSession
-    trial_id            : tinyint           # Counter of the trial in the session, same as RawBehaviorFile(), base 0
+class VRSession(dj.Computed):
+    definition = """ # Session-specific table holding part-tables with trials of aligned VR behavioral data
+    -> VRSessionInfo
     ---
-    timestamp           : time              # Start time of the trial
-    -> CorridorPattern
-    tone                : tinyint           # bool flag whether the RZ tone during the trial was on or off
-    pos                 : longblob          # 1d array with VR position sampled every 8 ms
-    lick                : longblob          # 1d array with licks sampled every 8 ms
-    frame               : longblob          # 1d array with frame triggers sampled every 8 ms
-    enc                 : longblob          # 1d array with raw encoder ticks sampled every 8 ms
-    valve               : longblob          # 1d array with valve openings (reward) sampled every 8 ms
+    time_vr_align = CURRENT_TIMESTAMP    : timestamp     # automatic timestamp
     """
 
-    def enc2speed(self) -> np.ndarray:
-        """
-        Transform encoder ticks of the queried SINGLE trial to speed in cm/s.
-
-        Returns:
-            1D numpy array of encoder data transformed to cm/s
-        """
-        # Hard-coded constant properties of encoder wheel
-        D_WHEEL = 10.5  # wheel diameter in cm
-        N_TICKS = 1436  # number of ticks in a full wheel rotation
-        DEG_DIST = (D_WHEEL * np.pi) / N_TICKS  # distance in cm the band moves for each encoder tick
-
-        # TODO: How to deal with the encoder artifact of "catching up" ticks from the ITI?
-        # Query encoder data from queried trial and translate encoder data into velocity [cm/s]
-        speed = self.fetch1('enc') * DEG_DIST / SAMPLE
-        speed[speed == -0] = 0
-        return speed
-
-    def get_zone_borders(self) -> np.ndarray:
-        """
-        Return a deepcopy of the queried SINGLE trial's reward zone borders. The deepcopy is necessary to edit the
-        zone borders without changing the data in the database.
-
-        Returns:
-            A numpy array with dimensions (2, 4), start and end position of all four RZs
-        """
-        return deepcopy((self * CorridorPattern).fetch1('positions'))
-
-    def get_array(self, attr: Iterable[str] = None) -> np.ndarray:
-        """
-        Combine individual attribute data with reconstructed time stamp to a common array for processing.
-
-        Args:
-            attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
-
-        Returns:
-            A numpy array (# samples, # attributes + 1) with single attributes as columns, the common
-                time stamp as first column.
-        """
-        if attr is None:
-            attr = ['pos', 'lick', 'frame', 'enc', 'valve']
-
-        # Fetch behavioral data of the trial, add time scale and merge into np.array
-        data = self.fetch1(*attr)
-        time = self.get_timestamps()
-        return np.vstack((time, *data)).T
-
-    def get_arrays(self, attr: Iterable[str] = None) -> List[np.ndarray]:
-        """
-        Wrapper function of self.get_array() for more than one trial. Returns list of arrays of queried entries.
-
-        Args:
-            attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
-
-        Returns:
-            A list of ndarrays (# samples, # attributes + 1) with single attributes as columns, the common
-                time stamp as first column.
+    class VRTrial(dj.Part):
+        definition = """ # Aligned trials of VR behavioral data
+        -> VRSession
+        trial_id            : tinyint           # Counter of the trial in the session, same as RawBehaviorFile(), base 0
+        ---
+        timestamp           : time              # Start time of the trial
+        -> CorridorPattern
+        tone                : tinyint           # bool flag whether the RZ tone during the trial was on or off
+        pos                 : longblob          # 1d array with VR position sampled every 8 ms (125 Hz)
+        lick                : longblob          # 1d array with binary licks sampled every 8 ms (125 Hz)
+        frame               : longblob          # 1d array with binary frame trigger sampled every 8 ms (125 Hz)
+        enc                 : longblob          # 1d array with raw encoder ticks sampled every 8 ms (125 Hz)
+        valve               : longblob          # 1d array with binary valve openings (reward) sampled at 125 Hz
         """
 
-        trial_ids = self.fetch('trial_id')
-        data = [(self & {'trial_id': trial_id}).get_array(attr) for trial_id in trial_ids]
+        def enc2speed(self) -> np.ndarray:
+            """
+            Transform encoder ticks of the queried SINGLE trial to speed in cm/s.
 
-        return data
+            Returns:
+                1D numpy array of encoder data transformed to cm/s
+            """
+            # Hard-coded constant properties of encoder wheel
+            D_WHEEL = 10.5  # wheel diameter in cm
+            N_TICKS = 1436  # number of ticks in a full wheel rotation
+            DEG_DIST = (D_WHEEL * np.pi) / N_TICKS  # distance in cm the band moves for each encoder tick
 
+            # TODO: How to deal with the encoder artifact of "catching up" ticks from the ITI?
+            # Query encoder data from queried trial and translate encoder data into velocity [cm/s]
+            speed = self.fetch1('enc') * DEG_DIST / SAMPLE
+            speed[speed == -0] = 0
+            return speed
 
-    def get_timestamps(self) -> np.ndarray:
-        """
-        Returns np.array of time stamps in seconds for behavioral data points.
+        def get_zone_borders(self) -> np.ndarray:
+            """
+            Return a deepcopy of the queried SINGLE trial's reward zone borders. The deepcopy is necessary to edit the
+            zone borders without changing the data in the database.
 
-        Returns:
-            Np.ndarray with shape (n_datapoints,) of time stamps in seconds
-        """
-        n_samples = len(self.fetch1('lick'))
-        # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
-        return np.array(range(0, n_samples * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
+            Returns:
+                A numpy array with dimensions (2, 4), start and end position of all four RZs
+            """
+            return deepcopy((self * CorridorPattern).fetch1('positions'))
+
+        def get_array(self, attr: Iterable[str] = None) -> np.ndarray:
+            """
+            Combine individual attribute data with reconstructed time stamp to a common array for processing.
+
+            Args:
+                attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
+
+            Returns:
+                A numpy array (# samples, # attributes + 1) with single attributes as columns, the common
+                    time stamp as first column.
+            """
+            #
+            # def idx2arr(indices: Iterable[int], length: int) -> np.ndarray:
+            #     """
+            #     Transform a list of array of indices into a 1D binary array with 1 at these indices.
+            #
+            #     Args:
+            #         indices: Indices in final array at which positions the value will be 1
+            #         length: Length of the final array. Has to be larger than the largest value in indices
+            #
+            #     Returns:
+            #         1D binary array with 1 at specified indices and 0 everywhere else.
+            #     """
+            #
+            #     if max(indices) >= length:
+            #         raise IndexError(f"Error in VRSession.VRTrial().get_array() of entry {self.fetch1('KEY')}:\n"
+            #                          f"Highest index {max(indices)} cannot fit into an array of length {length}!")
+            #     else:
+            #         bin_array = np.zeros(length, dtype=np.int8)
+            #         bin_array[indices] = 1
+            #
+            #         return bin_array
+
+            if attr is None:
+                attr = ['pos', 'lick', 'frame', 'enc', 'valve']
+
+            # Fetch behavioral data of the trial, add time scale and merge into np.array
+            data = self.fetch1(*attr)
+            #
+            # # If queried, transform lick and valve indices into an continuously sampled array
+            # if 'lick' in attr:
+            #     data[attr.index('lick')] = data[attr.index('lick')]
+
+            time = self.get_timestamps()
+            return np.vstack((time, *data)).T
+
+        def get_arrays(self, attr: Iterable[str] = None) -> List[np.ndarray]:
+            """
+            Wrapper function of self.get_array() for more than one trial. Returns list of arrays of queried entries.
+
+            Args:
+                attr: List of attributes from the behavior dataset that should be combined. Default is all attributes.
+
+            Returns:
+                A list of ndarrays (# samples, # attributes + 1) with single attributes as columns, the common
+                    time stamp as first column.
+            """
+
+            trial_ids = self.fetch('trial_id')
+            data = [(self & {'trial_id': trial_id}).get_array(attr) for trial_id in trial_ids]
+
+            return data
+
+        def get_timestamps(self) -> np.ndarray:
+            """
+            Returns np.array of time stamps in seconds for behavioral data points.
+
+            Returns:
+                Np.ndarray with shape (n_datapoints,) of time stamps in seconds
+            """
+            n_samples = len(self.fetch1('lick'))
+            # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
+            return np.array(range(0, n_samples * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
+
+        def compute_performances(self, params: dict) -> Tuple[float, float, float]:
+            """
+            Computes lick, binned lick and stop performance of a single trial. Called by VRPerformance.make().
+
+            Args:
+                params: Current entry of PerformanceParameters()
+
+            Returns:
+                Three 1D arrays with different performance metrics: Binned lick ratio, lick count ratio, stop ratio
+            """
+            # TODO: Alternative approaches to calculate performances
+            #  - only count the ONSET of licks per bin, not if a lick went over a bin border (especially impactful if a mouse is running fast while licking)
+            #  - if one bin of a RZ is licked, count it for all bins of that RZ
+            #  - check for mean distance of licked bins to the next RZ
+
+            # Fetch required behavior data as array (columns: time - lick - pos - enc)
+            data = self.get_array(attr=('lick', 'pos', 'enc'))
+
+            # Get reward zone borders for the current trial and add the buffer
+            zone_borders = self.get_zone_borders()
+            zone_borders[:, 0] -= params['vrzone_buffer']
+            zone_borders[:, 1] += params['vrzone_buffer']
+
+            # Find out which reward zones were passed (reward given) if parameter is set (default no)
+            reward_from_merged = False
+            if params['valve_for_passed']:
+                rz_passed = np.zeros(len(zone_borders))
+                for idx, zone in enumerate(zone_borders):
+                    # Get the reward entries at indices where the mouse is in the current RZ
+                    valve = self.fetch1('valve')
+                    rz_data = valve[np.where(np.logical_and(data[:, 2] >= zone[0], data[:, 2] <= zone[1]))]
+                    # Cap reward at 1 per reward zone (ignore possible manual water rewards given)
+                    if rz_data.sum() >= 1:
+                        rz_passed[idx] = 1
+                    else:
+                        rz_passed[idx] = 0
+
+                passed_rz = rz_passed.sum() / len(zone_borders)
+                reward_from_merged = True
+
+            ### GET LICKING DATA ###
+            # select only time point where the mouse licked
+            lick_only = data[np.where(data[:, 1] == 1)]
+
+            if lick_only.shape[0] == 0:
+                lick_count_ratio = np.nan  # set nan, if there was no licking during the trial
+                if not reward_from_merged:
+                    passed_rz = 0
+            else:
+                # remove continuous licks that were longer than 5 seconds
+                diff = np.round(np.diff(lick_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
+                licks = np.split(lick_only,
+                                 np.where(diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample rate
+                licks = [i for i in licks if i.shape[0] <= int(5 / SAMPLE)]  # only keep licks shorter than 5 seconds
+                if len(licks) > 0:
+                    licks = np.vstack(licks)  # put list of arrays together to one array
+                    # out of these, select only time points where the mouse was in a reward zone
+                    lick_zone_only = []
+                    for zone in zone_borders:
+                        lick_zone_only.append(licks[(zone[0] <= licks[:, 2]) & (licks[:, 2] <= zone[1])])
+                    zone_licks = np.vstack(lick_zone_only)
+                    # the length of the zone-only licks divided by the all-licks is the zone-lick ratio
+                    lick_count_ratio = zone_licks.shape[0] / lick_only.shape[0]
+
+                    # correct by fraction of reward zones where the mouse actually licked
+                    if not reward_from_merged:
+                        passed_rz = len([x for x in lick_zone_only if len(x) > 0]) / len(zone_borders)
+                    lick_count_ratio = lick_count_ratio * passed_rz
+
+                    # # correct by the fraction of time the mouse spent in reward zones vs outside
+                    # rz_idx = 0
+                    # for zone in zone_borders:
+                    #     rz_idx += len(np.where((zone[0] <= data[:, 1]) & (data[:, 1] <= zone[1]))[0])
+                    # rz_occupancy = rz_idx/len(data)
+                    # lick_ratio = lick_ratio/rz_occupancy
+
+                else:
+                    lick_count_ratio = np.nan
+                    if not reward_from_merged:
+                        passed_rz = 0
+
+            ### GET BINNED LICKING PERFORMANCE
+            licked_rz_bins = 0
+            licked_nonrz_bins = 0
+            bins = np.arange(start=-10, stop=111, step=1)  # create bin borders for position bins (2 steps/6cm per bin)
+            zone_bins = []
+            for zone in zone_borders:
+                zone_bins.extend(np.arange(start=zone[0], stop=zone[1] + 1, step=params['bin_size']))
+            bin_idx = np.digitize(data[:, 2], bins)
+            # Go through all position bins
+            for curr_bin in np.unique(bin_idx):
+                # Check if there was any licking at the current bin
+                if sum(data[np.where(bin_idx == curr_bin)[0], 1]) >= 1:
+                    # If yes, check if the bin is part of a reward zone
+                    if bins[curr_bin - 1] in zone_bins:
+                        licked_rz_bins += 1  # if yes, the current bin was RZ and thus correctly licked in
+                    else:
+                        licked_nonrz_bins += 1  # if no, the current bin was not RZ and thus incorrectly licked in
+            try:
+                # Ratio of RZ bins that were licked vs total number of licked bins, normalized by factor of passed RZs
+                binned_lick_ratio = (licked_rz_bins / (licked_rz_bins + licked_nonrz_bins)) * passed_rz
+            except ZeroDivisionError:
+                binned_lick_ratio = 0
+
+            ### GET STOPPING DATA ###
+            # select only time points where the mouse was not running (from params (in cm/s) divided by encoder factor)
+            stop_only = data[(-params['velocity_thresh'] / 2.87 <= data[:, 3]) &
+                             (data[:, 3] <= params['velocity_thresh'] / 2.87)]
+            # split into discrete stops
+            diff = np.round(np.diff(stop_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
+            stops = np.split(stop_only, np.where(diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample gap
+            # select only stops that were longer than the specified stop time
+            stops = [i for i in stops if i.shape[0] >= params['stop_time'] / (SAMPLE * 1000)]
+            # select only stops that were inside a reward zone (min or max position was inside a zone border)
+            zone_stop_only = []
+            for zone in zone_borders:
+                zone_stop_only.append([i for i in stops if zone[0] <= np.max(i[:, 1]) <= zone[1] or
+                                       zone[0] <= np.min(i[:, 1]) <= zone[1]])
+            # the number of the zone-only stops divided by the number of the total stops is the zone-stop ratio
+            zone_stops = np.sum([len(i) for i in zone_stop_only])
+            stop_ratio = zone_stops / len(stops)
+
+            return binned_lick_ratio, lick_count_ratio, stop_ratio
+
+        def compute_time_metrics(self, params: dict) -> Tuple[float, float, float]:
+            """
+            Compute mean speed, running speed and trial duration of a single trial.
+
+            Args:
+                params: Current entry of PerformanceParameters()
+
+            Returns:
+                Three different time metrics: mean speed, mean running speed and trial duration of the queried trial
+            """
+
+            # Get mean speed by taking track length / max time stamp. Slightly more accurate than mean(vel) because ITI
+            # running is ignored, but included in vel
+            time = max(self.get_timestamps())
+            length = (VRSessionInfo & self.restriction[0]).fetch1('length')
+            mean_speed = length / time
+
+            # Get mean running speed by filtering out time steps where mouse is stationary
+            vel = self.enc2speed()  # Get velocity in cm/s
+            running_vel = vel[vel >= params['velocity_thresh']]
+            mean_running_speed = np.mean(running_vel)
+
+            return mean_speed, mean_running_speed, time
+
+        @staticmethod
+        def get_condition(key: dict, task: str, condition_switch: List[int]) -> Tuple[str, int]:
+            """
+            Returns condition (RZ position, corridor pattern, tone) of a single trial.
+            Args:
+                key: Primary keys of the queried trial
+                task: Type of task, manually entered in common_exp.Session
+                condition_switch: Trial ID(s) at which the new condition in this session appears. [-1] for no change.
+
+            Returns:
+                Corridor pattern at that trial (corresponds to CorridorPattern()), and if the tone was on (1) or off (0).
+            """
+
+            # No condition switches in novel corridor
+            if (VRLog & key).is_session_novel():
+                return 'novel', 1
+
+            # No condition switch or before first switch
+            if (condition_switch == [-1]) or key['trial_id'] < condition_switch[0]:
+                if ((task == 'Active') or (task == 'Passive')) or key['trial_id'] < condition_switch[0]:
+                    pattern = 'training'
+                    tone = 1
+                else:
+                    raise Exception(f'Error at {key}:\nTask is not Active or Passive, but no condition switch given.')
+
+            # One condition switch in this session, and the current trial is after the switch
+            elif (len(condition_switch) == 1) and key['trial_id'] >= condition_switch[0]:
+                if task == 'No tone':
+                    pattern = 'training'
+                    tone = 0
+                elif task == 'No pattern':
+                    pattern = 'none'
+                    tone = 1
+                elif task == 'Changed distances':
+                    pattern = 'training_shifted'
+                    tone = 1
+                elif task == 'No reward at RZ3':
+                    pattern = 'training'
+                    tone = 1
+                else:
+                    raise Exception('Error at {}:\n'
+                                    'Task condition could not be determined for trial nb {}.'.format(key,
+                                                                                                     key['trial_id']))
+
+            # Two condition switches, and the trial is after the first but before the second, or after the second switch
+            elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (
+                    key['trial_id'] >= condition_switch[1]):
+                pattern = 'none'
+                tone = 0
+            elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (
+                    key['trial_id'] < condition_switch[1]):
+                pattern = 'none'
+                tone = 1
+            else:
+                raise Exception('Error at {}:\n'
+                                'Task condition could not be determined for trial nb {}.'.format(key, key['trial_id']))
+
+            return pattern, tone
 
     def make(self, key: dict) -> None:
         """
-        Fills VRTrial with temporally aligned behavior parameters for all trials of one queried VRSession() entry.
+        Fills VRSession and VRSession.VRTrial with temporally aligned behavior parameters for all trials of each
+        VRSessionInfo() entry.
 
         Args:
-            key: Primary keys of current VRSession() entry
+            key: Primary keys of current VRSessionInfo() entry
         """
 
         print('Starting to align trials for session {}'.format(key))
 
         # Fetch data about the session
         trial_ids = (RawBehaviorFile() & key).fetch('trial_id')  # Trial IDs (should be regularly counting up)
-        imaging = bool((VRSession & key).fetch1('imaging_session'))  # Flag if frame trigger should be created
+        imaging = bool((VRSessionInfo & key).fetch1('imaging_session'))  # Flag if frame trigger should be created
         cond = (common_exp.Session & key).fetch1('task')  # Task condition
-        cond_switch = (VRSession & key).fetch1('condition_switch')  # First trial of new condition
+        cond_switch = (VRSessionInfo & key).fetch1('condition_switch')  # First trial of new condition
+
+        trial_entries = []
 
         for trial_id in trial_ids:
-
             # Initialize relevant variables
             trial_key = dict(**key, trial_id=trial_id)  # dict containing the values of all trial attributes
             frame_count = None  # frame count of the imaging file of that trial
@@ -559,7 +821,7 @@ class VRTrial(dj.Computed):
                 frame_count = (common_img.RawImagingFile & dict(**key, part=trial_id)).fetch1('nr_frames')
 
             # Find out which condition this trial was
-            trial_key['pattern'], trial_key['tone'] = self.get_condition(trial_key, cond, cond_switch)
+            trial_key['pattern'], trial_key['tone'] = self.VRTrial().get_condition(trial_key, cond, cond_switch)
 
             # Get time stamp from filename
             time_format = '%H%M%S'
@@ -577,9 +839,22 @@ class VRTrial(dj.Computed):
             merge = self.align_behavior_files(trial_key, data['enc'], data['tcp'], data['tdt'],
                                               imaging=imaging, frame_count=frame_count)
 
+            # Transform lick and valve to event-time indices instead of continuous sampling to save disk space
+            # lick_idx = np.where(merge[:, 2] == 1)[0]
+            # frame_idx = np.where(merge[:, 3] == 1)[0]
+            # valve_idx = np.where(merge[:, 5] == 1)[0]
+
+            # Disk usages for sample session M93, 20210708: (with dj.size_on_disk)
+            # All continuous, int8: 65536
+            # All continuous, int: 65536
+            # All idx, int32: 98304
+            # Frame continuous, rest idx: 65536
+            # Valve continuous, rest idx: 98304
+            # Lick continuous, rest idx: 81920
+            # -> Datajoint stores small integers more efficiently than large integers, so continuous sampling is better
+
             if merge is not None:
                 # parse columns into entry dict and typecast to int to save disk space
-                # TODO: make "frame" and "valve" to event-times rather than continuous sampling?
                 trial_key['pos'] = merge[:, 1].astype(np.float32)
                 trial_key['lick'] = merge[:, 2].astype(int)
                 trial_key['frame'] = merge[:, 3].astype(int)
@@ -588,85 +863,14 @@ class VRTrial(dj.Computed):
             else:
                 raise ValueError("Alignment returned None, check trial!")
 
-            # Insert entry of the trial into the database
-            self.insert1(trial_key)
+            # Add entry to entry list
+            trial_entries.append(trial_key)
 
-    def get_condition(self, key: dict, task: str, condition_switch: Iterable[int]) -> Tuple[str, int]:
-        """
-        Returns condition (RZ position, corridor pattern, tone) of a single trial.
-        Args:
-            key: Primary keys of the queried trial
-            task: Type of task, manually entered in common_exp.Session
-            condition_switch: Trial ID(s) at which the new condition in this session appears. [-1] for no change.
+        # Insert entry of the master table into the database
+        self.insert1(key)
 
-        Returns:
-            Corridor pattern at that trial (corresponds to CorridorPattern()), and if the tone was on (1) or off (0).
-        """
-
-        # No condition switches in novel corridor
-        if self.is_session_novel(key):
-            return 'novel', 1
-
-        # No condition switch or before first switch
-        if (condition_switch == [-1]) or key['trial_id'] < condition_switch[0]:
-            if ((task == 'Active') or (task == 'Passive')) or key['trial_id'] < condition_switch[0]:
-                pattern = 'training'
-                tone = 1
-            else:
-                raise Exception(f'Error at {key}:\nTask is not Active or Passive, but no condition switch given.')
-
-        # One condition switch in this session, and the current trial is after the switch
-        elif (len(condition_switch) == 1) and key['trial_id'] >= condition_switch[0]:
-            if task == 'No tone':
-                pattern = 'training'
-                tone = 0
-            elif task == 'No pattern':
-                pattern = 'none'
-                tone = 1
-            elif task == 'Changed distances':
-                pattern = 'training_shifted'
-                tone = 1
-            elif task == 'No reward at RZ3':
-                pattern = 'training'
-                tone = 1
-            else:
-                raise Exception('Error at {}:\n'
-                                'Task condition could not be determined for trial nb {}.'.format(key, key['trial_id']))
-
-        # Two condition switches, and the trial is after the first but before the second, or after the second switch
-        elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (
-                key['trial_id'] >= condition_switch[1]):
-            pattern = 'none'
-            tone = 0
-        elif task == 'No pattern and tone' and (len(condition_switch) == 2) and (key['trial_id'] < condition_switch[1]):
-            pattern = 'none'
-            tone = 1
-        else:
-            raise Exception('Error at {}:\n'
-                            'Task condition could not be determined for trial nb {}.'.format(key, key['trial_id']))
-
-        return pattern, tone
-
-    def is_session_novel(self, sess_key: dict) -> bool:
-        """
-        Checks whether the session of 'sess_key' is in the novel corridor (from VR zone borders)
-        Args:
-            sess_key: Primary keys to query entry of VRLog()
-
-        Returns:
-            Boolean flag whether the queried session is in the novel (True) or training (False) corridor
-        """
-        # Get event log
-        log_events = (VRLog & sess_key).get_dataframe()['log_event']
-        # Get the rounded position of the first reward zone
-        rz_pos = int(
-            np.round(float(log_events[log_events.str.contains('VR enter Reward Zone:')].iloc[0].split(':')[1])))
-        if rz_pos == -6:
-            return False
-        elif rz_pos == 9:
-            return True
-        else:
-            print(f'Could not determine context in session {self.key}!\n')
+        # Insert trial entries into the part table
+        self.VRTrial().insert(trial_entries)
 
     @staticmethod
     def align_behavior_files(trial_key: dict, encoder: np.ndarray, position: np.ndarray, trigger: np.ndarray,
@@ -829,7 +1033,7 @@ class VRTrial(dj.Computed):
         merge = pd.merge_asof(merge, df_list[data_times[3]], left_index=True, right_index=True)
 
         ### Get valve opening times from LOG file
-        # Load LOG file TODO maybe make another boolean column with "being in reward zone"
+        # Load LOG file
         log = (VRLog & trial_key).get_dataframe()
         if log is not None:
             # Filter out bad lines if Datetime column could not be parsed
@@ -872,152 +1076,6 @@ class VRTrial(dj.Computed):
 
         return array
 
-    def compute_performances(self, params: dict) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Computes lick, binned lick and stop performance of a single trial. Called by VRPerformance.make().
-
-        Args:
-            params: Current entry of PerformanceParameters()
-
-        Returns:
-            Three 1D arrays with different performance metrics: Binned lick ratio, lick count ratio, stop ratio
-        """
-        # TODO: Alternative approaches to calculate performances
-        #  - only count the ONSET of licks per bin, not if a lick went over a bin border (especially impactful if a mouse is running fast while licking)
-        #  - if one bin of a RZ is licked, count it for all bins of that RZ
-        #  - check for mean distance of licked bins to the next RZ
-
-        # Fetch required behavior data as array (columns: time - lick - pos - enc)
-        data = self.get_array(attr=('lick', 'pos', 'enc'))
-
-        # Get reward zone borders for the current trial and add the buffer
-        zone_borders = self.get_zone_borders()
-        zone_borders[:, 0] -= params['vrzone_buffer']
-        zone_borders[:, 1] += params['vrzone_buffer']
-
-        # Find out which reward zones were passed (reward given) if parameter is set (default no)
-        reward_from_merged = False
-        if params['valve_for_passed']:
-            rz_passed = np.zeros(len(zone_borders))
-            for idx, zone in enumerate(zone_borders):
-                # Get the reward entries at indices where the mouse is in the current RZ
-                valve = self.fetch1('valve')
-                rz_data = valve[np.where(np.logical_and(data[:, 2] >= zone[0], data[:, 2] <= zone[1]))]
-                # Cap reward at 1 per reward zone (ignore possible manual water rewards given)
-                if rz_data.sum() >= 1:
-                    rz_passed[idx] = 1
-                else:
-                    rz_passed[idx] = 0
-
-            passed_rz = rz_passed.sum() / len(zone_borders)
-            reward_from_merged = True
-
-        ### GET LICKING DATA ###
-        # select only time point where the mouse licked
-        lick_only = data[np.where(data[:, 1] == 1)]
-
-        if lick_only.shape[0] == 0:
-            lick_count_ratio = np.nan  # set nan, if there was no licking during the trial
-            if not reward_from_merged:
-                passed_rz = 0
-        else:
-            # remove continuous licks that were longer than 5 seconds
-            diff = np.round(np.diff(lick_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
-            licks = np.split(lick_only, np.where(diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample rate
-            licks = [i for i in licks if i.shape[0] <= int(5 / SAMPLE)]  # only keep licks shorter than 5 seconds
-            if len(licks) > 0:
-                licks = np.vstack(licks)  # put list of arrays together to one array
-                # out of these, select only time points where the mouse was in a reward zone
-                lick_zone_only = []
-                for zone in zone_borders:
-                    lick_zone_only.append(licks[(zone[0] <= licks[:, 2]) & (licks[:, 2] <= zone[1])])
-                zone_licks = np.vstack(lick_zone_only)
-                # the length of the zone-only licks divided by the all-licks is the zone-lick ratio
-                lick_count_ratio = zone_licks.shape[0] / lick_only.shape[0]
-
-                # correct by fraction of reward zones where the mouse actually licked
-                if not reward_from_merged:
-                    passed_rz = len([x for x in lick_zone_only if len(x) > 0]) / len(zone_borders)
-                lick_count_ratio = lick_count_ratio * passed_rz
-
-                # # correct by the fraction of time the mouse spent in reward zones vs outside
-                # rz_idx = 0
-                # for zone in zone_borders:
-                #     rz_idx += len(np.where((zone[0] <= data[:, 1]) & (data[:, 1] <= zone[1]))[0])
-                # rz_occupancy = rz_idx/len(data)
-                # lick_ratio = lick_ratio/rz_occupancy
-
-            else:
-                lick_count_ratio = np.nan
-                if not reward_from_merged:
-                    passed_rz = 0
-
-        ### GET BINNED LICKING PERFORMANCE
-        licked_rz_bins = 0
-        licked_nonrz_bins = 0
-        bins = np.arange(start=-10, stop=111, step=1)  # create bin borders for position bins (2 steps/6cm per bin)
-        zone_bins = []
-        for zone in zone_borders:
-            zone_bins.extend(np.arange(start=zone[0], stop=zone[1] + 1, step=params['bin_size']))
-        bin_idx = np.digitize(data[:, 2], bins)
-        # Go through all position bins
-        for curr_bin in np.unique(bin_idx):
-            # Check if there was any licking at the current bin
-            if sum(data[np.where(bin_idx == curr_bin)[0], 1]) >= 1:
-                # If yes, check if the bin is part of a reward zone
-                if bins[curr_bin - 1] in zone_bins:
-                    licked_rz_bins += 1  # if yes, the current bin was RZ and thus correctly licked in
-                else:
-                    licked_nonrz_bins += 1  # if no, the current bin was not RZ and thus incorrectly licked in
-        try:
-            # Ratio of RZ bins that were licked vs total number of licked bins, normalized by factor of passed RZs
-            binned_lick_ratio = (licked_rz_bins / (licked_rz_bins + licked_nonrz_bins)) * passed_rz
-        except ZeroDivisionError:
-            binned_lick_ratio = 0
-
-        ### GET STOPPING DATA ###
-        # select only time points where the mouse was not running (from params (in cm/s) divided by encoder factor)
-        stop_only = data[(-params['velocity_thresh'] / 2.87 <= data[:, 3]) &
-                         (data[:, 3] <= params['velocity_thresh'] / 2.87)]
-        # split into discrete stops
-        diff = np.round(np.diff(stop_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
-        stops = np.split(stop_only, np.where(diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample gap
-        # select only stops that were longer than the specified stop time
-        stops = [i for i in stops if i.shape[0] >= params['stop_time'] / (SAMPLE * 1000)]
-        # select only stops that were inside a reward zone (min or max position was inside a zone border)
-        zone_stop_only = []
-        for zone in zone_borders:
-            zone_stop_only.append([i for i in stops if zone[0] <= np.max(i[:, 1]) <= zone[1] or
-                                   zone[0] <= np.min(i[:, 1]) <= zone[1]])
-        # the number of the zone-only stops divided by the number of the total stops is the zone-stop ratio
-        zone_stops = np.sum([len(i) for i in zone_stop_only])
-        stop_ratio = zone_stops / len(stops)
-
-        return binned_lick_ratio, lick_count_ratio, stop_ratio
-
-    def compute_time_metrics(self, params: dict) -> Tuple[float, float, float]:
-        """
-        Compute mean speed, running speed and trial duration of a single trial.
-
-        Args:
-            params: Current entry of PerformanceParameters()
-
-        Returns:
-            Three different time metrics: mean speed, mean running speed and trial duration of the queried trial
-        """
-
-        # Get mean speed by taking track length / max time stamp. Slightly more accurate than mean(vel) because ITI
-        # running is ignored, but included in vel
-        time = max(self.get_timestamps())
-        length = (VRSession & self.restriction[0]).fetch1('length')
-        mean_speed = length / time
-
-        # Get mean running speed by filtering out time steps where mouse is stationary
-        vel = self.enc2speed()  # Get velocity in cm/s
-        running_vel = vel[vel >= params['velocity_thresh']]
-        mean_running_speed = np.mean(running_vel)
-
-        return mean_speed, mean_running_speed, time
 
 @schema
 class PerformanceParameters(dj.Lookup):
@@ -1058,7 +1116,7 @@ class VRPerformance(dj.Computed):
         """
         Computes general performance metrics from individual trials of a session with a certain set of parameters.
         Args:
-            key: Primary keys of the union of the current VRSession and PerformanceParameters entry.
+            key: Primary keys of the union of the current VRSessionInfo and PerformanceParameters entry.
         """
 
         # Get current set of parameters
@@ -1067,18 +1125,12 @@ class VRPerformance(dj.Computed):
         # Initialize dict that will hold single-trial lists (one per (non-primary) attribute)
         trial_data = {key: [] for key in self.heading if key not in self.primary_key}
 
-        trial_ids = (VRTrial & key).fetch('trial_id')
+        trial_ids = (VRSession.VRTrial & key).fetch('trial_id')
 
         # Process every trial (start with 1 because trial_id is 1-based
         for trial_id in trial_ids:
             # Store query of current trial
-            trial = (VRTrial & key & 'trial_id={}'.format(trial_id))
-
-            # # Fetch behavioral data of the current trial, add time scale and merge into np.array
-            # lick, pos, enc = trial.fetch1('lick', 'pos', 'enc')
-            # # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
-            # time = np.array(range(0, len(lick) * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
-            # data = np.vstack((time, lick, pos, enc)).T
+            trial = (VRSession.VRTrial & key & 'trial_id={}'.format(trial_id))
 
             # Compute lick and stop performances
             binned_lick_ratio, lick_count_ratio, stop_ratio = trial.compute_performances(params)
@@ -1086,13 +1138,13 @@ class VRPerformance(dj.Computed):
             # Compute time metrics
             mean_speed, mean_running_speed, trial_duration = trial.compute_time_metrics(params)
 
-            # Add trial metrics to data dict
-            trial_data['binned_lick_ratio'].append(binned_lick_ratio)
-            trial_data['lick_count_ratio'].append(lick_count_ratio)
-            trial_data['stop_ratio'].append(stop_ratio)
-            trial_data['mean_speed'].append(mean_speed)
-            trial_data['mean_running_speed'].append(mean_running_speed)
-            trial_data['trial_duration'].append(trial_duration)
+            # Add trial metrics to data dict, convert to float32 before to save disk space
+            trial_data['binned_lick_ratio'].append(np.float32(binned_lick_ratio))
+            trial_data['lick_count_ratio'].append(np.float32(lick_count_ratio))
+            trial_data['stop_ratio'].append(np.float32(stop_ratio))
+            trial_data['mean_speed'].append(np.float32(mean_speed))
+            trial_data['mean_running_speed'].append(np.float32(mean_running_speed))
+            trial_data['trial_duration'].append(np.float32(trial_duration))
 
         # Combine primary dict "key" with attributes "trial_data" and insert entry
         self.insert1({**key, **trial_data})
@@ -1138,8 +1190,9 @@ class PerformanceTrend(dj.Computed):
     definition = """ # Trend analysis metrics of performance across trials of a session. LinReg via statsmodels.OLS()
     -> VRPerformance
     ---
-    p_normality = NULL    : float           # p-value of stats.normaltest (D'Agostino + Pearson's omnibus test)
-                                            # (can only be reliably determined for >20 trials, otherwise p=1).
+    p_normality = NULL    : float           # p-value whether single-trial performance datapoints are normal distributed
+                                            # (D'Agostino + Pearson's omnibus test). Can only be reliably determined for 
+                                            # >20 trials, otherwise p=1 and assumed non-normality.
     perf_corr = NULL      : float           # Correlation coefficient, through Pearson or Spearman (dep. on p_normality)
     p_perf_corr = NULL    : float           # p-value of correlation coefficient (strongly depends on sample size)
     perf_r2 = NULL        : float           # R-squared value of the OLS model (how much is y explained by x?)

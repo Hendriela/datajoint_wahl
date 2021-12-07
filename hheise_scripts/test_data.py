@@ -10,7 +10,7 @@ common_exp.Session.insert1(data)
 
 # manual key
 key = {'username': 'hheise', 'mouse_id': 81, 'session_num': 1, 'day': datetime.strptime('2021-06-17', '%Y-%m-%d'), 'perf_param_id':0}
-hheise_behav.VRSession().make(key)
+hheise_behav.VRSessionInfo().make(key)
 
 # Matteos session that should be ignored by populate()
 common_exp.Session.insert1({"username": "mpanze", "mouse_id": 1, "day": '1900-01-01', "session_num": 1, "session_id": 'hheise_M001_1900-01-01_00',
@@ -18,7 +18,7 @@ common_exp.Session.insert1({"username": "mpanze", "mouse_id": 1, "day": '1900-01
                  "task": "Passive", "experimenter": "mpanze", "session_notes": "A test session"})
 
 common_exp.Session()
-hheise_behav.VRSession().populate('username="hheise"')
+hheise_behav.VRSessionInfo().populate('username="hheise"')
 
 test = [1,2,3,4,5,6]
 
@@ -52,9 +52,9 @@ log = pd.DataFrame({'log_time': self.fetch1('log_time'),
               'log_trial': self.fetch1('log_trial'),
                'log_event': self.fetch1('log_event')})
 
-#%% Test VRSession validation
+#%% Test VRSessionInfo validation
 key = {'username': 'hheise', 'mouse_id': 81, 'session_num': 1, 'day': datetime.strptime('2021-06-17', '%Y-%m-%d')}
-sess_trials = hheise_behav.VRSession.VRTrial() & key
+sess_trials = hheise_behav.VRSessionInfo.VRTrial() & key
 
 lys = []
 for i in range(1,7):
@@ -89,16 +89,16 @@ restored = pickle.loads(results_pick)
 
 # Test performance plotting
 self = (hheise_behav.VRPerformance * common_mice.Mouse) & 'batch=7'
-self = hheise_behav.VRSession.VRTrial & 'mouse_id=81' & 'day="2021-07-05"'
-position = (hheise_behav.VRSession.VRTrial & 'mouse_id=81' & 'day="2021-07-05"' & 'trial_id=1').fetch1('pos')
+self = hheise_behav.VRSessionInfo.VRTrial & 'mouse_id=81' & 'day="2021-07-05"'
+position = (hheise_behav.VRSessionInfo.VRTrial & 'mouse_id=81' & 'day="2021-07-05"' & 'trial_id=1').fetch1('pos')
 enc_path = r"W:\Neurophysiology-Storage1\Wahl\Hendrik\PhD\Data\Batch7\M81\20210705\Encoder data20210705_143133.txt"
 pos_path = r"W:\Neurophysiology-Storage1\Wahl\Hendrik\PhD\Data\Batch7\M81\20210705\TCP read data20210705_143134.txt"
 trig_path = r"W:\Neurophysiology-Storage1\Wahl\Hendrik\PhD\Data\Batch7\M81\20210705\TDT TASK DIG-IN_20210705_143134.txt"
 
 attr = ['frame', 'lick', 'enc', 'pos', 'valve']
 # Fetch behavioral data of the current trial, add time scale and merge into np.array
-data = (hheise_behav.VRSession.VRTrial & 'mouse_id=81' & 'day="2021-07-05"' & 'trial_id=1').fetch1(*attr)
+data = (hheise_behav.VRSessionInfo.VRTrial & 'mouse_id=81' & 'day="2021-07-05"' & 'trial_id=1').fetch1(*attr)
 # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
 time = np.array(range(0, len(data[0]) * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
 array = np.vstack((time, *data)).T
-position = (hheise_behav.VRSession.VRTrial & 'mouse_id=81' & 'day="2021-07-05"' & 'trial_id=1').fetch1('pos')
+position = (hheise_behav.VRSessionInfo.VRTrial & 'mouse_id=81' & 'day="2021-07-05"' & 'trial_id=1').fetch1('pos')

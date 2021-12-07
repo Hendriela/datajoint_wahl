@@ -105,7 +105,7 @@ class PCAnalysis(dj.Computed):
         params = (PlaceCellParameter & key).fetch1()
 
         # Compute number of bins, depends on the track length and user-parameter bin_length
-        track_length = (hheise_behav.VRSession & key).fetch1('length')
+        track_length = (hheise_behav.VRSessionInfo & key).fetch1('length')
         if track_length % params['bin_length'] == 0:
             n_bins = int(track_length / params['bin_length'])
         else:
@@ -211,111 +211,129 @@ class TransientOnly(dj.Computed):
 
 @schema
 class Synchronization (dj.Computed):
-    definition = """ # Synchronized frame times binned to VR position, one entry per trial
-    -> hheise_behav.VRTrial
-    -> PlaceCellParameter
+    definition = """ # Synchronized frame times binned to VR position of this session, trial data in part table
+    -> PCAnalysis
     ------
-    running_mask    : longblob      # Bool array with shape (n_frames), False if mouse was stationary during this frame
-    aligned_frames  : longblob      # np.array with shape (n_bins), number of frames averaged in each VR position bin
+    time_sync = CURRENT_TIMESTAMP    : timestamp     # automatic timestamp
     """
+
+    class VRTrial(dj.Part):
+        definition = """ # Frame numbers aligned to VR position and spatially binned for individual trials
+        -> Synchronization
+        trial_id        : tinyint   # Counter of the trial in the session, same as RawImagingFile's 'part', base 0
+        ---
+        running_mask    : longblob  # Bool array with shape (n_frames), False if mouse was stationary during this frame
+        aligned_frames  : longblob  # np.array with shape (n_bins), number of frames averaged in each VR position bin
+        """
 
     def make(self, key: dict) -> None:
         """
         Align frame times with VR position and bin frames into VR position bins for each trial in a session.
 
         Args:
-            key: Primary keys of the current Segmentation() entry.
+            key: Primary keys of the current PCAnalysis() entry.
         """
 
-        # print('Populating Synchronization for {}'.format(key))
+        print('Populating Synchronization for {}'.format(key))
 
-        # Load and calculate necessary parameters
+        # Load parameters and data
         params = (PlaceCellParameter & key).fetch1()
-        frame_count = (common_img.RawImagingFile & dict(**key, part=key['trial_id'])).fetch1('nr_frames')
-
+        params['n_bins'] = (PCAnalysis & key).fetch1('n_bins')
+        trial_ids, frame_counts = (common_img.RawImagingFile & key).fetch('part', 'nr_frames')
         # The given attributes will be columns in the array, next to time stamp in col 0
-        behavior = (hheise_behav.VRTrial & key).get_array(attr=['pos', 'lick', 'frame', 'enc', 'valve'])
+        behavior = (hheise_behav.VRSession.VRTrial & key).get_arrays(attr=['pos', 'lick', 'frame', 'enc', 'valve'])
 
-        if params['encoder_unit'] == 'speed':
-            curr_speed = (hheise_behav.VRTrial & key).enc2speed()
+        trial_entries = []
 
-        # Make mask with length n_frames that is False for frames where the mouse was stationary (or True everywhere if
-        # exclude_rest = 0).
-        running_mask = np.ones(frame_count, dtype=bool)
-        if params['exclude_rest']:
-            frame_idx = np.where(behavior[:, 3] == 1)[0]  # find idx of all frames
+        for trial_idx, trial_id in enumerate(trial_ids):
+            # If necessary, translate encoder data to running speed in cm/s
+            if params['encoder_unit'] == 'speed':
+                curr_speed = (hheise_behav.VRSession.VRTrial & dict(**key, trial_id=trial_id)).enc2speed()
 
-            # Because data collection starts at the first frame, there is no running data available before it.
-            # Mice usually run at the beginning of the trial, so we assume that the frame is not stationary and just
-            # skip the first frame and start with i=1.
-            for i in range(1, len(frame_idx)):
-                # TODO: implement smoothing speed (2 s window) before removing (after Harvey 2009)
-                if params['encoder_unit'] == 'speed':
-                    if np.mean(curr_speed[frame_idx[i - 1]:frame_idx[i]]) <= params['running_thresh']:
-                        # set index of mask to False (excluded in later analysis)
-                        running_mask[i] = False
-                        # set the bad frame in the behavior array to 0 to skip it during bin_frame_counting
-                        behavior[frame_idx[i], 3] = np.nan
-                elif params['encoder_unit'] == 'raw':
-                    if np.sum(behavior[frame_idx[i - 1]:frame_idx[i], 4]) < params['running_thresh']:
-                        # set index of mask to False (excluded in later analysis)
-                        running_mask[i] = False
-                        # set the bad frame in the behavior array to 0 to skip it during bin_frame_counting
-                        behavior[frame_idx[i], 3] = np.nan
-                else:
-                    raise ValueError(f"Encoder unit {params['encoder_unit']} not recognized, behavior not aligned.")
+            # Make mask with length n_frames that is False for frames where the mouse was stationary (or True everywhere if
+            # exclude_rest = 0).
+            running_mask = np.ones(frame_counts[trial_idx], dtype=bool)
+            if params['exclude_rest']:
+                frame_idx = np.where(behavior[trial_idx][:, 3] == 1)[0]  # find idx of all frames
 
-        # Get frame counts for each bin for complete trial (moving and resting frames)
-        bin_frame_count = np.zeros((params['n_bins']), 'int')
+                # Because data collection starts at the first frame, there is no running data available before it.
+                # Mice usually run at the beginning of the trial, so we assume that the frame is not stationary and just
+                # skip the first frame and start with i=1.
+                for i in range(1, len(frame_idx)):
+                    # TODO: implement smoothing speed (2 s window) before removing (after Harvey 2009)
+                    if params['encoder_unit'] == 'speed':
+                        if np.mean(curr_speed[frame_idx[i - 1]:frame_idx[i]]) <= params['running_thresh']:
+                            # set index of mask to False (excluded in later analysis)
+                            running_mask[i] = False
+                            # set the bad frame in the behavior array to 0 to skip it during bin_frame_counting
+                            behavior[trial_idx][frame_idx[i], 3] = np.nan
+                    elif params['encoder_unit'] == 'raw':
+                        if np.sum(behavior[trial_idx][frame_idx[i - 1]:frame_idx[i], 4]) < params['running_thresh']:
+                            # set index of mask to False (excluded in later analysis)
+                            running_mask[i] = False
+                            # set the bad frame in the behavior array to 0 to skip it during bin_frame_counting
+                            behavior[trial_idx][frame_idx[i], 3] = np.nan
+                    else:
+                        raise ValueError(f"Encoder unit {params['encoder_unit']} not recognized, behavior not aligned.")
 
-        # bin data in distance chunks
-        bin_borders = np.linspace(-10, 110, params['n_bins'])
-        idx = np.digitize(behavior[:, 1], bin_borders)  # get indices of bins
+            # Get frame counts for each bin for complete trial (moving and resting frames)
+            bin_frame_count = np.zeros((params['n_bins']), 'int')
 
-        # check how many frames are in each bin
-        for i in range(params['n_bins']):
-            bin_frame_count[i] = np.nansum(behavior[np.where(idx == i + 1), 3])
+            # bin data in distance chunks
+            bin_borders = np.linspace(-10, 110, params['n_bins'])
+            idx = np.digitize(behavior[trial_idx][:, 1], bin_borders)  # get indices of bins
 
-        # check that every bin has at least one frame in it
-        if np.any(bin_frame_count == 0):
-            all_zero_idx = np.where(bin_frame_count == 0)[0]
-            # if not, take a frame of the next bin. If the mouse is running that fast, the recorded calcium will lag
-            # behind the actual activity in terms of mouse position, so spikes from a later time point will probably be
-            # related to an earlier actual position. (or the previous bin in case its the last bin)
-            for zero_idx in all_zero_idx:
-                # If the bin with no frames is the last bin, take one frame from the second-last bin
-                if zero_idx == 79 and bin_frame_count[78] > 1:
-                    bin_frame_count[78] -= 1
-                    bin_frame_count[79] += 1
-                # Otherwise, take it from the next bin, but only if the next bin has more than 1 frame itself
-                elif zero_idx < 79 and bin_frame_count[zero_idx+1] > 1:
-                    bin_frame_count[zero_idx+1] -= 1
-                    bin_frame_count[zero_idx] += 1
-                # This error is raised if two consecutive bins have no frames
-                else:
-                    raise ValueError('Error in {}:\nNo frame in this bin, could not be corrected: {}'.format(key,
-                                                                                                             zero_idx))
+            # check how many frames are in each bin
+            for i in range(params['n_bins']):
+                bin_frame_count[i] = np.nansum(behavior[trial_idx][np.where(idx == i + 1), 3])
 
-        # Enter data into table
-        self.insert1(dict(**key, running_mask=running_mask, aligned_frames=bin_frame_count))
+            # check that every bin has at least one frame in it
+            if np.any(bin_frame_count == 0):
+                all_zero_idx = np.where(bin_frame_count == 0)[0]
+                # if not, take a frame of the next bin. If the mouse is running that fast, the recorded calcium will lag
+                # behind the actual activity in terms of mouse position, so spikes from a later time point will probably be
+                # related to an earlier actual position. (or the previous bin in case its the last bin)
+                for zero_idx in all_zero_idx:
+                    # If the bin with no frames is the last bin, take one frame from the second-last bin
+                    if zero_idx == 79 and bin_frame_count[78] > 1:
+                        bin_frame_count[78] -= 1
+                        bin_frame_count[79] += 1
+                    # Otherwise, take it from the next bin, but only if the next bin has more than 1 frame itself
+                    elif zero_idx < 79 and bin_frame_count[zero_idx+1] > 1:
+                        bin_frame_count[zero_idx+1] -= 1
+                        bin_frame_count[zero_idx] += 1
+                    # This error is raised if two consecutive bins have no frames
+                    else:
+                        raise ValueError('Error in {}:\nNo frame in this bin, could not be corrected: {}'.format(key,
+                                                                                                                 zero_idx))
+
+            # Save trial entry for later combined insertion
+            trial_entries.append(dict(**key, trial_id=trial_id, running_mask=running_mask,
+                                      aligned_frames=bin_frame_count))
+
+        # After all trials are processed, make entry into master table
+        self.insert1(key)
+
+        # And enter trial data into part table
+        self.VRTrial().insert(trial_entries)
 
 
 @schema
 class BinnedActivity(dj.Computed):
-    definition = """ # Spatially binned dF/F traces to VR position, one entry per trial
+    definition = """ # Spatially binned dF/F traces to VR position, one entry per session
     -> Synchronization
     ------
     time_bin_act = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
     """
 
     class ROI(dj.Part):
-        definition = """ # Data of single neurons
+        definition = """ # Data of single neurons, trials stacked as axis 1 (columns) in np.array
         -> BinnedActivity
         mask_id         : int       # Mask index (as in Segmentation.ROI, base 0)
         -----
-        bin_activity   : longblob   # Array with shape (n_bins), spatially binned single-trial dF/F trace
+        bin_activity   : longblob   # Array with shape (n_bins, n_trials), spatially binned single-trial dF/F trace
         bin_spikes     : longblob   # Same as bin_activity, but with estimated CASCADE spike probabilities
-        bin_spikerate  : longblob   # Same as bin_activity, but with estimated CASCADE spikerates 
+        bin_spikerate  : longblob   # Same as bin_activity, but with estimated CASCADE spikerates
         """
 
     def make(self, key: dict) -> None:
@@ -333,60 +351,93 @@ class BinnedActivity(dj.Computed):
         # Fetch activity traces and parameter sets
         traces, unit_ids = (common_img.Segmentation & key).get_traces(include_id=True)
         spikes = (common_img.Segmentation & key).get_traces(trace_type='decon')
-        n_bins = (PCAnalysis & key).fetch1('n_bins')
-        trial_mask = (PCAnalysis & key).fetch1('trial_mask')
-        running_mask = (Synchronization & key).fetch1('running_mask')
-        bin_frame_count = (Synchronization & key).fetch1('aligned_frames')
-
-        # Create bin mask from frame counts
-        bin_masks = []
-        for idx, n_frames in enumerate(bin_frame_count):
-            bin_masks.append(np.full(n_frames, idx))
-        bin_mask = np.concatenate(bin_masks)
-
-        # Enter master table entry
-        self.insert1(key)
+        n_bins, trial_mask = (PCAnalysis & key).fetch1('n_bins', 'trial_mask')
+        running_masks, bin_frame_counts = (Synchronization.VRTrial & key).fetch('running_mask', 'aligned_frames')
+        n_trials = len(running_masks)
 
         # Create part table entries
-        part_entries = []
+        part_entries = []   # Store entries for each neuron in a list
         for unit_id, trace, spike in zip(unit_ids, traces, spikes):
 
-            # Get section of current trial from the trace
-            trial_trace = trace[trial_mask == key['trial_id']]
-            trial_spike = spike[trial_mask == key['trial_id']]
+            binned_trace = np.zeros((n_bins, n_trials))
+            binned_spike = np.zeros((n_bins, n_trials))
+            binned_spikerate = np.zeros((n_bins, n_trials))
 
-            # Filter out non-running frames
-            trial_trace = trial_trace[running_mask]
-            trial_spike = trial_spike[running_mask]
+            for trial_idx, (running_mask, bin_frame_count) in enumerate(zip(running_masks, bin_frame_counts)):
+                # Create bin mask from frame counts
+                bin_masks = []
+                for idx, n_frames in enumerate(bin_frame_count):
+                    bin_masks.append(np.full(n_frames, idx))
+                bin_mask = np.concatenate(bin_masks)
 
-            # Iteratively for all bins, average trace and sum spike probabilities
-            binned_trace = np.zeros(n_bins)
-            binned_spike = np.zeros(n_bins)
-            for bin_idx in range(n_bins):
-                bin_trace = trial_trace[bin_mask == bin_idx]
-                bin_spike = trial_spike[bin_mask == bin_idx]
+                # Get section of current trial from the session-wide trace and filter out non-running frames
+                trial_trace = trace[trial_mask == trial_idx][running_mask]
+                trial_spike = spike[trial_mask == trial_idx][running_mask]
 
-                if len(bin_trace):       # Test if there is data for the current bin, otherwise raise error
-                    binned_trace[bin_idx] = np.mean(bin_trace)
-                    # sum instead of mean (CASCADE's spike probability is cumulative)
-                    binned_spike[bin_idx] = np.nansum(bin_spike)
-                else:
-                    raise IndexError("Entry {}:\n\tNeuron {}, in {} returned empty array, "
-                                     "could not bin trace.".format(key, unit_id, bin_idx))
+                # Iteratively for all bins, average trace and sum spike probabilities
+                for bin_idx in range(n_bins):
+                    bin_trace = trial_trace[bin_mask == bin_idx]
+                    bin_spike = trial_spike[bin_mask == bin_idx]
 
-            # Smooth average spike rate and transform values into mean firing rates by dividing by the time in s
-            # occupied by the bin (from number of samples * sampling rate)
+                    if len(bin_trace):       # Test if there is data for the current bin, otherwise raise error
+                        binned_trace[bin_idx, trial_idx] = np.mean(bin_trace)
+                        # sum instead of mean (CASCADE's spike probability is cumulative)
+                        binned_spike[bin_idx, trial_idx] = np.nansum(bin_spike)
+                    else:
+                        raise IndexError("Entry {}:\n\tNeuron {}, in {} returned empty array, "
+                                         "could not bin trace.".format(key, unit_id, bin_idx))
 
-            # Todo: Discuss if smoothing the binned spikes across spatial bins (destroying temporal resolution) is
-            #  actually necessary
-            # smooth_binned_spike = gaussian_filter1d(binned_spike, 1)
-            binned_spikerate = binned_spike/(bin_frame_count / (common_img.ScanInfo & key).fetch1('fr'))
+                # Smooth average spike rate and transform values into mean firing rates by dividing by the time in s
+                # occupied by the bin (from number of samples * sampling rate)
+
+                # Todo: Discuss if smoothing the binned spikes across spatial bins (destroying temporal resolution) is
+                #  actually necessary
+                # smooth_binned_spike = gaussian_filter1d(binned_spike, 1)
+                bin_times = bin_frame_count / (common_img.ScanInfo & key).fetch1('fr')
+                binned_spikerate[:, trial_idx] = binned_spike[:, trial_idx]/bin_times
 
             part_entries.append(dict(**key, mask_id=unit_id,
                                      bin_activity=np.array(binned_trace, dtype=np.float32),
                                      bin_spikes=np.array(binned_spike, dtype=np.float32),
                                      bin_spikerate=np.array(binned_spikerate, dtype=np.float32)))
 
+        # Enter master table entry
+        self.insert1(key)
+        
+        # Enter part table entries
         self.ROI().insert(part_entries)
+
+    def get_trial_avg(self, trace: str) -> np.array:
+        """
+        Compute trial-averaged VR position bin values for a given trace of one queried session.
+
+        Args:
+            trace: Trace type. Has to be attr of self.ROI(): bin_activity (dF/F), bin_spikes (spikes, decon),
+                    bin_spikerate (spikerate).
+
+        Returns:
+            Numpy array with shape (n_neurons, n_bins) with traces averaged over queried trials (one session).
+        """
+
+        # Accept multiple inputs
+        if trace in ['bin_activity', 'dff']:
+            trace = 'bin_activity'
+        elif trace in ['bin_spikes', 'spikes', 'decon']:
+            trace = 'bin_spikes'
+        elif trace in ['bin_spikerate', 'spikerate']:
+            trace = 'bin_spikerate'
+        else:
+            raise ValueError('Trace has invalid value.\nUse bin_activity, bin_spikes or bin_spikerate.')
+
+        # Check that only one entry has been queried
+        if len(self) > 1:
+            raise dj.errors.QueryError('You have to query a single session when computing trial averages. '
+                                       f'{len(self)} sessions queried.')
+
+        data = self.ROI().fetch(trace)          # Fetch requested data arrays from all neurons
+
+        # Take average across trials (axis 1) and return array with shape (n_neurons, n_bins)
+        return np.vstack([np.mean(x, axis=1) for x in data])
+
 
 

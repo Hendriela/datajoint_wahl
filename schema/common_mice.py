@@ -95,9 +95,10 @@ class Mouse(dj.Manual):
 
         """
         mouse = self.fetch1()                                   # Get Mouse() entry (has to be single row)
-        surg = Surgery() & mouse                                # Filter for most recent surgery
-        last_surg = surg & 'surgery_num={}'.format(max(surg.fetch('surgery_num')))
-        if len(last_surg) == 1:
+        surg = Surgery() & mouse
+        if len(surg) > 0:
+            # Filter for most recent surgery
+            last_surg = surg & 'surgery_num={}'.format(max(surg.fetch('surgery_num')))
             # Get date of first surgery and the weight from Weight() at that date
             last_surg_date = last_surg.fetch1('surgery_date').strftime("%Y-%m-%d")
             pre_op_weight = float((Weight() & mouse & "date_of_weight='{}'".format(last_surg_date)).fetch1('weight'))
@@ -268,12 +269,12 @@ class PainManagement(dj.Manual):
 
         if 'care_num' not in row:
             try:
-                row['care_num'] = len(self & row)
+                row['care_num'] = len(self)
             except TypeError:
                 # Todo: implement code that works for types which do not support item assignment
                 raise TypeError(f"Type '{type(row)}' is unsupported for insertion in PainManagement(). "
                                 f"Use dict to insert.")
-        self.insert1((row,), **kwargs)
+        self.insert1(row=dict(**row, **kwargs))
         return row['care_num']
 
 
