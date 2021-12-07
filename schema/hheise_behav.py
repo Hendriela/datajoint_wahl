@@ -122,6 +122,8 @@ class VRSessionInfo(dj.Imported):
             new_key['imaging_session'] = 1
         else:
             new_key['imaging_session'] = 0
+            print(f"Could not find session {key} in common_img.Scan, thus assuming that the session is not an imaging"
+                  f"session. If it is, enter session into Scan() before populating VRSession()!")
 
         self.insert1(new_key)
 
