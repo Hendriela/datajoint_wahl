@@ -62,7 +62,7 @@ class PlaceCellParameter(dj.Manual):
             print("Warning:\n\tParameter 'bin_length' = {} cm is not a divisor of common track lengths 170 and 400 cm."
                   "\n\tProblems might occur in downstream analysis.".format(entry['bin_length']))
 
-        if not 'min_bin_size' in entry:
+        if 'min_bin_size' not in entry:
             entry['min_bin_size'] = int(np.ceil(entry['min_pf_size'] / entry['bin_length']))
         else:
             raise KeyError("Parameter 'min_bin_size' will be calculated before insertion and should not be given by the"
@@ -70,7 +70,8 @@ class PlaceCellParameter(dj.Manual):
 
         self.insert1(entry)
 
-        full_entry = (self & entry).fetch1()  # Query full entry in case some default attributes were not set
+        # Query full entry in case some default attributes were not set
+        full_entry = (self & f"place_cell_id = {entry['place_cell_id']}").fetch1()
 
         # TODO: remove hard-coding of folder location
         REL_BACKUP_PATH = "Datajoint/manual_submissions"
@@ -342,7 +343,7 @@ class BinnedActivity(dj.Computed):
         Spatially bin dF/F trace of every trial for each neuron and thus align it to VR position.
 
         Args:
-            key: Primary keys of the current Synchronization() entry (one per trial).
+            key: Primary keys of the current Synchronization() entry (one per session).
         """
 
         # from scipy.ndimage.filters import gaussian_filter1d
