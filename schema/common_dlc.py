@@ -12,6 +12,8 @@ import pathlib
 from schema import common_exp
 import cv2
 import matplotlib.pyplot as plt
+import os
+import subprocess
 login.connect()
 
 
@@ -43,6 +45,39 @@ class Video(dj.Manual):
     -> CameraPosition
     ---
     """
+
+    def get_first_image(self):
+        f_vid = (RawVideoFile & self).get_path(check_existence=True)
+        cap = cv2.VideoCapture(str(f_vid))
+        ret, frame = cap.read()
+        cap.release()
+        return frame
+
+    def plot_cropping(self):
+        import matplotlib
+        matplotlib.use("Qt5Agg")
+        for vid in self:
+            for crop in FFMPEGParameters():
+                frame = (self & vid).get_first_image()
+                w, h, x, y = crop["crop_w"], crop["crop_h"], crop["crop_x"], crop["crop_y"]
+                scale_w, scale_h = crop["scale_w"], crop["scale_h"]
+                frame_crop = frame[y:y+h, x:x+h]
+                iw = int(w / scale_w)
+                ih = int(h / scale_h)
+                if iw % 2 == 1:
+                    iw = iw + 1
+                if ih % 2 == 1:
+                    ih = ih + 1
+                frame_rescale = cv2.resize(frame_crop, (iw, ih), cv2.INTER_CUBIC)
+                p_vid = (RawVideoFile & vid).get_path()
+                plt.figure("%i, %s, %s" % (crop["param_id"], vid["camera_position"], p_vid))
+                plt.subplot(122)
+                plt.imshow(frame_rescale, "Greys_r")
+                plt.subplot(121)
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0))
+                plt.imshow(frame)
+                plt.tight_layout()
+                plt.show()
 
 
 @schema
@@ -169,7 +204,6 @@ class FrameCountVideoTimeFile(dj.Manual):
         data = np.fromfile(path_file)
         return data[::2], data[1::2]
 
-import matplotlib as mpl
 
 @schema
 class VideoTime(dj.Computed):
@@ -191,7 +225,6 @@ class VideoTime(dj.Computed):
         nr_frames_counted = int(counts[-1])
         t0 = t[counts>0][0]
         tf = t[-1]
-        #print(type(nr_frames_counted), type(t0), type(tf))
         video_duration = tf-t0
         video_time = np.linspace(t0, tf, nr_frames_counted)
         estim_frame_rate = nr_frames_counted/video_duration
@@ -202,3 +235,82 @@ class VideoTime(dj.Computed):
         new_key = {**key, "nr_frames_counted": nr_frames_counted, "video_duration": video_duration,
                    "estim_frame_rate": estim_frame_rate, "frame_offset": frame_offset, "video_time": video_time}
         self.insert1(new_key)
+
+
+@schema
+class FFMPEGParameters(dj.Lookup):
+    definition = """ # Parameters for cropping, rescaling and recompressing videos using ffmpeg and h264 codec
+    param_id            : int           # id of this parameter set
+    ---
+    preset              : enum('ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow')    # ratio of encoding speed to compression ratio
+    crf                 : tinyint       # compression quality from 0 (no compression) to 31. typical values around 15-17
+    scale_w             : float         # scale factor for video width
+    scale_h             : float         # scale factor for video height
+    crop_w              : int           # width of cropped region, in pixels
+    crop_h              : int           # height of cropped region, in pixels
+    crop_x              : int           # x offset of crop region, in pixels
+    crop_y              : int           # y offset of crop region, in pixels 
+    """
+    contents = [{"param_id": 0, "preset": "faster", "crf": 15, "scale_w": 1.5, "scale_h": 1.5,
+                 "crop_w": 840, "crop_h": 524, "crop_x": 440, "crop_y": 500},
+                {"param_id": 1, "preset": "faster", "crf": 17, "scale_w": 1, "scale_h": 1,
+                 "crop_w": 1280, "crop_h": 1024, "crop_x": 0, "crop_y": 0}
+                ]
+
+
+@schema
+class CroppedVideo(dj.Computed):
+    definition = """ # Generates cropped video file using a given set of parameters. requires ffmpeg and h264
+    -> Video
+    -> FFMPEGParameters
+    ---
+    pixel_w             : int   # actual width of the video in pixels. should always be even due to h264 requirements
+    pixel_h             : int   # actual height of the video in pixels. should always be even due to h264 requirements
+    filename_cropped    : varchar(256)  # Name of the cropped video file, relative to session folder
+    """
+
+    def make(self, key):
+        # set path to ffmpeg executable
+        ffmpeg_dir = "C:/Users/mpanze/Documents/ffmpeg/bin/"
+        # get new path
+        p_video = (RawVideoFile & key).get_path(check_existence=True)
+        p_cropped = pathlib.Path(p_video.parent, p_video.stem + "_cropped_%i.avi" % (key["param_id"]))
+        # read video info
+        vid_info = (VideoInfo & key).fetch1()
+        w_0, h_0 = vid_info["width"], vid_info["height"]
+        # get crop parameters
+        crop = (FFMPEGParameters & key).fetch1()
+        w, h, x, y = crop["crop_w"], crop["crop_h"], crop["crop_x"], crop["crop_y"]
+        scale_w, scale_h = crop["scale_w"], crop["scale_h"]
+        # actual frame dimensions must be divisible by 2 to be used with h264 codec
+        iw = int(w / scale_w)
+        ih = int(h / scale_h)
+        if iw % 2 == 1:
+            iw = iw + 1
+        if ih % 2 == 1:
+            ih = ih + 1
+
+        # cropped dimensions same as vid dimensions, keep video as is
+        if (w_0 == w) and (h_0 == h) and (x == 0) and (y == 0) and (scale_h == 1) and (scale_w == 1):
+            p_video_rel = (RawVideoFile & key).fetch1["filename_video"]
+            new_entry = {**key, "pixel_w": w_0, "pixel_h": h_0, "filename_cropped": p_video_rel}
+        else:
+            # make ffmpeg command
+            ffmpeg_command = [
+                'ffmpeg',
+                '-i', str(p_video),
+                '-c:v', 'libx264',
+                '-preset', crop["preset"],
+                '-crf', "%i" % (crop["crf"]),
+                '-vf', 'crop=w=%i:h=%i:x=%i:y=%i, scale=%i:%i' % (w, h, x, y, iw, ih),
+                '-c:a', 'copy', str(p_cropped)
+            ]
+            # execute command
+            os.chdir(ffmpeg_dir)
+            print(ffmpeg_command)
+            subprocess.run(ffmpeg_command)
+            # create entry
+            p_cropped_rel = p_cropped.relative_to(login.get_working_directory())
+            new_entry = {**key, "pixel_w": iw, "pixel_h": ih, "filename_cropped": str(p_cropped_rel)}
+        # insert data
+        self.insert1(new_entry)
