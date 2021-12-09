@@ -1,5 +1,4 @@
 """Schema for processing sensory mapping data"""
-import json
 
 import datajoint as dj
 import numpy as np
@@ -7,7 +6,7 @@ import login
 from schema import common_exp, mpanze_widefield
 import pathlib
 import json
-from mpanze_scripts.widefield import utils
+from mpanze_scripts import utils
 from tifffile import TiffWriter, memmap
 
 login.connect()

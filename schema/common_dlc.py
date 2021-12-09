@@ -11,6 +11,7 @@ import login
 import pathlib
 from schema import common_exp
 import cv2
+import matplotlib.pyplot as plt
 login.connect()
 
 
@@ -24,9 +25,9 @@ schema = dj.schema('common_dlc', locals(), create_tables=True)
 @schema
 class CameraPosition(dj.Lookup):
     definition = """ # Lookup table for camera positions
-    camera_position : varchar(128)
+    camera_position : varchar(128)      # attribute for distinguishing between separate camera angles
     ---
-    position_details : varchar(1048)
+    position_details : varchar(1048)    # longer description of camera position and properties
     """
     contents = [
         ['Right_Forelimb_Side_View', 'camera placed orthogonally, with view of right forelimb from hand to shoulder'],
@@ -168,12 +169,36 @@ class FrameCountVideoTimeFile(dj.Manual):
         data = np.fromfile(path_file)
         return data[::2], data[1::2]
 
+import matplotlib as mpl
 
-# @schema
-# class VideoTime(dj.Computed):
-#     definition = """ # Compute frame timestamps from synchronisation file
-#     -> Video
-#     --------
-#     avg_frame_rate  : float         # Measured average frame rate
-#     video_time      : longblob      # 1d array, time of each frame in seconds of behavior PC
-#     """
+@schema
+class VideoTime(dj.Computed):
+    definition = """ # Compute frame timestamps from synchronisation file
+    -> Video
+    --------
+    nr_frames_counted : int         # number of frames that could effectively be counted from sync file
+    video_duration    : float       # measured video duration in seconds
+    estim_frame_rate  : float       # Average frame rate estimated from video time file
+    frame_offset      : int         # frame offset between raw video and detected frames in sync file
+    video_time        : longblob    # 1d array, time of each frame in seconds of behavior PC
+    """
+
+    def make(self, key):
+        # load data from counts file
+        t, counts = (FrameCountVideoTimeFile & key).get_raw_data()
+
+        # compute entries
+        nr_frames_counted = int(counts[-1])
+        t0 = t[counts>0][0]
+        tf = t[-1]
+        #print(type(nr_frames_counted), type(t0), type(tf))
+        video_duration = tf-t0
+        video_time = np.linspace(t0, tf, nr_frames_counted)
+        estim_frame_rate = nr_frames_counted/video_duration
+        delta_frames = (VideoInfo & key).fetch1()["nr_frames"] - nr_frames_counted
+        frame_offset = delta_frames - 3
+
+        # populate new entry
+        new_key = {**key, "nr_frames_counted": nr_frames_counted, "video_duration": video_duration,
+                   "estim_frame_rate": estim_frame_rate, "frame_offset": frame_offset, "video_time": video_time}
+        self.insert1(new_key)

@@ -4,7 +4,8 @@ import datajoint as dj
 import login
 import pathlib
 from schema import common_mice, common_exp
-from mpanze_scripts.widefield import utils, smoothing_functions
+from mpanze_scripts import utils
+from mpanze_scripts.widefield import smoothing_functions
 import matplotlib.pyplot as plt
 import numpy as np
 import tifffile as tif
@@ -253,49 +254,3 @@ class Smoothing(dj.Lookup):
             raise Exception("A single smoothing kernel must be selected!")
         kernel = self.fetch1()
         return kernel["kernel_name"] + "_" + "{:02d}".format(kernel["kernel_id"])
-
-
-
-# @schema
-# class SpatialAlignmentParameters(dj.Manual):
-#     definition = """ # Contains transformation matrix for spatially registering different imaging sessions
-#     -> RawImagingFile
-#     ---
-#     TransformationMatrix        : longblob      # forward transformation matrix for aligning to reference image
-#     """
-#
-# @schema
-# class SynchronisationMethod(dj.Lookup):
-#     definition = """ # Information about the synchronisation methods
-#     sync_method                 : varchar(256) # synchronisation method (short description)
-#     ---
-#     sync_description            : varchar(1024)# longer description of snyc method
-#     """
-#     contents = [
-#         ["Exposure", "Sync file contains signal obtained from exposure times of the widefield camera."]
-#     ]
-#
-#
-# @schema
-# class RawSynchronisationFile(dj.Manual):
-#     definition = """ # Paths to raw synchronisation files. 1-1 relationship to Synchronisation
-#     -> RawImagingFile
-#     ---
-#     filename_sync               : varchar(256) # name of synchronisation file, relative to session folder
-#     -> SynchronisationMethod
-#     """
-#
-#     def get_paths(self):
-#         """Return list of paths to raw synchronisation files"""
-#         path_neurophys = login.get_neurophys_data_directory()  # get data directory path on local machine
-#         # find sessions corresponding to current files
-#         sessions = (self * common_exp.Session())
-#
-#         # iterate over sessions
-#         paths = []
-#         for session in sessions:
-#             # obtain full path
-#             path_session = session["path"]
-#             path_file = session["filename_sync"]
-#             paths.append(pathlib.Path(path_neurophys, path_session, path_file))
-#         return paths
