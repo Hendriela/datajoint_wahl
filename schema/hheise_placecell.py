@@ -12,13 +12,14 @@ import os
 import yaml
 import numpy as np
 from scipy import stats
-
+from typing import Optional, Tuple
 
 import datajoint as dj
 import login
 login.connect()
 
 from schema import common_img, hheise_behav
+from hheise_scripts import pc_classifier
 
 schema = dj.schema('hheise_placecell', locals(), create_tables=True)
 
@@ -62,7 +63,7 @@ class PlaceCellParameter(dj.Manual):
             print("Warning:\n\tParameter 'bin_length' = {} cm is not a divisor of common track lengths 170 and 400 cm."
                   "\n\tProblems might occur in downstream analysis.".format(entry['bin_length']))
 
-        if not 'min_bin_size' in entry:
+        if 'min_bin_size' not in entry:
             entry['min_bin_size'] = int(np.ceil(entry['min_pf_size'] / entry['bin_length']))
         else:
             raise KeyError("Parameter 'min_bin_size' will be calculated before insertion and should not be given by the"
@@ -70,7 +71,8 @@ class PlaceCellParameter(dj.Manual):
 
         self.insert1(entry)
 
-        full_entry = (self & entry).fetch1()  # Query full entry in case some default attributes were not set
+        # Query full entry in case some default attributes were not set
+        full_entry = (self & f"place_cell_id = {entry['place_cell_id']}").fetch1()
 
         # TODO: remove hard-coding of folder location
         REL_BACKUP_PATH = "Datajoint/manual_submissions"
@@ -213,6 +215,7 @@ class TransientOnly(dj.Computed):
 class Synchronization (dj.Computed):
     definition = """ # Synchronized frame times binned to VR position of this session, trial data in part table
     -> PCAnalysis
+    -> hheise_behav.VRSession
     ------
     time_sync = CURRENT_TIMESTAMP    : timestamp     # automatic timestamp
     """
@@ -341,7 +344,7 @@ class BinnedActivity(dj.Computed):
         Spatially bin dF/F trace of every trial for each neuron and thus align it to VR position.
 
         Args:
-            key: Primary keys of the current Synchronization() entry (one per trial).
+            key: Primary keys of the current Synchronization() entry (one per session).
         """
 
         # from scipy.ndimage.filters import gaussian_filter1d
@@ -403,7 +406,7 @@ class BinnedActivity(dj.Computed):
 
         # Enter master table entry
         self.insert1(key)
-        
+
         # Enter part table entries
         self.ROI().insert(part_entries)
 
@@ -438,6 +441,50 @@ class BinnedActivity(dj.Computed):
 
         # Take average across trials (axis 1) and return array with shape (n_neurons, n_bins)
         return np.vstack([np.mean(x, axis=1) for x in data])
+
+
+@schema
+class PlaceCells(dj.Computed):
+    definition = """ # Place cell analysis and results (PC criteria mainly from Hainmüller (2018) and Dombeck/Tank lab)
+    -> BinnedActivity
+    -> TransientOnly
+    ------
+    time_place_cell = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
+    """
+
+    class ROI(dj.Part):
+        definition = """ # Data of single neurons
+        -> PlaceCells
+        mask_id         : int       # Mask index (as in Segmentation.ROI, base 0)
+        -----
+
+        """
+
+    def make(self, key: dict) -> None:
+        """
+        Perform place cell classification on one session, after criteria from Hainmüller (2018) and Tank lab.
+        Args:
+            key: Primary keys of the current BinnedActivity() entry (one per session).
+        """
+
+        print(f"Classifying place cells for {key}.")
+
+        # Fetch data and parameters of the current session
+        traces = (BinnedActivity & key).get_trial_avg('bin_activity')      # Get spatially binned dF/F (n_cells, n_bins)
+        trans_only = np.vstack((TransientOnly.ROI & key).fetch('trans'))   # Get transient-only dF/F (n_cells, n_frames)
+        params = (PlaceCellParameter & key).fetch1()
+
+        # Smooth binned data
+        smooth = pc_classifier.smooth_trace(traces, params['bin_window_avg'])
+
+        # Screen for potential place fields
+        potential_pf = pc_classifier.pre_screen_place_fields(smooth, params['bin_base'], params['place_thresh'])
+
+        trace = smooth[1]
+        trans = trans_only[1]
+        place_blocks = potential_pf[1]
+
+
 
 
 
