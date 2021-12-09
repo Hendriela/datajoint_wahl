@@ -12,13 +12,14 @@ import os
 import yaml
 import numpy as np
 from scipy import stats
-
+from typing import Optional, Tuple
 
 import datajoint as dj
 import login
 login.connect()
 
 from schema import common_img, hheise_behav
+from hheise_scripts import pc_classifier
 
 schema = dj.schema('hheise_placecell', locals(), create_tables=True)
 
@@ -440,6 +441,50 @@ class BinnedActivity(dj.Computed):
 
         # Take average across trials (axis 1) and return array with shape (n_neurons, n_bins)
         return np.vstack([np.mean(x, axis=1) for x in data])
+
+
+@schema
+class PlaceCells(dj.Computed):
+    definition = """ # Place cell analysis and results (PC criteria mainly from Hainmüller (2018) and Dombeck/Tank lab)
+    -> BinnedActivity
+    -> TransientOnly
+    ------
+    time_place_cell = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
+    """
+
+    class ROI(dj.Part):
+        definition = """ # Data of single neurons
+        -> PlaceCells
+        mask_id         : int       # Mask index (as in Segmentation.ROI, base 0)
+        -----
+
+        """
+
+    def make(self, key: dict) -> None:
+        """
+        Perform place cell classification on one session, after criteria from Hainmüller (2018) and Tank lab.
+        Args:
+            key: Primary keys of the current BinnedActivity() entry (one per session).
+        """
+
+        print(f"Classifying place cells for {key}.")
+
+        # Fetch data and parameters of the current session
+        traces = (BinnedActivity & key).get_trial_avg('bin_activity')      # Get spatially binned dF/F (n_cells, n_bins)
+        trans_only = np.vstack((TransientOnly.ROI & key).fetch('trans'))   # Get transient-only dF/F (n_cells, n_frames)
+        params = (PlaceCellParameter & key).fetch1()
+
+        # Smooth binned data
+        smooth = pc_classifier.smooth_trace(traces, params['bin_window_avg'])
+
+        # Screen for potential place fields
+        potential_pf = pc_classifier.pre_screen_place_fields(smooth, params['bin_base'], params['place_thresh'])
+
+        trace = smooth[1]
+        trans = trans_only[1]
+        place_blocks = potential_pf[1]
+
+
 
 
 
