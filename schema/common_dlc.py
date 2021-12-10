@@ -57,7 +57,7 @@ class Video(dj.Manual):
         import matplotlib
         matplotlib.use("Qt5Agg")
         for vid in self:
-            for crop in FFMPEGParameters():
+            for crop in FFMPEGParameter():
                 frame = (self & vid).get_first_image()
                 w, h, x, y = crop["crop_w"], crop["crop_h"], crop["crop_x"], crop["crop_y"]
                 scale_w, scale_h = crop["scale_w"], crop["scale_h"]
@@ -279,7 +279,7 @@ class CroppedVideo(dj.Computed):
         vid_info = (VideoInfo & key).fetch1()
         w_0, h_0 = vid_info["width"], vid_info["height"]
         # get crop parameters
-        crop = (FFMPEGParameters & key).fetch1()
+        crop = (FFMPEGParameter & key).fetch1()
         w, h, x, y = crop["crop_w"], crop["crop_h"], crop["crop_x"], crop["crop_y"]
         scale_w, scale_h = crop["scale_w"], crop["scale_h"]
         # actual frame dimensions must be divisible by 2 to be used with h264 codec
@@ -303,14 +303,14 @@ class CroppedVideo(dj.Computed):
                 '-preset', crop["preset"],
                 '-crf', "%i" % (crop["crf"]),
                 '-vf', 'crop=w=%i:h=%i:x=%i:y=%i, scale=%i:%i' % (w, h, x, y, iw, ih),
-                '-c:a', 'copy', str(p_cropped)
+                '-n', '-c:a', 'copy', str(p_cropped)
             ]
             # execute command
             os.chdir(ffmpeg_dir)
             print(ffmpeg_command)
             subprocess.run(ffmpeg_command)
             # create entry
-            p_cropped_rel = p_cropped.relative_to(login.get_working_directory())
+            p_cropped_rel = p_cropped.relative_to(p_video.parent)
             new_entry = {**key, "pixel_w": iw, "pixel_h": ih, "filename_cropped": str(p_cropped_rel)}
         # insert data
         self.insert1(new_entry)
