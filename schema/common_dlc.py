@@ -70,7 +70,7 @@ class Video(dj.Manual):
                     ih = ih + 1
                 frame_rescale = cv2.resize(frame_crop, (iw, ih), cv2.INTER_CUBIC)
                 p_vid = (RawVideoFile & vid).get_path()
-                plt.figure("%i, %s, %s" % (crop["param_id"], vid["camera_position"], p_vid))
+                plt.figure("%i, %s, %s" % (crop["crop_id"], vid["camera_position"], p_vid))
                 plt.subplot(122)
                 plt.imshow(frame_rescale, "Greys_r")
                 plt.subplot(121)
@@ -238,9 +238,9 @@ class VideoTime(dj.Computed):
 
 
 @schema
-class FFMPEGParameters(dj.Lookup):
+class FFMPEGParameter(dj.Lookup):
     definition = """ # Parameters for cropping, rescaling and recompressing videos using ffmpeg and h264 codec
-    param_id            : int           # id of this parameter set
+    crop_id            : int           # id of this parameter set
     ---
     preset              : enum('ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow')    # ratio of encoding speed to compression ratio
     crf                 : tinyint       # compression quality from 0 (no compression) to 31. typical values around 15-17
@@ -251,9 +251,9 @@ class FFMPEGParameters(dj.Lookup):
     crop_x              : int           # x offset of crop region, in pixels
     crop_y              : int           # y offset of crop region, in pixels 
     """
-    contents = [{"param_id": 0, "preset": "faster", "crf": 15, "scale_w": 1.5, "scale_h": 1.5,
+    contents = [{"crop_id": 0, "preset": "faster", "crf": 15, "scale_w": 1.5, "scale_h": 1.5,
                  "crop_w": 840, "crop_h": 524, "crop_x": 440, "crop_y": 500},
-                {"param_id": 1, "preset": "faster", "crf": 17, "scale_w": 1, "scale_h": 1,
+                {"crop_id": 1, "preset": "faster", "crf": 17, "scale_w": 1, "scale_h": 1,
                  "crop_w": 1280, "crop_h": 1024, "crop_x": 0, "crop_y": 0}
                 ]
 
@@ -262,7 +262,7 @@ class FFMPEGParameters(dj.Lookup):
 class CroppedVideo(dj.Computed):
     definition = """ # Generates cropped video file using a given set of parameters. requires ffmpeg and h264
     -> Video
-    -> FFMPEGParameters
+    -> FFMPEGParameter
     ---
     pixel_w             : int   # actual width of the video in pixels. should always be even due to h264 requirements
     pixel_h             : int   # actual height of the video in pixels. should always be even due to h264 requirements
@@ -274,7 +274,7 @@ class CroppedVideo(dj.Computed):
         ffmpeg_dir = "C:/Users/mpanze/Documents/ffmpeg/bin/"
         # get new path
         p_video = (RawVideoFile & key).get_path(check_existence=True)
-        p_cropped = pathlib.Path(p_video.parent, p_video.stem + "_cropped_%i.avi" % (key["param_id"]))
+        p_cropped = pathlib.Path(p_video.parent, p_video.stem + "_cropped_%i.avi" % (key["crop_id"]))
         # read video info
         vid_info = (VideoInfo & key).fetch1()
         w_0, h_0 = vid_info["width"], vid_info["height"]
