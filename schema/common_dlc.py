@@ -314,3 +314,25 @@ class CroppedVideo(dj.Computed):
             new_entry = {**key, "pixel_w": iw, "pixel_h": ih, "filename_cropped": str(p_cropped_rel)}
         # insert data
         self.insert1(new_entry)
+
+
+@schema
+class DLCModel(dj.Lookup):
+    definition = """ # lookup table pointing to Deeplabcut projects
+    model_name          : varchar(128)      # model name == project folder name for clarity
+    iteration           : smallint          # current iteration of the model
+    ---
+    config_path         : varchar(512)      # absolute path to the config.yaml file for the project
+    """
+    contents = [{"model_name": "DigitsLateralView-mpanze-2021-10-27", "iteration": 2,
+                 "config_path": "W:\\Neurophysiology-Storage1\\Wahl\\Matteo\\deeplabcut\\DigitsLateralView-mpanze-2021-10-27\\config.yaml"}]
+
+
+@schema
+class VideoPredictions(dj.Computed):
+    definition = """ # runs video through a deeplabcut model and generates a .h5 with predictions
+    -> CroppedVideo
+    -> DLCModel
+    ---
+    filename_pred       : varchar(512)      # location of .h5 with predicted labels, relative to session folder
+    """
