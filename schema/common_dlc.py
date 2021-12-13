@@ -16,6 +16,8 @@ import os
 import yaml
 import subprocess
 import mpanze_scripts.utils as utils
+import pandas as pd
+from scipy.signal import medfilt
 login.connect()
 
 
@@ -95,7 +97,7 @@ class RawVideoFile(dj.Manual):
         return utils.get_paths(self, "filename_video")
 
     def get_path(self, check_existence=False):
-       return utils.get_path(self, "filename_video", check_existence=check_existence)
+        return utils.get_path(self, "filename_video", check_existence=check_existence)
 
 
 @schema
@@ -337,3 +339,72 @@ class VideoPredictions(dj.Computed):
         filename_pred = p_h5[0].relative_to(p_video.parent)
         new_entry = {**key, "filename_pred": str(filename_pred)}
         self.insert1(new_entry)
+
+    def get_paths(self):
+        return utils.get_paths(self, "filename_pred")
+
+    def get_path(self, check_existence=False):
+        return utils.get_path(self, "filename_pred", check_existence=check_existence)
+
+
+@schema
+class MedianFilterParameter(dj.Lookup):
+    definition = """ # parameters for implementing simple median filtering and thresholding
+    filt_index      : smallint      # primary key for parameter set, 0-base
+    ---
+    p_cutoff        : float         # points with likelihood below threshold will be replaced with NaN
+    kernel_size     : int           # window size for filter, must be odd
+    """
+    contents = [{"filt_index": 0, "p_cutoff": 0.9, "kernel_size": 5}]
+
+
+@schema
+class MedianFilterPredictions(dj.Computed):
+    definition = """ # simple median filtering and thresholding of traces
+    -> VideoPredictions
+    -> MedianFilterParameter
+    ---
+    filename_medfilt      : varchar(512)    # filepath of the filtered predictions, in .h5 format
+    """
+
+    def make(self, key):
+        p_pred = (VideoPredictions() & key).get_path(check_existence=True)
+        p_crop = str((CroppedVideo() & key).get_path().stem)
+        p_session = (RawVideoFile() & key).get_path().parent
+        p_medfilt = pathlib.Path(p_pred.parent, p_crop + "_%i.h5" % key["filt_index"])
+        p_medfilt_rel = p_medfilt.relative_to(p_session)
+
+        # load dataframe
+        df = pd.read_hdf(str(p_pred))
+        p_cutoff = (MedianFilterParameter() & key).fetch1()['p_cutoff']
+        kernel_size = (MedianFilterParameter() & key).fetch1()['kernel_size']
+
+        # create empty dataframe to store results
+        scorer = df.columns.levels[0][0]
+        bodyparts = df.columns.levels[1]
+        mi = pd.MultiIndex.from_product([bodyparts, ["x", "y", "likelihood"]])
+        df_filt = pd.DataFrame(np.nan, index=range(len(df.index)), columns=mi, dtype=np.float64)
+
+        # populate array
+        for bp in bodyparts:
+            p = df[scorer, bp, "likelihood"]
+            x = np.copy(df[scorer, bp, "x"])
+            y = np.copy(df[scorer, bp, "y"])
+            # threshold x, y
+            x[p < p_cutoff] = np.nan
+            y[p < p_cutoff] = np.nan
+            # add to dataframe
+            df_filt[bp, "x"] = medfilt(x, kernel_size=kernel_size)
+            df_filt[bp, "y"] = medfilt(y, kernel_size=kernel_size)
+            df_filt[bp, "likelihood"] = p
+
+        # save dataframe as hdf5 file
+        df_filt.to_hdf(str(p_medfilt), key="df", mode="w")
+        new_entry = {**key, "filename_medfilt": str(p_medfilt_rel)}
+        self.insert1(new_entry)
+
+    def get_paths(self):
+        return utils.get_paths(self, "filename_medfilt")
+
+    def get_path(self, check_existence=False):
+        return utils.get_path(self, "filename_medfilt", check_existence=check_existence)
