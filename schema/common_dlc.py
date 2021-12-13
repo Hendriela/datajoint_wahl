@@ -222,15 +222,24 @@ class VideoTime(dj.Computed):
         # load data from counts file
         t, counts = (FrameCountVideoTimeFile & key).get_raw_data()
 
-        # compute entries
         nr_frames_counted = int(counts[-1])
-        t0 = t[counts>0][0]
-        tf = t[-1]
-        video_duration = tf-t0
-        video_time = np.linspace(t0, tf, nr_frames_counted)
-        estim_frame_rate = nr_frames_counted/video_duration
-        delta_frames = (VideoInfo & key).fetch1()["nr_frames"] - nr_frames_counted
-        frame_offset = delta_frames - 3
+        nr_frames_video = (VideoInfo & key).fetch1()["nr_frames"]
+        delta_frames = nr_frames_video - nr_frames_counted
+        try:
+            t0 = t[counts>0][0]
+            tf = t[-1]
+            video_duration = tf-t0
+            video_time = np.linspace(t0, tf, nr_frames_counted)
+            estim_frame_rate = nr_frames_counted/video_duration
+            frame_offset = delta_frames - 3
+        except IndexError:
+            # assume start and end points coincide with acquisition time
+            t0 = t[0]
+            tf = t[-1]
+            video_duration = tf - t0
+            video_time = np.linspace(t0, tf, nr_frames_video-3)
+            estim_frame_rate = (nr_frames_video-3)/video_duration
+            frame_offset = 0
 
         # populate new entry
         new_key = {**key, "nr_frames_counted": nr_frames_counted, "video_duration": video_duration,
