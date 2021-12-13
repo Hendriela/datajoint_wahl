@@ -355,12 +355,13 @@ class MedianFilterParameter(dj.Lookup):
     p_cutoff        : float         # points with likelihood below threshold will be replaced with NaN
     kernel_size     : int           # window size for filter, must be odd
     """
-    contents = [{"filt_index": 0, "p_cutoff": 0.9, "kernel_size": 5}]
+    contents = [{"filt_index": 0, "p_cutoff": 0.9, "kernel_size": 5},
+                {"filt_index": 1, "p_cutoff": 0.9, "kernel_size": 1}]
 
 
 @schema
 class MedianFilterPredictions(dj.Computed):
-    definition = """ # simple median filtering and thresholding of traces
+    definition = """ # simple median filtering and thresholding of traces. rescales data to original space
     -> VideoPredictions
     -> MedianFilterParameter
     ---
@@ -385,11 +386,15 @@ class MedianFilterPredictions(dj.Computed):
         mi = pd.MultiIndex.from_product([bodyparts, ["x", "y", "likelihood"]])
         df_filt = pd.DataFrame(np.nan, index=range(len(df.index)), columns=mi, dtype=np.float64)
 
+        # load crop parameters
+        crop = (FFMPEGParameter() & key).fetch1()
+
         # populate array
         for bp in bodyparts:
+            # load and scale data
             p = df[scorer, bp, "likelihood"]
-            x = np.copy(df[scorer, bp, "x"])
-            y = np.copy(df[scorer, bp, "y"])
+            x = df[scorer, bp, "x"] * crop["scale_w"] + crop["crop_x"]
+            y = df[scorer, bp, "y"] * crop["scale_h"] + crop["crop_y"]
             # threshold x, y
             x[p < p_cutoff] = np.nan
             y[p < p_cutoff] = np.nan
@@ -408,3 +413,55 @@ class MedianFilterPredictions(dj.Computed):
 
     def get_path(self, check_existence=False):
         return utils.get_path(self, "filename_medfilt", check_existence=check_existence)
+
+    def plot_timeseries(self):
+        import matplotlib
+        matplotlib.use("Qt5Agg")
+
+        if len(self) != 1:
+            raise Exception("please select a single entry!")
+
+        p_file = self.get_path()
+        df = pd.read_hdf(str(p_file), key="df")
+        bodyparts = np.roll(df.columns.levels[0], 1)
+        n_parts = len(bodyparts)
+        from matplotlib import cm
+        plasma = cm.get_cmap("plasma")
+        c = np.linspace(0, plasma.N, n_parts, dtype=int)
+        plt.figure()
+        for i, bp in enumerate(bodyparts):
+            plt.plot(i * 400 + df[bp, "x"] - np.mean(df[bp, "x"]), color=plasma(c[i]))
+            plt.plot((i+0.5) * 400 + df[bp, "y"] - np.mean(df[bp, "y"]), color=plasma(c[i]))
+
+    def make_short_video(self, N_frames=150*60):
+        import imageio
+        if len(self) != 1:
+            raise Exception("please select a single entry!")
+
+        # get paths
+        p_video = (RawVideoFile() & self).get_path(check_existence=True)
+        p_h5 = self.get_path(check_existence=True)
+        p_labeled_video = pathlib.Path(p_video.parent, p_video.stem + "_labeled.avi")
+
+        # open files
+        cap = cv2.VideoCapture(str(p_video))
+        df = pd.read_hdf(p_h5, "df")
+        writer = imageio.get_writer(str(p_labeled_video), fps=150)
+        bodyparts = np.roll(df.columns.levels[0], 1)
+        n_parts = len(bodyparts)
+        from matplotlib import cm
+        plasma = cm.get_cmap("plasma")
+        c = np.linspace(0, plasma.N, n_parts, dtype=int)
+        bgr = lambda rgb: (int(rgb[0]*255), int(rgb[1]*255), int(rgb[2]*255))
+        import tqdm
+        for i in tqdm.trange(N_frames):
+            ret, frame = cap.read()
+            for j, bp in enumerate(bodyparts):
+                x, y = df[bp, "x"][i], df[bp, "y"][i]
+                if (not np.isnan(x)) and (not np.isnan(y)):
+                    x, y = int(x), int(y)
+                    clr = bgr(plasma(c[j]))
+                    cv2.circle(frame, (x,y), 6, clr, -1)
+            writer.append_data(frame)
+        writer.close()
+        cap.release()
