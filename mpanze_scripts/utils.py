@@ -9,6 +9,8 @@ from timeit import default_timer as timer
 from datetime import timedelta
 from tifffile import TiffWriter
 
+import login
+login.connect()
 
 
 def mapping_date_from_dict(data_json):
@@ -173,3 +175,30 @@ def session_from_filename(filename):
     suffix = f.suffix
     file_desc = parts[3]
     return mouse_id, date_str, session_num, suffix, file_desc
+
+from schema.common_exp import Session
+def get_paths(table, attribute):
+    # build relative paths to experimental session
+    path_neurophys = login.get_working_directory()
+
+    # find sessions corresponding to current files
+    sessions = (table * Session())
+
+    # iterate over sessions
+    paths = []
+    for session in sessions:
+        path_session = session["session_path"]
+        path_file = session[attribute]
+        paths.append(pathlib.Path(path_neurophys, path_session, path_file))
+    return paths
+
+
+def get_path(table, attribute, check_existence = False):
+    if len(table) == 1:
+        p = get_paths(table, attribute)[0]
+        if check_existence:
+            if not p.exists():
+                raise Exception("The file was not found at %s" % str(p))
+        return p
+    else:
+        raise Exception("This method only works for a single entry! For multiple entries use get_paths")
