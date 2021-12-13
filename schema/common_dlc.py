@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import os
 import yaml
 import subprocess
+import mpanze_scripts.utils as utils
 login.connect()
 
 
@@ -91,35 +92,10 @@ class RawVideoFile(dj.Manual):
     """
 
     def get_paths(self):
-        """Construct full paths to raw video files"""
-        path_neurophys = login.get_working_directory()  # get data directory path on local machine
-        # find sessions corresponding to current files
-        sessions = (self * common_exp.Session())
-
-        # iterate over sessions
-        paths = []
-        for session in sessions:
-            # obtain full path
-            path_session = session["session_path"]
-            path_file = session["filename_video"]
-            paths.append(pathlib.Path(path_neurophys, path_session, path_file))
-        return paths
+        return utils.get_paths(self, "filename_video")
 
     def get_path(self, check_existence=False):
-        """
-        Construct full path to a raw video file.
-        Method only works for single-element query.
-        Args:
-            check_existence: is True, method throws an exception if the file does not exist
-        """
-        if len(self) == 1:
-            p = self.get_paths()[0]
-            if check_existence:
-                if not p.exists():
-                    raise Exception("The file was not found at %s" % str(p))
-            return p
-        else:
-            raise Exception("This method only works for a single entry! For multiple entries use get_paths")
+       return utils.get_path(self, "filename_video", check_existence=check_existence)
 
 
 @schema
@@ -169,35 +145,10 @@ class FrameCountVideoTimeFile(dj.Manual):
     """
 
     def get_paths(self):
-        """Construct full paths to raw synchronisation files"""
-        path_neurophys = login.get_working_directory()  # get data directory path on local machine
-        # find sessions corresponding to current files
-        sessions = (self * common_exp.Session())
-
-        # iterate over sessions
-        paths = []
-        for session in sessions:
-            # obtain full path
-            path_session = session["session_path"]
-            path_file = session["filename_binary"]
-            paths.append(pathlib.Path(path_neurophys, path_session, path_file))
-        return paths
+        return utils.get_paths(self, "filename_binary")
 
     def get_path(self, check_existence=False):
-        """
-        Construct full path to a raw video file.
-        Method only works for single-element query.
-        Args:
-            check_existence: is True, method throws an exception if the file does not exist
-        """
-        if len(self) == 1:
-            p = self.get_paths()[0]
-            if check_existence:
-                if not p.exists():
-                    raise Exception("The file was not found at %s" % str(p))
-            return p
-        else:
-            raise Exception("This method only works for a single entry! For multiple entries use get_paths")
+        return utils.get_path(self, "filename_binary", check_existence=check_existence)
 
     def get_raw_data(self):
         """ Read data from file, return two arrays: one of timestamps and one of frame counts """
@@ -326,35 +277,10 @@ class CroppedVideo(dj.Computed):
         self.insert1(new_entry)
 
     def get_paths(self):
-        """Construct full paths to cropped videos"""
-        path_neurophys = login.get_working_directory()  # get data directory path on local machine
-        # find sessions corresponding to current files
-        sessions = (self * common_exp.Session())
-
-        # iterate over sessions
-        paths = []
-        for session in sessions:
-            # obtain full path
-            path_session = session["session_path"]
-            path_file = session["filename_cropped"]
-            paths.append(pathlib.Path(path_neurophys, path_session, path_file))
-        return paths
+        return utils.get_paths(self, "filename_cropped")
 
     def get_path(self, check_existence=False):
-        """
-        Construct full path to a cropped video file.
-        Method only works for single-element query.
-        Args:
-            check_existence: is True, method throws an exception if the file does not exist
-        """
-        if len(self) == 1:
-            p = self.get_paths()[0]
-            if check_existence:
-                if not p.exists():
-                    raise Exception("The file was not found at %s" % str(p))
-            return p
-        else:
-            raise Exception("This method only works for a single entry! For multiple entries use get_paths")
+        return utils.get_path(self, "filename_cropped", check_existence=check_existence)
 
 
 @schema
