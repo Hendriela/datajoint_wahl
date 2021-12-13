@@ -53,31 +53,31 @@ class Video(dj.Manual):
         cap.release()
         return frame
 
-    def plot_cropping(self):
+    def plot_cropping(self, crop_param=0):
         import matplotlib
         matplotlib.use("Qt5Agg")
         for vid in self:
-            for crop in FFMPEGParameter():
-                frame = (self & vid).get_first_image()
-                w, h, x, y = crop["crop_w"], crop["crop_h"], crop["crop_x"], crop["crop_y"]
-                scale_w, scale_h = crop["scale_w"], crop["scale_h"]
-                frame_crop = frame[y:y+h, x:x+h]
-                iw = int(w / scale_w)
-                ih = int(h / scale_h)
-                if iw % 2 == 1:
-                    iw = iw + 1
-                if ih % 2 == 1:
-                    ih = ih + 1
-                frame_rescale = cv2.resize(frame_crop, (iw, ih), cv2.INTER_CUBIC)
-                p_vid = (RawVideoFile & vid).get_path()
-                plt.figure("%i, %s, %s" % (crop["crop_id"], vid["camera_position"], p_vid))
-                plt.subplot(122)
-                plt.imshow(frame_rescale, "Greys_r")
-                plt.subplot(121)
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0))
-                plt.imshow(frame)
-                plt.tight_layout()
-                plt.show()
+            crop = (FFMPEGParameter() & "crop_id=%i" % crop_param).fetch1()
+            frame = (self & vid).get_first_image()
+            w, h, x, y = crop["crop_w"], crop["crop_h"], crop["crop_x"], crop["crop_y"]
+            scale_w, scale_h = crop["scale_w"], crop["scale_h"]
+            frame_crop = frame[y:y+h, x:x+h]
+            iw = int(w / scale_w)
+            ih = int(h / scale_h)
+            if iw % 2 == 1:
+                iw = iw + 1
+            if ih % 2 == 1:
+                ih = ih + 1
+            frame_rescale = cv2.resize(frame_crop, (iw, ih), cv2.INTER_CUBIC)
+            p_vid = (RawVideoFile & vid).get_path()
+            plt.figure("%i, %s, %s" % (crop["crop_id"], vid["camera_position"], p_vid))
+            plt.subplot(122)
+            plt.imshow(frame_rescale, "Greys_r")
+            plt.subplot(121)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 0, 0))
+            plt.imshow(frame)
+            plt.tight_layout()
+            plt.show()
 
 
 @schema
