@@ -13,6 +13,7 @@ from schema import common_exp
 import cv2
 import matplotlib.pyplot as plt
 import os
+import yaml
 import subprocess
 login.connect()
 
@@ -315,6 +316,37 @@ class CroppedVideo(dj.Computed):
         # insert data
         self.insert1(new_entry)
 
+    def get_paths(self):
+        """Construct full paths to cropped videos"""
+        path_neurophys = login.get_working_directory()  # get data directory path on local machine
+        # find sessions corresponding to current files
+        sessions = (self * common_exp.Session())
+
+        # iterate over sessions
+        paths = []
+        for session in sessions:
+            # obtain full path
+            path_session = session["session_path"]
+            path_file = session["filename_cropped"]
+            paths.append(pathlib.Path(path_neurophys, path_session, path_file))
+        return paths
+
+    def get_path(self, check_existence=False):
+        """
+        Construct full path to a cropped video file.
+        Method only works for single-element query.
+        Args:
+            check_existence: is True, method throws an exception if the file does not exist
+        """
+        if len(self) == 1:
+            p = self.get_paths()[0]
+            if check_existence:
+                if not p.exists():
+                    raise Exception("The file was not found at %s" % str(p))
+            return p
+        else:
+            raise Exception("This method only works for a single entry! For multiple entries use get_paths")
+
 
 @schema
 class DLCModel(dj.Lookup):
@@ -327,6 +359,11 @@ class DLCModel(dj.Lookup):
     contents = [{"model_name": "DigitsLateralView-mpanze-2021-10-27", "iteration": 2,
                  "config_path": "W:\\Neurophysiology-Storage1\\Wahl\\Matteo\\deeplabcut\\DigitsLateralView-mpanze-2021-10-27\\config.yaml"}]
 
+    def get_path(self):
+        if len(self) != 1:
+            raise Exception("Please select a single DLCModel")
+        return self.fetch1()["config_path"]
+
 
 @schema
 class VideoPredictions(dj.Computed):
@@ -336,3 +373,32 @@ class VideoPredictions(dj.Computed):
     ---
     filename_pred       : varchar(512)      # location of .h5 with predicted labels, relative to session folder
     """
+
+    def make(self, key):
+        # check that model iteration matches selected iteration
+        p_config = (DLCModel() & key).get_path()
+        with open(p_config) as file:
+            cfg_dict = yaml.load(file, Loader=yaml.FullLoader)
+        if cfg_dict["iteration"] != key["iteration"]:
+            raise Exception("DLC model iterations do not match!")
+
+        # get path to video
+        p_video = (CroppedVideo() & key).get_path(check_existence=True)
+
+        # generate subfolder for storing results. subfolders are separated by iteration
+        iteration_folder = pathlib.Path(p_video.parent, "iteration_%i" % key["iteration"])
+        if not iteration_folder.exists():
+            os.mkdir(str(iteration_folder))
+
+        # run analysis on video
+        deeplabcut.analyze_videos(str(p_config), [str(p_video)], destfolder=str(iteration_folder))
+
+        # find file in subfolder
+        p_h5 = list(iteration_folder.glob(str(p_video.stem) + "*.h5"))
+        if len(p_h5) != 1:
+            raise Exception("Failed to find .h5 file")
+
+        # generate attributes and add to table
+        filename_pred = p_h5[0].relative_to(p_video.parent)
+        new_entry = {**key, "filename_pred": str(filename_pred)}
+        self.insert1(new_entry)
