@@ -421,17 +421,36 @@ class MedianFilterPredictions(dj.Computed):
         if len(self) != 1:
             raise Exception("please select a single entry!")
 
-        p_file = self.get_path()
-        df = pd.read_hdf(str(p_file), key="df")
-        bodyparts = np.roll(df.columns.levels[0], 1)
+        # load raw data
+        p_pred = (VideoPredictions() & self).get_path()
+        df_pred = pd.read_hdf(str(p_pred))
+        scorer = df_pred.columns.levels[0][0]
+        bodyparts = np.roll(df_pred.columns.levels[1], 1)
+        df2 = df_pred[scorer]
+
+        # load filtered data
+        p_filt = self.get_path()
+        df = pd.read_hdf(str(p_filt), key="df")
+
+        # get colormap
         n_parts = len(bodyparts)
         from matplotlib import cm
         plasma = cm.get_cmap("plasma")
         c = np.linspace(0, plasma.N, n_parts, dtype=int)
         plt.figure()
+
+        # get crop params
+        crop = (FFMPEGParameter() & self).fetch1()
+
         for i, bp in enumerate(bodyparts):
-            plt.plot(i * 400 + df[bp, "x"] - np.mean(df[bp, "x"]), color=plasma(c[i]))
-            plt.plot((i+0.5) * 400 + df[bp, "y"] - np.mean(df[bp, "y"]), color=plasma(c[i]))
+            x_raw = df2[bp, "x"] * crop["scale_w"] + crop["crop_x"]
+            y_raw = df2[bp, "y"] * crop["scale_h"] + crop["crop_y"]
+            plt.plot(i * 1000 + x_raw - np.mean(x_raw), color=plasma(c[i]))
+            plt.plot((i + 0.5) * 1000 + y_raw - np.mean(y_raw), color=plasma(c[i]))
+            plt.plot(i * 1000 + df[bp, "x"] - np.mean(x_raw), '.', color=plasma(c[i]))
+            plt.plot((i + 0.5) * 1000 + df[bp, "y"] - np.mean(y_raw), '.', color=plasma(c[i]))
+
+        plt.show()
 
     def make_short_video(self, N_frames=150*60):
         import imageio
@@ -441,7 +460,7 @@ class MedianFilterPredictions(dj.Computed):
         # get paths
         p_video = (RawVideoFile() & self).get_path(check_existence=True)
         p_h5 = self.get_path(check_existence=True)
-        p_labeled_video = pathlib.Path(p_video.parent, p_video.stem + "_labeled.avi")
+        p_labeled_video = pathlib.Path(p_video.parent, p_h5.stem + "_labeled.avi")
 
         # open files
         cap = cv2.VideoCapture(str(p_video))
