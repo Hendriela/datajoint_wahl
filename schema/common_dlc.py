@@ -356,7 +356,21 @@ class MedianFilterParameter(dj.Lookup):
     kernel_size     : int           # window size for filter, must be odd
     """
     contents = [{"filt_index": 0, "p_cutoff": 0.9, "kernel_size": 5},
-                {"filt_index": 1, "p_cutoff": 0.9, "kernel_size": 1}]
+                {"filt_index": 1, "p_cutoff": 0.9, "kernel_size": 1},
+                {"filt_index": 2, "p_cutoff": 0.5, "kernel_size": 3}]
+
+
+@schema
+class MedianFilterParameter(dj.Lookup):
+    definition = """ # parameters for implementing simple median filtering and thresholding
+    filt_index      : smallint      # primary key for parameter set, 0-base
+    ---
+    p_cutoff        : float         # points with likelihood below threshold will be replaced with NaN
+    kernel_size     : int           # window size for filter, must be odd
+    """
+    contents = [{"filt_index": 0, "p_cutoff": 0.9, "kernel_size": 5},
+                {"filt_index": 1, "p_cutoff": 0.9, "kernel_size": 1},
+                {"filt_index": 2, "p_cutoff": 0.5, "kernel_size": 3}]
 
 
 @schema
@@ -445,10 +459,10 @@ class MedianFilterPredictions(dj.Computed):
         for i, bp in enumerate(bodyparts):
             x_raw = df2[bp, "x"] * crop["scale_w"] + crop["crop_x"]
             y_raw = df2[bp, "y"] * crop["scale_h"] + crop["crop_y"]
-            plt.plot(i * 1000 + x_raw - np.mean(x_raw), color=plasma(c[i]))
-            plt.plot((i + 0.5) * 1000 + y_raw - np.mean(y_raw), color=plasma(c[i]))
-            plt.plot(i * 1000 + df[bp, "x"] - np.mean(x_raw), '.', color=plasma(c[i]))
-            plt.plot((i + 0.5) * 1000 + df[bp, "y"] - np.mean(y_raw), '.', color=plasma(c[i]))
+            plt.plot(i * 1000 + x_raw - np.mean(x_raw), '.', color=plasma(c[i]))
+            plt.plot((i + 0.5) * 1000 + y_raw - np.mean(y_raw), '.', color=plasma(c[i]))
+            plt.plot(i * 1000 + df[bp, "x"] - np.mean(x_raw), color=plasma(c[i]))
+            plt.plot((i + 0.5) * 1000 + df[bp, "y"] - np.mean(y_raw), color=plasma(c[i]))
 
         plt.show()
 
@@ -484,3 +498,127 @@ class MedianFilterPredictions(dj.Computed):
             writer.append_data(frame)
         writer.close()
         cap.release()
+
+
+@schema
+class InterpolationParameter(dj.Lookup):
+    definition = """ # parameters for interpolation with cubic splines
+    interp_index    : smallint      # primary key for parameter set, 0-base
+    ---
+    interp_method   : varchar(20)   # interpolation method for pandas
+    target_fps      : float         # target frames per second for downsampling
+    max_gap_size    : int           # maximum number of missing samples that interpolation will try to replace
+    order=NULL      : int           # (optional) order of the interpolator, for polynomial and splines
+    """
+    contents = [{"interp_index": 0, "interp_method": "cubicspline", "target_fps": 100, "max_gap_size": 20},
+                {"interp_index": 1, "interp_method": "linear", "target_fps": 20, "max_gap_size": 20},
+                {"interp_index": 2, "interp_method": "cubicspline", "target_fps": 20, "max_gap_size": 20},
+                {"interp_index": 3, "interp_method": "akima", "target_fps": 100, "max_gap_size": 20},
+                {"interp_index": 4, "interp_method": "akima", "target_fps": 20, "max_gap_size": 20},
+                {"interp_index": 5, "interp_method": "pchip", "target_fps": 100, "max_gap_size": 20},
+                {"interp_index": 6, "interp_method": "pchip", "target_fps": 20, "max_gap_size": 20},
+                {"interp_index": 7, "interp_method": "pchip", "target_fps": 100, "max_gap_size": 100},
+                {"interp_index": 8, "interp_method": "pchip", "target_fps": 60, "max_gap_size": 20},
+                {"interp_index": 9, "interp_method": "pchip", "target_fps": 150, "max_gap_size": 30},
+                ]
+
+
+@schema
+class InterpolatedPredictions(dj.Computed):
+    definition = """ # downsample and interpolate data using cubic splines
+    -> MedianFilterPredictions
+    -> InterpolationParameter
+    ---
+    filename_interp         : varchar(512)    # filepath of the filtered predictions, in .h5 format
+    """
+
+    def make(self, key):
+        # load hdf5 file
+        p_medfilt = (MedianFilterPredictions() & key).get_path(check_existence=True)
+        df = pd.read_hdf(str(p_medfilt), "df")
+
+        # make new filepath
+        p_session = (RawVideoFile() & key).get_path().parent
+        p_interp = pathlib.Path(p_medfilt.parent, p_medfilt.stem + "_%i.h5" % key["interp_index"])
+        p_interp_rel = p_interp.relative_to(p_session)
+
+        # get bodyparts
+        bodyparts = df.columns.levels[0]
+
+        # gather time information from VideoTime()
+        vt = (VideoTime() & key).fetch1()
+        fps_orig = vt["estim_frame_rate"]
+        t_orig = vt["video_time"]
+        n_frames_orig = len(t_orig)
+        fps_target = (InterpolationParameter() & key).fetch1()["target_fps"]
+        n_offset = vt["frame_offset"]
+        max_gap_size = (InterpolationParameter() & key).fetch1()["max_gap_size"]
+        method = (InterpolationParameter() & key).fetch1()["interp_method"]
+        order = (InterpolationParameter() & key).fetch1()["order"]
+
+        # generate new dataframe structure
+        mi = pd.MultiIndex.from_product([bodyparts, ["x", "y"]])
+        data_new = np.empty((len(t_orig), len(bodyparts)*2), dtype=np.float32)
+
+        # create dataframe with timeseries index, and save for future reference
+        for i, bp in enumerate(bodyparts):
+            x = np.copy(df[bp]["x"][n_offset:-3])
+            y = np.copy(df[bp]["y"][n_offset:-3])
+            data_new[:, 2*i] = x
+            data_new[:, 2*i+1] = y
+
+        dt_index = pd.to_timedelta(t_orig, "S")
+        df_orig = pd.DataFrame(index=dt_index, columns=mi, data=data_new)
+
+        # interpolate
+        df_interp = df_orig.interpolate(method=method, axis='index', limit=max_gap_size, limit_area='inside',
+                                        order=order)
+
+        # resample
+        target_timedelta = int(1000/fps_target)
+        df_resample = df_interp.resample("%ims" % target_timedelta, axis='index').mean()
+
+        # save all data in hdf file
+        df_orig.to_hdf(str(p_interp), key="orig", mode="w")
+        df_interp.to_hdf(str(p_interp), key="interp")
+        df_resample.to_hdf(str(p_interp), key="resample")
+
+        # add key to table
+        key_insert = {**key, "filename_interp": str(p_interp_rel)}
+        self.insert1(key_insert)
+
+    def check_interpolation(self):
+        import matplotlib
+        matplotlib.use("Qt5Agg")
+        from matplotlib import cm
+        plasma = cm.get_cmap("plasma")
+        if len(self) != 1:
+            raise Exception("please check one at a time!")
+        # load hdf
+        p_hdf = self.get_path(check_existence=True)
+        df_orig = pd.read_hdf(str(p_hdf), "orig")
+        df_resample = pd.read_hdf(str(p_hdf), "resample")
+        bodyparts = np.roll(df_orig.columns.levels[0], 1)
+        c = np.linspace(0, plasma.N, len(bodyparts), dtype=int)
+        f, ax = plt.subplots(2*len(bodyparts), 1, sharex=True, gridspec_kw={'hspace': 0})
+        f.canvas.manager.set_window_title(str(p_hdf))
+        for i, bp in enumerate(bodyparts):
+            ax[2*i].set_title(bp, loc="left")
+            ax[2*i].plot(df_orig.index.total_seconds(), df_orig[bp, "x"], '.', color=plasma(c[i]))
+            ax[2*i].plot(df_resample.index.total_seconds(), df_resample[bp, "x"], '-', color=plasma(c[i]))
+            ax[2*i+1].plot(df_orig.index.total_seconds(), df_orig[bp, "y"], '.', color=plasma(c[i]))
+            ax[2*i+1].plot(df_resample.index.total_seconds(), df_resample[bp, "y"], '-', color=plasma(c[i]))
+            ax[2*i].set_frame_on(False)
+            ax[2*i+1].set_frame_on(False)
+            ax[2*i].yaxis.set_visible(False)
+            ax[2*i+1].yaxis.set_visible(False)
+
+        fig_manager = plt.get_current_fig_manager()
+        fig_manager.window.showMaximized()
+        plt.show()
+
+    def get_paths(self):
+        return utils.get_paths(self, "filename_interp")
+
+    def get_path(self, check_existence=False):
+        return utils.get_path(self, "filename_interp", check_existence=check_existence)
