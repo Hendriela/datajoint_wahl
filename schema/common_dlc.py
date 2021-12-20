@@ -255,7 +255,7 @@ class CroppedVideo(dj.Computed):
 
         # cropped dimensions same as vid dimensions, keep video as is
         if (w_0 == w) and (h_0 == h) and (x == 0) and (y == 0) and (scale_h == 1) and (scale_w == 1):
-            p_video_rel = (RawVideoFile & key).fetch1["filename_video"]
+            p_video_rel = (RawVideoFile & key).fetch1()["filename_video"]
             new_entry = {**key, "pixel_w": w_0, "pixel_h": h_0, "filename_cropped": p_video_rel}
         else:
             # make ffmpeg command
