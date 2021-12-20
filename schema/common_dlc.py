@@ -361,19 +361,6 @@ class MedianFilterParameter(dj.Lookup):
 
 
 @schema
-class MedianFilterParameter(dj.Lookup):
-    definition = """ # parameters for implementing simple median filtering and thresholding
-    filt_index      : smallint      # primary key for parameter set, 0-base
-    ---
-    p_cutoff        : float         # points with likelihood below threshold will be replaced with NaN
-    kernel_size     : int           # window size for filter, must be odd
-    """
-    contents = [{"filt_index": 0, "p_cutoff": 0.9, "kernel_size": 5},
-                {"filt_index": 1, "p_cutoff": 0.9, "kernel_size": 1},
-                {"filt_index": 2, "p_cutoff": 0.5, "kernel_size": 3}]
-
-
-@schema
 class MedianFilterPredictions(dj.Computed):
     definition = """ # simple median filtering and thresholding of traces. rescales data to original space
     -> VideoPredictions
