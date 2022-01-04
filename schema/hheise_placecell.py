@@ -12,10 +12,11 @@ import os
 import yaml
 import numpy as np
 from scipy import stats
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Iterable
 
 import datajoint as dj
 import login
+
 login.connect()
 
 from schema import common_img, hheise_behav
@@ -212,7 +213,7 @@ class TransientOnly(dj.Computed):
 
 
 @schema
-class Synchronization (dj.Computed):
+class Synchronization(dj.Computed):
     definition = """ # Synchronized frame times binned to VR position of this session, trial data in part table
     -> PCAnalysis
     -> hheise_behav.VRSession
@@ -302,8 +303,8 @@ class Synchronization (dj.Computed):
                         bin_frame_count[78] -= 1
                         bin_frame_count[79] += 1
                     # Otherwise, take it from the next bin, but only if the next bin has more than 1 frame itself
-                    elif zero_idx < 79 and bin_frame_count[zero_idx+1] > 1:
-                        bin_frame_count[zero_idx+1] -= 1
+                    elif zero_idx < 79 and bin_frame_count[zero_idx + 1] > 1:
+                        bin_frame_count[zero_idx + 1] -= 1
                         bin_frame_count[zero_idx] += 1
                     # This error is raised if two consecutive bins have no frames
                     else:
@@ -359,45 +360,12 @@ class BinnedActivity(dj.Computed):
         n_trials = len(running_masks)
 
         # Create part table entries
-        part_entries = []   # Store entries for each neuron in a list
-        for unit_id, trace, spike in zip(unit_ids, traces, spikes):
+        part_entries = []  # Store entries for each neuron in a list
+        for unit_id, cell_trace, cell_spike in zip(unit_ids, traces, spikes):
 
-            binned_trace = np.zeros((n_bins, n_trials))
-            binned_spike = np.zeros((n_bins, n_trials))
-            binned_spikerate = np.zeros((n_bins, n_trials))
-
-            for trial_idx, (running_mask, bin_frame_count) in enumerate(zip(running_masks, bin_frame_counts)):
-                # Create bin mask from frame counts
-                bin_masks = []
-                for idx, n_frames in enumerate(bin_frame_count):
-                    bin_masks.append(np.full(n_frames, idx))
-                bin_mask = np.concatenate(bin_masks)
-
-                # Get section of current trial from the session-wide trace and filter out non-running frames
-                trial_trace = trace[trial_mask == trial_idx][running_mask]
-                trial_spike = spike[trial_mask == trial_idx][running_mask]
-
-                # Iteratively for all bins, average trace and sum spike probabilities
-                for bin_idx in range(n_bins):
-                    bin_trace = trial_trace[bin_mask == bin_idx]
-                    bin_spike = trial_spike[bin_mask == bin_idx]
-
-                    if len(bin_trace):       # Test if there is data for the current bin, otherwise raise error
-                        binned_trace[bin_idx, trial_idx] = np.mean(bin_trace)
-                        # sum instead of mean (CASCADE's spike probability is cumulative)
-                        binned_spike[bin_idx, trial_idx] = np.nansum(bin_spike)
-                    else:
-                        raise IndexError("Entry {}:\n\tNeuron {}, in {} returned empty array, "
-                                         "could not bin trace.".format(key, unit_id, bin_idx))
-
-                # Smooth average spike rate and transform values into mean firing rates by dividing by the time in s
-                # occupied by the bin (from number of samples * sampling rate)
-
-                # Todo: Discuss if smoothing the binned spikes across spatial bins (destroying temporal resolution) is
-                #  actually necessary
-                # smooth_binned_spike = gaussian_filter1d(binned_spike, 1)
-                bin_times = bin_frame_count / (common_img.ScanInfo & key).fetch1('fr')
-                binned_spikerate[:, trial_idx] = binned_spike[:, trial_idx]/bin_times
+            binned_trace, binned_spike, binned_spikerate = self.bin_activity_to_vr(unit_id, cell_trace, cell_spike,
+                                                                                   n_bins, n_trials, trial_mask,
+                                                                                   running_masks, bin_frame_counts, key)
 
             part_entries.append(dict(**key, mask_id=unit_id,
                                      bin_activity=np.array(binned_trace, dtype=np.float32),
@@ -409,6 +377,69 @@ class BinnedActivity(dj.Computed):
 
         # Enter part table entries
         self.ROI().insert(part_entries)
+
+    @staticmethod
+    def bin_activity_to_vr(cell_id: int, trace: np.ndarray, spike: np.ndarray, n_bins: int, n_trials: int,
+                           trial_mask: np.ndarray, running_masks: Iterable, bin_frame_counts: Iterable,
+                           key: Optional[dict]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Spatially bins a single neuron's dF/F and deconvolved trace to the VR position. Extracted as static method from
+        make() because it is also used to bin the shuffled trace during place cell bootstrapping.
+
+        Args:
+            cell_id: ID of the current ROI, same as in common_img.Segmentation.ROI().
+            trace: dF/F trace of the current ROI, also queried from common_img.Segmentation.ROI().
+            spike: CASCADE spike prediction of the trace, also queried from common_img.Segmentation.ROI().
+            n_bins: Number of bins into which the trace should be binned, queried from PCAnalysis().
+            n_trials: Number of bins into which the trace should be binned, derived from len(running_masks).
+            trial_mask: 1D array with length n_frames_in_session, queried from PCAnalysis().
+            running_masks: Np.recarray, one elements per trial, queried from Synchronization.VRTrial()
+            bin_frame_counts: Same as running_masks, same as "aligned_frames" from Synchronization.VRTrial()
+            key: Primary keys of the current query
+
+        Returns:
+            Three ndarrays with shape (n_bins, n_trials), spatially binned activity metrics for a single neuron - dF/F,
+                spikes, spikerate, fitting for entry of BinnedActivity.ROI().
+        """
+
+        binned_trace = np.zeros((n_bins, n_trials))
+        binned_spike = np.zeros((n_bins, n_trials))
+        binned_spikerate = np.zeros((n_bins, n_trials))
+
+        for trial_idx, (running_mask, bin_frame_count) in enumerate(zip(running_masks, bin_frame_counts)):
+            # Create bin mask from frame counts
+            bin_masks = []
+            for idx, n_frames in enumerate(bin_frame_count):
+                bin_masks.append(np.full(n_frames, idx))
+            bin_mask = np.concatenate(bin_masks)
+
+            # Get section of current trial from the session-wide trace and filter out non-running frames
+            trial_trace = trace[trial_mask == trial_idx][running_mask]
+            trial_spike = spike[trial_mask == trial_idx][running_mask]
+
+            # Iteratively for all bins, average trace and sum spike probabilities
+            for bin_idx in range(n_bins):
+                bin_trace = trial_trace[bin_mask == bin_idx]
+                bin_spike = trial_spike[bin_mask == bin_idx]
+
+                if len(bin_trace):  # Test if there is data for the current bin, otherwise raise error
+                    binned_trace[bin_idx, trial_idx] = np.mean(bin_trace)
+                    # sum instead of mean (CASCADE's spike probability is cumulative)
+                    binned_spike[bin_idx, trial_idx] = np.nansum(bin_spike)
+                else:
+                    raise IndexError("Entry {}:\n\tNeuron {}, in {} returned empty array, "
+                                     "could not bin trace.".format(key, cell_id, bin_idx))
+
+            # Smooth average spike rate and transform values into mean firing rates by dividing by the time in s
+            # occupied by the bin (from number of samples * sampling rate)
+
+            # Todo: Discuss if smoothing the binned spikes across spatial bins (destroying temporal resolution) is
+            #  actually necessary
+            # smooth_binned_spike = gaussian_filter1d(binned_spike, 1)
+            bin_times = bin_frame_count / (common_img.ScanInfo & key).fetch1('fr')
+            binned_spikerate[:, trial_idx] = binned_spike[:, trial_idx] / bin_times
+
+        return binned_trace, binned_spike, binned_spikerate
 
     def get_trial_avg(self, trace: str) -> np.array:
         """
@@ -437,7 +468,7 @@ class BinnedActivity(dj.Computed):
             raise dj.errors.QueryError('You have to query a single session when computing trial averages. '
                                        f'{len(self)} sessions queried.')
 
-        data = self.ROI().fetch(trace)          # Fetch requested data arrays from all neurons
+        data = self.ROI().fetch(trace)  # Fetch requested data arrays from all neurons
 
         # Take average across trials (axis 1) and return array with shape (n_neurons, n_bins)
         return np.vstack([np.mean(x, axis=1) for x in data])
@@ -470,8 +501,8 @@ class PlaceCells(dj.Computed):
         print(f"Classifying place cells for {key}.")
 
         # Fetch data and parameters of the current session
-        traces = (BinnedActivity & key).get_trial_avg('bin_activity')      # Get spatially binned dF/F (n_cells, n_bins)
-        trans_only = np.vstack((TransientOnly.ROI & key).fetch('trans'))   # Get transient-only dF/F (n_cells, n_frames)
+        traces = (BinnedActivity & key).get_trial_avg('bin_activity')  # Get spatially binned dF/F (n_cells, n_bins)
+        trans_only = np.vstack((TransientOnly.ROI & key).fetch('trans'))  # Get transient-only dF/F (n_cells, n_frames)
         params = (PlaceCellParameter & key).fetch1()
 
         # Smooth binned data
