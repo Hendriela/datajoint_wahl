@@ -159,6 +159,13 @@ def frame_timestamps_from_txt_file(path_sync):
 
     return frames_widefield, diff_mean, diff_std, fps
 
+def filename_from_session(key):
+    # takes a primary key (dependent on common_exp.Session) and gives the filename stem
+    filename = "M{:03d}".format(key["mouse_id"])
+    filename += "_" + key["day"].strftime("%Y-%m-%d")
+    filename += "_" + str(key["session_num"])
+    return filename
+
 def session_from_filename(filename):
     # parse filename to obtain session details
     if not isinstance(filename, pathlib.Path):
