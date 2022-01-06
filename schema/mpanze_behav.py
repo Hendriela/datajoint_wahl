@@ -47,8 +47,8 @@ class JoystickSessionInfo(dj.Imported):
             key_entry["pre_trial_time"] = data["pre_trial_time"]
             key_entry["post_trial_time"] = data["post_trial_time"]
         else:
-            key["pre_trial_time"] = 2
-            key["post_trial_time"] = 3
+            key_entry["pre_trial_time"] = 2
+            key_entry["post_trial_time"] = 3
 
         # populate rest of key
         key_entry["cue_type"] = data["Cue type"]
@@ -57,7 +57,9 @@ class JoystickSessionInfo(dj.Imported):
         key_entry["upper_threshold"] = data["Upper threshold"]
         key_entry["lower_threshold"] = data["Lower threshold"]
         key_entry["total_intertrial_time"] = data["Intertrial time (s)"]
-        key_entry["valve_opening_time"] = data[""]
+        key_entry["valve_opening_time"] = data["Valve opening  time (ms)"]
+        key_entry["no_touch_required"] = int(data["no_touch_required"])
+        key_entry["sampling_rate"] = data["sampling rate"]
         key_entry["filename_params"] = filename_params.stem + filename_params.suffix
 
         # add to table
