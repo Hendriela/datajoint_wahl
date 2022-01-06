@@ -7,14 +7,80 @@ Created on 07/12/2021 15:32
 Functions that constitute the place cell classification pipeline for hheise_placecell.PlaceCells.
 """
 import numpy as np
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Iterable
+import random
 
-from schema import hheise_placecell
+from schema import common_img, hheise_placecell
+
+
+def bin_activity_to_vr(traces: np.ndarray, spikes: np.ndarray, n_bins: int, n_trials: int,
+                       trial_mask: np.ndarray, running_masks: Iterable, bin_frame_counts: Iterable,
+                       key: Optional[dict] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Spatially bins the dF/F and deconvolved traces of many neurons to the VR position. Extracted from
+    BinnedActivity.make() because it is also used to bin the shuffled trace during place cell bootstrapping.
+
+    Args:
+        traces: dF/F traces with shape (n_neurons, n_frames_in_session), queried from common_img.Segmentation.ROI().
+        spikes: CASCADE spike prediction of the trace, same shape and source as races.
+        n_bins: Number of bins into which the trace should be binned, queried from PCAnalysis().
+        n_trials: Number of bins into which the trace should be binned, derived from len(running_masks).
+        trial_mask: 1D array with length n_frames_in_session, queried from PCAnalysis().
+        running_masks: Np.recarray, one elements per trial, queried from Synchronization.VRTrial()
+        bin_frame_counts: Same as running_masks, same as "aligned_frames" from Synchronization.VRTrial()
+        key: Primary keys of the current query
+
+    Returns:
+        Three ndarrays with shape (n_neurons, n_bins, n_trials), spatially binned activity metrics for N neurons
+            - dF/F, spikes, spikerate, fitting for entry of BinnedActivity.ROI().
+    """
+
+    binned_trace = np.zeros((traces.shape[0], n_bins, n_trials))
+    binned_spike = np.zeros((spikes.shape[0], n_bins, n_trials))
+    binned_spikerate = np.zeros((spikes.shape[0], n_bins, n_trials))
+
+    for trial_idx, (running_mask, bin_frame_count) in enumerate(zip(running_masks, bin_frame_counts)):
+        # Create bin mask from frame counts
+        bin_masks = []
+        for idx, n_frames in enumerate(bin_frame_count):
+            bin_masks.append(np.full(n_frames, idx))
+        bin_mask = np.concatenate(bin_masks)
+
+        # Get section of current trial from the session-wide trace and filter out non-running frames
+        trial_trace = traces[:, trial_mask == trial_idx][:, running_mask]
+        trial_spike = spikes[:, trial_mask == trial_idx][:, running_mask]
+
+        # Iteratively for all bins, average trace and sum spike probabilities
+        for bin_idx in range(n_bins):
+            bin_trace = trial_trace[:, bin_mask == bin_idx]
+            bin_spike = trial_spike[:, bin_mask == bin_idx]
+
+            if bin_trace.shape[1]:  # Test if there is data for the current bin, otherwise raise error
+                binned_trace[:, bin_idx, trial_idx] = np.mean(bin_trace, axis=1)
+                # sum instead of mean (CASCADE's spike probability is cumulative)
+                binned_spike[:, bin_idx, trial_idx] = np.nansum(bin_spike, axis=1)
+            else:
+                if key is None:
+                    key = {'-- No primary keys provided': '--'}
+                raise IndexError("Entry {}:\n\t Bin {} returned empty array, could not bin trace.".format(key,
+                                                                                                          bin_idx))
+
+        # Smooth average spike rate and transform values into mean firing rates by dividing by the time in s
+        # occupied by the bin (from number of samples * sampling rate)
+
+        # Todo: Discuss if smoothing the binned spikes across spatial bins (destroying temporal resolution) is
+        #  actually necessary
+        # smooth_binned_spike = gaussian_filter1d(binned_spike, 1)
+        bin_times = bin_frame_count / (common_img.ScanInfo & key).fetch1('fr')
+        binned_spikerate[:, :, trial_idx] = binned_spike[:, :, trial_idx] / bin_times
+
+    return binned_trace, binned_spike, binned_spikerate
 
 
 def smooth_trace(trace: np.ndarray, bin_window: int) -> np.ndarray:
     """
-    Smooths a trace (usually binned, but can also be used unbinned) by averaging each time point across adjacent values.
+    Smooths traces of neurons (usually binned, but can also be used unbinned) by averaging each time point across
+    adjacent values.
 
     Args:
         trace:      2D np.ndarray with shape (n_neurons, n_timepoints) containing data points.
@@ -46,7 +112,7 @@ def smooth_trace(trace: np.ndarray, bin_window: int) -> np.ndarray:
 def pre_screen_place_fields(trace: np.ndarray, bin_baseline: float,
                             placefield_threshold: float) -> List[List[Optional[np.ndarray]]]:
     """
-    Performs pre-screening of potential place fields in a trace. A potential place field is any bin/point that
+    Performs pre-screening of potential place fields in traces. A potential place field is any bin/point that
     has a higher dF/F value than 'placefield_threshold' % (default 25%) of the difference between the baseline and
     maximum dF/F of this trace. The baseline dF/F is the mean of the 'bin_baseline' % (default 25%) least active bins.
 
@@ -166,10 +232,9 @@ def has_enough_transients(trans: np.ndarray, place_field: np.ndarray, key: dict,
 
     place_frames_trace = []  # stores the trace of all trials when the mouse was in a place field as one data row
     for trial in np.unique(trial_mask):
-
         # Get frame indices of first and last place field bin
         frame_borders = (np.sum(frames_per_bin[trial][:place_field[0]]),
-                         np.sum(frames_per_bin[trial][:place_field[-1]+1]))
+                         np.sum(frames_per_bin[trial][:place_field[-1] + 1]))
         # Mask transient-only trace for correct trial and running-only frames (like frames_per_bin)
         trans_masked = trans[trial_mask == trial][running_masks[trial]]
         # Add frames that were in the bin to the list
@@ -179,3 +244,107 @@ def has_enough_transients(trans: np.ndarray, place_field: np.ndarray, key: dict,
     place_frames_trace = np.hstack(place_frames_trace)
     # check if at least 'trans_time' percent of the frames are part of a significant transient
     return np.sum(place_frames_trace) >= trans_time * place_frames_trace.shape[0]
+
+
+def run_classifier(traces: np.ndarray, trans_only: np.ndarray, key: dict, params: Optional[dict] = None) -> dict:
+    """
+    Prepares binned and trial-averaged traces for place cell classification (smoothing) and runs classification by
+    applying place field criteria. Called by hheise_placecell.PlaceCells().make() for initial classification and by
+    perform_bootstrapping() for each shuffle iteration for validation.
+
+    Args:
+        traces:     2D array with shape (n_neurons, n_bins), spatially binned and trial-averaged traces. Can be queried
+                    from hheise_placecell.BinnedActivity.get_trial_avg('bin_activity').
+        trans_only: 2D array with shape (n_neurons, n_frames_in_session), transient-only traces from
+                    hheise_placecell.TransientOnly().
+        key:        Primary keys of the current BinnedActivity() entry.
+        params:     Current parameter set, from hheise_placecell.PlaceCellParameter(). If not provided, function
+                    attempts to query it itself.
+
+    Returns:
+        Dictionary with passed cell IDs as keys and a list with potential place fields and boolean flag of their passing
+        the three criteria.
+    """
+    # Try to fetch parameters if they were not provided
+    if params is None:
+        params = (hheise_placecell.PlaceCellParameter & key).fetch1()
+
+    # Smooth binned data
+    smooth = smooth_trace(traces, params['bin_window_avg'])
+
+    # Screen for potential place fields
+    potential_pf = pre_screen_place_fields(smooth, params['bin_base'], params['place_thresh'])
+
+    passed_cells = {}
+    # For each cell, apply place cell criteria on the potential place fields, and do bootstrapping if necessary
+    for neuron_id, (neuron_pf, neuron_trace, neuron_trans_only) in enumerate(zip(potential_pf, smooth, trans_only)):
+
+        # Apply criteria
+        results = apply_pf_criteria(neuron_trace, neuron_pf, neuron_trans_only, params, key)
+        # If any place field passed all three criteria (bool flags sum to 3), save data for later bootstrapping
+        if any([sum(entry[1:]) == 3 for entry in results]):
+            passed_cells[neuron_id] = results
+
+    return passed_cells
+
+
+def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, key: dict, n_iter: int = 1000,
+                          split_size: int = 50) -> np.ndarray:
+    """
+    Performs bootstrapping on unbinned dF/F traces and returns p-values of putative place cells.
+    For bootstrapping, the trace is divided in parts with 'split_size' length which are randomly shuffled n_iter times.
+    Then, place cell detection is performed on each shuffled trace. The p-value is defined as the ratio of place cells
+    detected in the shuffled traces versus number of shuffles (default 1000; see Dombeck et al., 2010). If this neuron's
+    trace gets a p-value of p < 0.05 (place fields detected in less than 50 shuffles), the place field is accepted.
+
+    Args:
+        pc_traces: 2D array with shape (n_passed_cells, n_frames_in_session), unbinned dF/F traces of all ROIs that
+            passed the initial PC classification and have to be validated. Queried from common_img.Segmentation.ROI().
+        pc_trans_only: Same shape as pc_traces, contains transient-only traces of only passed ROIs from
+            hheise_placecell.TransientOnly.ROI().
+        key: Primary keys of the current BinnedActivity() entry. Passed down from hheise_placecell.PlaceCells().make().
+        n_iter: Number of bootstrap iterations. Passed down from current PlaceCellParameter() entry, defaults to 1000.
+        split_size: Size in frames of shuffle segments. Passed down like n_iter, defaults to 50.
+
+    Returns:
+        1D array with shape (n_passed_cells,), holding p-values for all passed ROIs
+    """
+
+    n_bins, trial_mask = (hheise_placecell.PCAnalysis & key).fetch1('n_bins', 'trial_mask')
+    running_masks, bin_frame_counts = (hheise_placecell.Synchronization.VRTrial & key).fetch('running_mask',
+                                                                                             'aligned_frames')
+    n_trials = len(running_masks)
+
+    # This array keeps track of whether a shuffled trace passed the PC criteria
+    p_counter = np.zeros(pc_traces.shape[0])
+    for i in range(n_iter):
+        # Shuffle pc_traces for every trial separately
+        shuffle = []
+        for trial_id in np.unique(trial_mask):
+            trial = pc_traces[:, trial_mask == trial_id]
+
+            # divide the trial trace into splits of 'split_size' size and manually append the remainder
+            clean_div_length = trial.shape[1] - trial.shape[1] % split_size
+            split_trace = np.split(trial[:, :clean_div_length], clean_div_length / split_size, axis=1)
+            split_trace.append(trial[:, clean_div_length:])
+
+            # shuffle the list of trial-bits with random.sample, and concatenate to a new, now shuffled, array
+            shuffle.append(np.hstack(random.sample(split_trace, len(split_trace))))
+
+        # The binning function requires the whole session in one row, so we stack the single-trial-arrays
+        shuffle = np.hstack(shuffle)
+
+        # bin trials to VR position
+        # parse shuffle twice as a spike rate and discard spike rate output
+        bin_act, _, _ = bin_activity_to_vr(shuffle, shuffle, n_bins, n_trials, trial_mask, running_masks,
+                                           bin_frame_counts, key)
+
+        # Average binned activity across trials
+        bin_avg_act = np.vstack([np.mean(x, axis=1) for x in bin_act])
+
+        # Run the classifier on the shuffled traces
+        passed_shuffles = run_classifier(bin_avg_act, pc_trans_only, key)
+        # Add 1 to the counter of each cell that passed the criteria
+        p_counter[np.array(list(passed_shuffles.keys()))] += 1
+
+    return p_counter / n_iter  # return p-value of all neurons (ratio of accepted place fields out of n_iter shuffles)
