@@ -48,6 +48,7 @@ class PlaceCellParameter(dj.Manual):
     trans_time = 0.2    : float     # fraction of the (unbinned) signal while the mouse is located in the place field 
                                     # that should consist of significant transients
     split_size = 50     : int       # Number of frames in bootstrapping segments
+    boot_iter = 1000    : int       # Number of shuffles for bootstrapping (default 1000, after Dombeck et al., 2010)
     min_bin_size        : int       # Min_pf_size transformed into number of bins (rounded up). Calculated before 
                                     # insertion and raises an error if given by user.
     """
@@ -360,9 +361,10 @@ class BinnedActivity(dj.Computed):
         n_trials = len(running_masks)
 
         # Bin neuronal activity for all neurons
-        binned_trace, binned_spike, binned_spikerate = self.bin_activity_to_vr(traces, spikes, n_bins, n_trials,
-                                                                               trial_mask, running_masks,
-                                                                               bin_frame_counts, key)
+        binned_trace, binned_spike, binned_spikerate = pc_classifier.bin_activity_to_vr(traces, spikes, n_bins,
+                                                                                        n_trials, trial_mask,
+                                                                                        running_masks, bin_frame_counts,
+                                                                                        key)
 
         # Create part entries
         part_entries = [dict(**key, mask_id=unit_id,
@@ -376,68 +378,6 @@ class BinnedActivity(dj.Computed):
 
         # Enter part table entries
         self.ROI().insert(part_entries)
-
-    @staticmethod
-    def bin_activity_to_vr(traces: np.ndarray, spikes: np.ndarray, n_bins: int, n_trials: int,
-                           trial_mask: np.ndarray, running_masks: Iterable, bin_frame_counts: Iterable,
-                           key: Optional[dict]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Spatially bins the dF/F and deconvolved traces of many neurons to the VR position. Extracted as static method
-        from make() because it is also used to bin the shuffled trace during place cell bootstrapping.
-
-        Args:
-            traces: dF/F traces with shape (n_neurons, n_frames_in_session), queried from common_img.Segmentation.ROI().
-            spikes: CASCADE spike prediction of the trace, same shape and source as traces.
-            n_bins: Number of bins into which the trace should be binned, queried from PCAnalysis().
-            n_trials: Number of bins into which the trace should be binned, derived from len(running_masks).
-            trial_mask: 1D array with length n_frames_in_session, queried from PCAnalysis().
-            running_masks: Np.recarray, one elements per trial, queried from Synchronization.VRTrial()
-            bin_frame_counts: Same as running_masks, same as "aligned_frames" from Synchronization.VRTrial()
-            key: Primary keys of the current query
-
-        Returns:
-            Three ndarrays with shape (n_neurons, n_bins, n_trials), spatially binned activity metrics for N neurons
-                - dF/F, spikes, spikerate, fitting for entry of BinnedActivity.ROI().
-        """
-
-        binned_trace = np.zeros((traces.shape[0], n_bins, n_trials))
-        binned_spike = np.zeros((spikes.shape[0], n_bins, n_trials))
-        binned_spikerate = np.zeros((spikes.shape[0], n_bins, n_trials))
-
-        for trial_idx, (running_mask, bin_frame_count) in enumerate(zip(running_masks, bin_frame_counts)):
-            # Create bin mask from frame counts
-            bin_masks = []
-            for idx, n_frames in enumerate(bin_frame_count):
-                bin_masks.append(np.full(n_frames, idx))
-            bin_mask = np.concatenate(bin_masks)
-
-            # Get section of current trial from the session-wide trace and filter out non-running frames
-            trial_trace = traces[:, trial_mask == trial_idx][:, running_mask]
-            trial_spike = spikes[:, trial_mask == trial_idx][:, running_mask]
-
-            # Iteratively for all bins, average trace and sum spike probabilities
-            for bin_idx in range(n_bins):
-                bin_trace = trial_trace[:, bin_mask == bin_idx]
-                bin_spike = trial_spike[:, bin_mask == bin_idx]
-
-                if bin_trace.shape[1]:  # Test if there is data for the current bin, otherwise raise error
-                    binned_trace[:, bin_idx, trial_idx] = np.mean(bin_trace, axis=1)
-                    # sum instead of mean (CASCADE's spike probability is cumulative)
-                    binned_spike[:, bin_idx, trial_idx] = np.nansum(bin_spike, axis=1)
-                else:
-                    raise IndexError("Entry {}:\n\t Bin {} returned empty array, could not bin trace.".format(key,
-                                                                                                              bin_idx))
-
-            # Smooth average spike rate and transform values into mean firing rates by dividing by the time in s
-            # occupied by the bin (from number of samples * sampling rate)
-
-            # Todo: Discuss if smoothing the binned spikes across spatial bins (destroying temporal resolution) is
-            #  actually necessary
-            # smooth_binned_spike = gaussian_filter1d(binned_spike, 1)
-            bin_times = bin_frame_count / (common_img.ScanInfo & key).fetch1('fr')
-            binned_spikerate[:, :, trial_idx] = binned_spike[:, :, trial_idx] / bin_times
-
-        return binned_trace, binned_spike, binned_spikerate
 
     def get_trial_avg(self, trace: str) -> np.array:
         """
@@ -473,20 +413,34 @@ class BinnedActivity(dj.Computed):
 
 
 @schema
-class PlaceCells(dj.Computed):
+class PlaceCell(dj.Computed):
     definition = """ # Place cell analysis and results (PC criteria mainly from Hainmüller (2018) and Dombeck/Tank lab)
     -> BinnedActivity
     -> TransientOnly
     ------
-    time_place_cell = CURRENT_TIMESTAMP : timestamp   # automatic timestamp
+    place_cell_ratio                    : float         # Ratio of accepted place cells to total detected components
+    time_place_cell = CURRENT_TIMESTAMP : timestamp     # automatic timestamp
     """
 
     class ROI(dj.Part):
-        definition = """ # Data of single neurons
-        -> PlaceCells
-        mask_id         : int       # Mask index (as in Segmentation.ROI, base 0)
+        definition = """ # Data of ROIs that have place fields which passed all three criteria.
+        -> PlaceCell
+        mask_id         : int       # Mask index (as in Segmentation.ROI, base 0).
         -----
+        is_place_cell   : int       # Boolean flag whether the cell is classified as a place cell (at least one place
+                                    #  field passed all three criteria, and bootstrapping p-value is < 0.05).
+        p               : float     # P-value of bootstrapping.
+        """
 
+    class PlaceField(dj.Part):
+        definition = """ # Data of all place fields from ROIs with at least one place field that passed all 3 criteria.
+        -> PlaceCell.ROI
+        place_field_id  : int       # Index of the place field, base 0
+        -----
+        bin_idx         : longblob  # 1D array with the bin indices of the place field.
+        large_enough    : tinyint   # Boolean flag of the 1. criterion (PF is large enough).
+        strong_enough   : tinyint   # Boolean flag of the 2. criterion (PF is much stronger than the rest of the trace).
+        transients      : tinyint   # Boolean flag of the 3. criterion (Time in PF consists of enough transients).
         """
 
     def make(self, key: dict) -> None:
@@ -500,6 +454,7 @@ class PlaceCells(dj.Computed):
 
         # Fetch data and parameters of the current session
         traces = (BinnedActivity & key).get_trial_avg('bin_activity')  # Get spatially binned dF/F (n_cells, n_bins)
+        mask_ids = (BinnedActivity.ROI & key).fetch('mask_id')
         trans_only = np.vstack((TransientOnly.ROI & key).fetch('trans'))  # Get transient-only dF/F (n_cells, n_frames)
         params = (PlaceCellParameter & key).fetch1()
 
@@ -509,11 +464,34 @@ class PlaceCells(dj.Computed):
         # Screen for potential place fields
         potential_pf = pc_classifier.pre_screen_place_fields(smooth, params['bin_base'], params['place_thresh'])
 
-        trace = smooth[1]
-        trans = trans_only[1]
-        place_blocks = potential_pf[1]
+        passed_cells = {}
+        # For each cell, apply place cell criteria on the potential place fields, and do bootstrapping if necessary
+        for neuron_id, (neuron_pf, neuron_trace, neuron_trans_only) in enumerate(zip(potential_pf, smooth, trans_only)):
 
+            # Apply criteria
+            results = pc_classifier.apply_pf_criteria(neuron_trace, neuron_pf, neuron_trans_only, params, key)
+            # If any place field passed all three criteria (bool flags sum to 3), save data for later bootstrapping
+            if any([sum(entry[1:]) == 3 for entry in results]):
+                passed_cells[neuron_id] = results
 
+        print(f"\t{len(passed_cells)} potential place cells found. Performing bootstrapping...")
+        # Perform bootstrapping on all cells with passed place fields
+        pc_traces = (common_img.Segmentation & key).get_traces()[np.array(list(passed_cells.keys()))]
+        pc_trans_only = trans_only[np.array(list(passed_cells.keys()))]
+        p_values = pc_classifier.perform_bootstrapping(pc_traces, pc_trans_only, key, n_iter=params['boot_iter'],
+                                                       split_size=params['split_size'])
+        print(f"\tBootstrapping complete. {np.sum(p_values < 0.05)} cells with p<0.05.")
+        # Prepare single-ROI entries
+        pf_roi_entries = []
+        pf_entries = []
+        for idx, (cell_id, place_fields) in enumerate(passed_cells.items()):
+            pf_roi_entries.append(dict(**key, mask_id=mask_ids[cell_id], is_place_cell=int(p_values[idx] < 0.05),
+                                       p=p_values[idx]))
+            for field_idx, field in enumerate(place_fields):
+                pf_entries.append(dict(**key, mask_id=mask_ids[cell_id], place_field_id=field_idx, bin_idx=field[0],
+                                       large_enough=field[1], strong_enough=field[2], transients=field[3]))
 
-
-
+        # Insert entries into tables
+        self.insert1(dict(**key, place_cell_ratio=np.sum(p_values < 0.05)/len(traces)))
+        self.ROI().insert(pf_roi_entries)
+        self.PlaceField().insert(pf_entries)
