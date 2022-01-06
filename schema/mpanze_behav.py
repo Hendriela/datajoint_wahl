@@ -3,7 +3,7 @@ Schema for processing behavioural data from reach-to-grasp experiments
 """
 
 import datajoint as dj
-from schema import common_exp
+from schema import common_exp, common_mice
 from mpanze_scripts import utils
 import numpy as np
 import pathlib
@@ -223,3 +223,15 @@ class JoystickSession(dj.Computed):
         key["n_trials"] = n_trials
         self.insert1(key)
         self.JoystickTrial().insert(trial_keys)
+
+
+@schema
+class StrokeDate(dj.Manual):
+    definition = """ # dates when the mice had the stroke, for calculating statistics
+    -> common_mice.Mouse
+    ---
+    stroke_date             : date          # date of the stroke (YYYY-MM-DD)
+    """
+
+    def days(self, date):
+        return (date - self.fetch1()["stroke_date"]).days
