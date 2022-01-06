@@ -480,16 +480,16 @@ class PlaceCell(dj.Computed):
         pc_trans_only = trans_only[np.array(list(passed_cells.keys()))]
         p_values = pc_classifier.perform_bootstrapping(pc_traces, pc_trans_only, key, n_iter=params['boot_iter'],
                                                        split_size=params['split_size'])
-        print(f"\tBootstrapping complete. {np.sum(p_values < 0.05)} cells with p<0.05.")
+        print(f"\tBootstrapping complete. {np.sum(p_values <= 0.05)} cells with p<=0.05.")
         # Prepare single-ROI entries
         pf_roi_entries = []
         pf_entries = []
         for idx, (cell_id, place_fields) in enumerate(passed_cells.items()):
-            pf_roi_entries.append(dict(**key, mask_id=mask_ids[cell_id], is_place_cell=int(p_values[idx] < 0.05),
+            pf_roi_entries.append(dict(**key, mask_id=mask_ids[cell_id], is_place_cell=int(p_values[idx] <= 0.05),
                                        p=p_values[idx]))
             for field_idx, field in enumerate(place_fields):
                 pf_entries.append(dict(**key, mask_id=mask_ids[cell_id], place_field_id=field_idx, bin_idx=field[0],
-                                       large_enough=field[1], strong_enough=field[2], transients=field[3]))
+                                       large_enough=int(field[1]), strong_enough=int(field[2]), transients=int(field[3])))
 
         # Insert entries into tables
         self.insert1(dict(**key, place_cell_ratio=np.sum(p_values < 0.05)/len(traces)))
