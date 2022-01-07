@@ -17,6 +17,7 @@ Adapted by Hendrik 2021-05-04
 """
 import keyring
 import datajoint as dj
+import yaml
 
 # define variable to keep track of working directory
 __cwd__ = ""
@@ -24,7 +25,7 @@ __cwd__ = ""
 
 def get_ip() -> str:
     """Return ip address of the server"""
-    return '130.60.53.47'   # Ubuntu server in Anna-Sophias room
+    return '130.60.53.47'  # Ubuntu server in Anna-Sophias room
 
 
 def get_user() -> str:
@@ -33,12 +34,14 @@ def get_user() -> str:
     raise Exception('Define a username before connecting to the database.')
     return  # Put your shortname here
 
+
 def get_password() -> str:
     """Return password of the Datajoint and MySQL credentials"""
     # Before using DataJoint for the first time on a computer, store your password with
     # > keyring.set_password('datajoint_user', 'your_username', 'your_password')
     # This has to be the same password you used when registering at the MySQL database!
     return keyring.get_password('datajoint_user', get_user())
+
 
 def connect() -> None:
     """ Connects to the database using the credentials in the login.py file"""
@@ -52,6 +55,24 @@ def connect() -> None:
     __cwd__ = str(get_neurophys_data_directory())
 
     # TODO: Define cache and external storage here as well
+
+
+def get_default_parameters() -> dict:
+    """
+    Load user-specific gui_params.yaml file with default parameters for various GUIs.
+
+    Returns:
+        Dictionary with default parameters, some grouped in sub-dicts. See gui_params.yaml for data.
+    """
+
+    try:
+        with open(r'gui_params.yaml') as file:
+            # The FullLoader parameter handles the conversion from YAML scalar values to Python's dictionary format
+            default_params = yaml.load(file, Loader=yaml.FullLoader)
+        return default_params
+    except FileNotFoundError:
+        raise FileNotFoundError("Parameter file gui_params.yaml could not be found. Check that it is in the same"
+                                "folder as login.py")
 
 
 ## Functions to modify file paths depending on location of execution
@@ -75,6 +96,7 @@ def get_neurophys_wahl_directory() -> str:
 
     return  # for example for Hendrik's PC: 'W:\\Neurophysiology-Storage1\\Wahl'
 
+
 def get_neurophys_data_directory() -> str:
     """Return the path to the neurophys-storage1 data folder (specific folder for current user) on this system"""
 
@@ -82,7 +104,8 @@ def get_neurophys_data_directory() -> str:
     raise Exception('The path to the mapped neurophys directory path has not been set in the file '
                     '"login.py". Please modify this file.')
 
-    return # for example for Hendrik's PC:  'W:\\Neurophysiology-Storage1\\Wahl\\Hendrik\\PhD\\Data'
+    return  # for example for Hendrik's PC:  'W:\\Neurophysiology-Storage1\\Wahl\\Hendrik\\PhD\\Data'
+
 
 def get_computer_name() -> str:
     """ Return the name of the local computer to check if the file is locally cached """
@@ -91,7 +114,7 @@ def get_computer_name() -> str:
     raise Exception('The name of the computer this code is run on has not been set in the file '
                     '"login.py". Please modify this file.')
 
-    return # for example for Hendrik's PC:  'Hendrik_Lab'
+    return  # for example for Hendrik's PC:  'Hendrik_Lab'
 
 
 def get_working_directory() -> str:

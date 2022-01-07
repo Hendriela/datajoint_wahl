@@ -79,9 +79,7 @@ REL_BACKUP_PATH = "Datajoint/manual_submissions"
 # =============================================================================
 
 # Load YAML file (has to be present in the same folder
-with open(r'gui_params.yaml') as file:
-    # The FullLoader parameter handles the conversion from YAML scalar values to Python's dictionary format
-    default_params = yaml.load(file, Loader=yaml.FullLoader)
+default_params = login.get_default_parameters()
 
 # Set current day as default day
 current_day = datetime.today().strftime('%Y-%m-%d')  # YYYY-MM-DD
