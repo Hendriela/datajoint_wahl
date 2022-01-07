@@ -15,6 +15,8 @@ This has to be the same password you used when registering at the MySQL database
 
 Adapted by Hendrik 2021-05-04
 """
+import os
+
 import keyring
 import datajoint as dj
 import yaml
@@ -65,12 +67,19 @@ def get_default_parameters() -> dict:
         Dictionary with default parameters, some grouped in sub-dicts. See gui_params.yaml for data.
     """
 
+    tmp_wd = os.getcwd()  # Store the current working directory from where the function was called
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))  # Change working directory to path of the current file
+
     try:
         with open(r'gui_params.yaml') as file:
             # The FullLoader parameter handles the conversion from YAML scalar values to Python's dictionary format
             default_params = yaml.load(file, Loader=yaml.FullLoader)
+        os.chdir(tmp_wd)  # Reset working directory
+
         return default_params
+
     except FileNotFoundError:
+        os.chdir(tmp_wd)  # Reset working directory
         raise FileNotFoundError("Parameter file gui_params.yaml could not be found. Check that it is in the same"
                                 "folder as login.py")
 
