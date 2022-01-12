@@ -940,8 +940,6 @@ class Segmentation(dj.Computed):
             Returns:
                 Dense 2d array of the shape of the imaging field, shape (n_rois, x, y)
             """
-            if len(self) != 1:
-                raise Exception('Only length one allowed (not {})'.format(len(self)))
 
             from scipy import sparse
 
