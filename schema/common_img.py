@@ -197,17 +197,8 @@ class RawImagingFile(dj.Imported):
         # Get session path
         path = (common_exp.Session() & key).get_absolute_path()
 
-        if os.path.isfile('.\\gui_params.yaml'):
-            gui_param_path = '.\\gui_params.yaml'
-        elif os.path.isfile('..\\gui_params.yaml'):
-            gui_param_path = '..\\gui_params.yaml'
-        else:
-            raise FileNotFoundError('Cannot find gui_params.yaml file.')
-
-        # Get the file pattern for the current user from the YAML file
-        with open(gui_param_path) as file:
-            # The FullLoader parameter handles the conversion from YAML scalar values to Python's dictionary format
-            default_params = yaml.load(file, Loader=yaml.FullLoader)
+        # Load default parameters
+        default_params = login.get_default_parameters()
 
         # Iterate through the session directory and subdirectories and find files with the matching naming pattern
         file_list = []
@@ -941,28 +932,37 @@ class Segmentation(dj.Computed):
         cnn      : float        # CNN estimation of neuron-like shape (evaluation criterion)
         """
 
-        def get_roi(self) -> np.ndarray:
+        def get_rois(self) -> np.ndarray:
             """
             Returns the ROI mask as a dense 2d array of the shape of the imaging field
-            TODO: add support for multiple ROIs at a time
             Adrian 2019-09-05
 
             Returns:
-                Dense 2d array of the shape of the imaging field
+                Dense 2d array of the shape of the imaging field, shape (n_rois, x, y)
             """
             if len(self) != 1:
                 raise Exception('Only length one allowed (not {})'.format(len(self)))
 
-            from scipy.sparse import csc_matrix
-            # make sparse matrix (https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.csc_matrix.html)
-            weights = self.fetch1('weights')
-            pixels = self.fetch1('pixels')
+            from scipy import sparse
+
+            # Query data
+            weights = self.fetch('weights')
+            pixels = self.fetch('pixels')
             dims = (Segmentation() & self).fetch1('target_dim')
 
-            sparse_matrix = csc_matrix((weights, (pixels, np.zeros(len(pixels)))), shape=(dims[0] * dims[1], 1))
+            # make sparse matrices for all queried ROIs
+            sparse_matrices = []
+            for i in range(len(weights)):
+                sparse_matrices.append(sparse.csc_matrix((weights[i], (pixels[i], np.zeros(len(pixels[i])))),
+                                                  shape=(dims[0] * dims[1], 1)))
 
+            # stack sparse matrices
+            sparse_matrix = sparse.hstack(sparse_matrices)
             # transform to dense matrix
-            return np.reshape(sparse_matrix.toarray(), dims, order='F')
+            dense = np.reshape(sparse_matrix.toarray(), (dims[0], dims[1], len(weights)), order='F')
+
+            # swap axes to keep n_rois as first axis and return
+            return np.moveaxis(dense, 2, 0)
 
         def get_roi_center(self) -> np.ndarray:
             """
