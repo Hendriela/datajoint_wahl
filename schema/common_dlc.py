@@ -4,7 +4,6 @@ Adapted from Adrain Hoffmann's pipeline
 """
 
 import datajoint as dj
-import deeplabcut
 import os
 import numpy as np
 import login
@@ -326,6 +325,11 @@ class VideoPredictions(dj.Computed):
         iteration_folder = pathlib.Path(p_video.parent, "iteration_%i" % key["iteration"])
         if not iteration_folder.exists():
             os.mkdir(str(iteration_folder))
+
+        # this code requires DLC to be installed with GPU support
+        os.environ["DLClight"] = "True"
+        import deeplabcut as d
+        print('Running DeepLabCut version', d.__version__)
 
         # run analysis on video
         deeplabcut.analyze_videos(str(p_config), [str(p_video)], destfolder=str(iteration_folder))
