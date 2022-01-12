@@ -820,6 +820,8 @@ class CaimanParameter(dj.Manual):
                                         # of a kernel density estimation.
     quantile_min = 8:       tinyint     # Quantile to use as baseline fluorescence. Only used if flag_auto is False.
     frame_window = 2000:    int         # Sliding window size of fluorescence normalization
+    # Custom parameters that are not directly part of Caimans CNMFParams object
+    weight_tresh = 0.005:   float       # Threshold of giving an ROI ownership over a pixel
     """
 
     def helper_insert1(self, entry: dict) -> None:
@@ -912,6 +914,7 @@ class Segmentation(dj.Computed):
     target_dim                      : longblob      # Tuple (dim_y, dim_x) to reconstruct mask from linearized index
     s_background                    : longblob      # Spatial background component(s) weight mask (dim_y, dim_x, nb) 
     f_background                    : longblob      # Background fluorescence (nb, nr_frames)
+    roi_map                         : longblob      # FOV with pixels labelled with their (primary) ROI occupant. -1 if no ROI occupies this pixel.
     traces                          : varchar(128)  # Relative path (from session folder) to "raw" trace of each ROI (estimates.C + estimates.YrA)
     residuals                       : varchar(128)  # Relative path (from session folder) to residual fluorescence of each ROI (estimates.YrA)
     time_seg = CURRENT_TIMESTAMP    : timestamp     # automatic timestamp
@@ -924,7 +927,7 @@ class Segmentation(dj.Computed):
         -----
         pixels   : longblob     # Linearized indices of non-zero values
         weights  : longblob     # Corresponding values at the index position
-
+        com      : longblob     # Center of Mass (x/row, y/column)
         dff      : longblob     # Normalized deltaF/F fluorescence change
         perc     : float        # Percentile used for deltaF/F computation 
         snr      : float        # Signal-to-noise ratio of this ROI (evaluation criterion)
@@ -962,29 +965,30 @@ class Segmentation(dj.Computed):
             # swap axes to keep n_rois as first axis and return
             return np.moveaxis(dense, 2, 0)
 
-        def get_roi_center(self) -> np.ndarray:
-            """
-            Returns center of mass of a single ROI as int array of length 2.
-            Adrian 2019-09-05
-
-            Returns:
-                Center of mass coordinates as np.array(x, y) or np.array(row, col)
-            """
-            if len(self) != 1:
-                raise Exception('Only length one allowed (not {})'.format(len(self)))
-
-            roi_mask = self.get_roi()
-
-            # calculate center of mass of mask by center of two projections
-            proj1 = np.sum(roi_mask, axis=0)
-            index1 = np.arange(proj1.shape[0])
-            center1 = np.inner(proj1, index1) / np.sum(proj1)  # weighted average index
-
-            proj2 = np.sum(roi_mask, axis=1)
-            index2 = np.arange(proj2.shape[0])
-            center2 = np.inner(proj2, index2) / np.sum(proj2)  # weighted average index
-
-            return np.array([np.round(center1), np.round(center2)], dtype=int)
+        # Obsolete function, CoM is calculated during make() and stored in DB
+        # def get_roi_center(self) -> np.ndarray:
+        #     """
+        #     Returns center of mass of a single ROI as int array of length 2.
+        #     Adrian 2019-09-05
+        #
+        #     Returns:
+        #         Center of mass coordinates as np.array(x, y) or np.array(row, col)
+        #     """
+        #     if len(self) != 1:
+        #         raise Exception('Only length one allowed (not {})'.format(len(self)))
+        #
+        #     roi_mask = self.get_rois()[0]
+        #
+        #     # calculate center of mass of mask by center of two projections
+        #     proj1 = np.sum(roi_mask, axis=0)
+        #     index1 = np.arange(proj1.shape[0])
+        #     center1 = np.inner(proj1, index1) / np.sum(proj1)  # weighted average index
+        #
+        #     proj2 = np.sum(roi_mask, axis=1)
+        #     index2 = np.arange(proj2.shape[0])
+        #     center2 = np.inner(proj2, index2) / np.sum(proj2)  # weighted average index
+        #
+        #     return np.array([np.round(center1), np.round(center2)], dtype=int)
 
     # make of main table Segmentation
     def make(self, key: dict, save_results: bool = False, save_overviews: bool = False) -> None:
@@ -1106,12 +1110,32 @@ class Segmentation(dj.Computed):
         # warnings.filterwarnings('default', category=FutureWarning)
         warnings.filterwarnings('default', category=SparseEfficiencyWarning)
 
-        #### save caiman results in easy to read datajoint variables
+        #################################################################
+        #### SAVE CAIMAN RESULTS IN EASY TO READ DATAJOINT VARIABLES ####
+        #################################################################
         s_background = np.reshape(cnm2.estimates.b, cnm2.dims + (opts.get('init', 'nb'),), order='F')
         f_background = cnm2.estimates.f
 
         masks = cnm2.estimates.A  # (flattened_index, nr_masks)
         nr_masks = masks.shape[1]
+
+        from scipy.ndimage.measurements import center_of_mass
+
+        # Transform sparse mask into a dense array for CoM and neuron_map calculation
+        dense_masks = np.reshape(masks.toarray(), (cnm2.dims[0], cnm2.dims[1], len(cnm2.estimates.C)), order='F')
+        # Move axis of ROIs to position 0
+        dense_masks = np.moveaxis(dense_masks, 2, 0)
+
+        # Use scipy to calculate center of mass
+        coms = []
+        for footprint in dense_masks:
+            coms.append(center_of_mass(footprint))
+
+        # Create ROI location map
+        # Each pixel belongs to the ROI with the largest weight, with a default weight threshold of 0.005
+        max_vals = np.amax(dense_masks, axis=0)
+        pixel_owners = np.argmax(dense_masks, axis=0)
+        pixel_owners = np.where(max_vals > (CaimanParameter & key).fetch1('weight_thresh'), pixel_owners, -1)
 
         traces = cnm2.estimates.C + cnm2.estimates.YrA
         residual = cnm2.estimates.YrA
@@ -1134,6 +1158,7 @@ class Segmentation(dj.Computed):
                                 target_dim=np.array(dims),
                                 s_background=np.array(s_background, dtype=np.float32),
                                 f_background=np.array(f_background, dtype=np.float32),
+                                roi_map=pixel_owners,
                                 traces=traces_filename,
                                 residuals=residuals_filename)
         self.insert1(new_master_entry)
@@ -1144,6 +1169,7 @@ class Segmentation(dj.Computed):
                             mask_id=i,
                             pixels=masks[:, i].indices,
                             weights=np.array(masks[:, i].data, dtype=np.float32),
+                            com=coms[i],
                             dff=dff[i, :],
                             perc=perc[i],
                             snr=snr[i],
