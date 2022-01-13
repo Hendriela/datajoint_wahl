@@ -207,7 +207,8 @@ class RawImagingFile(dj.Imported):
                 file_list.extend(glob(step[0] + f'\\{file_pattern}'))
 
         if len(file_list) == 0:
-            raise ImportError("No files found in {} that fit the patterns {}!".format(path, default_params['imaging']['scientifica_file']))
+            raise ImportError("No files found in {} that fit the patterns {}!".format(path, default_params['imaging'][
+                'scientifica_file']))
 
         # Sort list by postfix number
         file_list_sort = helper.alphanumerical_sort(file_list)
@@ -345,6 +346,7 @@ class MotionParameter(dj.Manual):
     n_iter_rig = 2      : tinyint   # Number of iterations for rigid motion correction (not used for pw-rigid)
     nonneg_movie = 1    : tinyint   # flag for producing a non-negative movie
     """
+
     # TODO: CRUCIAL!! CHECK HOW THE CHANGED PMT SETTING THAT AFFECTS dF/F CAN BE CORRECTED TO MAKE SESSIONS COMPARABLE
     # Todo: check if n_iter is only important for rigid, or also for pw-rigid correction
 
@@ -358,7 +360,7 @@ class MotionParameter(dj.Manual):
 
         self.insert1(entry)
 
-        full_entry = (self & entry).fetch1()        # Query full entry in case some default attributes were not set
+        full_entry = (self & entry).fetch1()  # Query full entry in case some default attributes were not set
 
         # TODO: remove hard-coding of folder location
         REL_BACKUP_PATH = "Datajoint/manual_submissions"
@@ -821,7 +823,7 @@ class CaimanParameter(dj.Manual):
     quantile_min = 8:       tinyint     # Quantile to use as baseline fluorescence. Only used if flag_auto is False.
     frame_window = 2000:    int         # Sliding window size of fluorescence normalization
     # Custom parameters that are not directly part of Caimans CNMFParams object
-    weight_tresh = 0.005:   float       # Threshold of giving an ROI ownership over a pixel
+    weight_thresh = 0.005:  float       # Threshold of giving an ROI ownership over a pixel
     """
 
     def helper_insert1(self, entry: dict) -> None:
@@ -955,7 +957,7 @@ class Segmentation(dj.Computed):
             sparse_matrices = []
             for i in range(len(weights)):
                 sparse_matrices.append(sparse.csc_matrix((weights[i], (pixels[i], np.zeros(len(pixels[i])))),
-                                                  shape=(dims[0] * dims[1], 1)))
+                                                         shape=(dims[0] * dims[1], 1)))
 
             # stack sparse matrices
             sparse_matrix = sparse.hstack(sparse_matrices)
@@ -1007,13 +1009,27 @@ class Segmentation(dj.Computed):
         print('Populating Segmentation for {}.'.format(key))
 
         # Create the memory mapped file if it does not exist yet
-        if len(MemoryMappedFile() & key) == 0:
-            # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
-            channel = Scan().select_channel_if_necessary(key, 0)
-            MemoryMappedFile().make(key, channel)
 
-        mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')    # locally cached file
-        folder = (common_exp.Session() & key).get_absolute_path()   # Session folder on the Neurophys server
+        # Look for mmap files in the temp folder that might be leftover from a previously cancelled make() call
+        mmap_path = glob(login.get_cache_directory() + "\\*.mmap")
+        mmap_frames = [int(mmap.split("_")[-2]) for mmap in mmap_path]
+        try:
+            # N_frames of the found mmap files are matched with the session's nr_frames to find correct mmap file
+            mmap = mmap_path[mmap_frames.index((ScanInfo & key).fetch1('nr_frames'))]
+            # If a mmap file with the correct nr of frames exists, force-insert it into the table for later deletion
+            MemoryMappedFile().insert1(dict(**{i: key[i] for i in key if i != 'caiman_id'}, mmap_path=mmap),
+                                       allow_direct_insert=True)
+            print("\tFound existing mmap file, skipping motion correction.")
+        except ValueError:
+            # If no fitting mmap file has been found in the temp folder, check if an entry already exists somewhere else
+            # If no entry exists, re-create the mmap file.
+            if len(MemoryMappedFile() & key) == 0:
+                # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
+                channel = Scan().select_channel_if_necessary(key, 0)
+                MemoryMappedFile().make(key, channel)
+
+        mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')  # locally cached file
+        folder = (common_exp.Session() & key).get_absolute_path()  # Session folder on the Neurophys server
 
         # Get Caiman parameters and include it into the parameters of the motion correction
         opts = (MotionParameter() & key).get_parameter_obj(key)
@@ -1022,7 +1038,7 @@ class Segmentation(dj.Computed):
 
         # log('Using the following parameters: {}'.format(opts.to_dict()))
         p = opts.get('temporal', 'p')  # save for later
-        cn = (QualityControl() & key).fetch1('cor_image')   # Local correlation image for FOV background
+        cn = (QualityControl() & key).fetch1('cor_image')  # Local correlation image for FOV background
 
         # load memory mapped file
         Yr, dims, T = cm.load_memmap(mmap_file)
@@ -1036,9 +1052,12 @@ class Segmentation(dj.Computed):
         # disable the most common warnings in the caiman code...
         import warnings
         from scipy.sparse import SparseEfficiencyWarning
+        from sklearn.exceptions import ConvergenceWarning
         warnings.filterwarnings('ignore', category=SparseEfficiencyWarning)
         warnings.filterwarnings('ignore', category=FutureWarning)
+        warnings.filterwarnings('ignore', category=ConvergenceWarning)
 
+        print("\tStart running CNMF...")
         # First extract spatial and temporal components on patches and combine them
         # for this step deconvolution is turned off (p=0)
         opts.change_params({'p': 0})
@@ -1084,6 +1103,7 @@ class Segmentation(dj.Computed):
         # Caiman's source code has to be edited to return the computed percentiles (which are always used instead of
         # quantileMin if flag_auto is not actively set to False). It is a numpy array with shape (#components) with the
         # percentile used as fluorescence baseline for each neuron.
+        print("\tStart computing dF/F...")
         flag_auto = bool((CaimanParameter() & key).fetch1('flag_auto'))
         frames_window = (CaimanParameter() & key).fetch1('frame_window')
         quantileMin = (CaimanParameter() & key).fetch1('quantile_min')
@@ -1107,12 +1127,15 @@ class Segmentation(dj.Computed):
         cm.stop_server(dview=dview)
 
         # reset warnings to normal:
-        # warnings.filterwarnings('default', category=FutureWarning)
+        warnings.filterwarnings('default', category=FutureWarning)
         warnings.filterwarnings('default', category=SparseEfficiencyWarning)
+        warnings.filterwarnings('default', category=ConvergenceWarning)
 
         #################################################################
         #### SAVE CAIMAN RESULTS IN EASY TO READ DATAJOINT VARIABLES ####
         #################################################################
+        print("\tStart saving data in DataJoint format...")
+
         s_background = np.reshape(cnm2.estimates.b, cnm2.dims + (opts.get('init', 'nb'),), order='F')
         f_background = cnm2.estimates.f
 
@@ -1360,7 +1383,8 @@ class Deconvolution(dj.Computed):
             -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], None]:
         """ Wrapper function for Segmentation.get_traces(). See that function for documentation """
 
-        return (Segmentation & self).get_traces(trace_type='decon', include_id=include_id, decon_id=self.fetch1('decon_id'))
+        return (Segmentation & self).get_traces(trace_type='decon', include_id=include_id,
+                                                decon_id=self.fetch1('decon_id'))
 
 
 @schema
