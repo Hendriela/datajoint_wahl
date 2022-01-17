@@ -915,7 +915,7 @@ class Segmentation(dj.Computed):
     -> CaimanParameter
     ------
     nr_masks                        : smallint      # Number of total detected masks in this FOV (includes rejected masks)
-    target_dim                      : longblob      # Tuple (dim_y, dim_x) to reconstruct mask from linearized index
+    target_dim                      : longblob      # FOV dimensions as tuple (dim_y, dim_x) to reconstruct mask from linearized index
     s_background                    : longblob      # Spatial background component(s) weight mask (dim_y, dim_x, nb) 
     f_background                    : longblob      # Background fluorescence (nb, nr_frames)
     roi_map                         : longblob      # FOV with pixels labelled with their (primary) ROI occupant. -1 if no ROI occupies this pixel.
@@ -968,6 +968,46 @@ class Segmentation(dj.Computed):
 
             # swap axes to keep n_rois as first axis and return
             return np.moveaxis(dense, 2, 0)
+
+        def plot_contours(self, thr: float = 0.05, background: str = 'cor_image', ax: plt.Axes = None,
+                          show_id: bool = False, contour_color='w', id_color='w') -> None:
+            """
+            Plot contours of queried ROIs.
+
+            Args:
+                thr             : Weight threshold of contour function
+                background      : Background image. Has to be attribute of QualityControl(), or None for no background
+                ax              : If provided an Axes, contours will be plotted there, otherwise in a new figure
+                show_id         : Bool flag whether mask IDs should be shown in the contour centers
+                contour_color   : Color of the contour drawing
+                id_color        : Color of the mask ID text
+            """
+            
+            from skimage import measure
+
+            # Fetch footprints of the queried ROIs and compute contours
+            footprints = self.get_rois()
+            contours = [measure.find_contours(footprint, thr, fully_connected='high')[0] for footprint in footprints]
+
+            # If no axes object is provided, plot in a new figure
+            if ax is None:
+                plt.figure()
+                ax = plt.gca()
+
+            # Fetch and plot background image if provided
+            if background is None:
+                ax.imshow((QualityControl() & self).fetch1(background))
+
+            # Plot contours
+            for c in contours:
+                c[:, [0, 1]] = c[:, [1, 0]]  # Plotting swaps X and Y axes, swap them back before
+                ax.plot(*c.T, c=contour_color)
+
+            # Write mask ID at the CoM of each ROI
+            if show_id:
+                mask_ids, coms = self.fetch('mask_id', 'com')
+                for mask_id, com in zip(mask_ids, coms):
+                    ax.text(com[1], com[0], str(mask_id), color=id_color)
 
         # Obsolete function, CoM is calculated during make() and stored in DB
         # def get_roi_center(self) -> np.ndarray:
