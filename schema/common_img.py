@@ -851,6 +851,8 @@ class CaimanParameter(dj.Manual):
     def get_parameter_obj(self, scan_key: dict, return_dict: bool = True):
         """
         Exports parameters as a params.CNMFParams type dictionary for CaImAn.
+        Type hinting of params.CNMFParams not possible because then the schema cant be loaded in a non-Caiman env.
+
         Args:
             scan_key: Primary keys of Scan entry that is being processed
             return_dict: Bool flag whether a a dict instead of a CNMFParams object should be returned.
