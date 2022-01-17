@@ -982,7 +982,7 @@ class Segmentation(dj.Computed):
                 contour_color   : Color of the contour drawing
                 id_color        : Color of the mask ID text
             """
-            
+
             from skimage import measure
 
             # Fetch footprints of the queried ROIs and compute contours
@@ -995,7 +995,7 @@ class Segmentation(dj.Computed):
                 ax = plt.gca()
 
             # Fetch and plot background image if provided
-            if background is None:
+            if background is not None:
                 ax.imshow((QualityControl() & self).fetch1(background))
 
             # Plot contours
