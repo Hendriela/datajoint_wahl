@@ -32,6 +32,8 @@ class CellMatchingParameter(dj.Manual):
     neighbourhood_radius = 80   : int       # Radius in um of the area around the ROI where matches are considered. 
                                             # Default of 80 translates to 50 pixels at 1x zoom
     nearby_neuron_cap = 15      : int       # Maximum nearest neurons found by KDTree nearest-neighbor-analysis
+    fov_shift_patches = 8       : tinyint   # Number of patches squared into which the FOV will be split for shift 
+                                            # estimation. E.g. with 8, the FOV will be split into 8x8=64 patches.
     """
 
 
@@ -47,8 +49,67 @@ class CellMatchingClassifier(dj.Manual):
 
 
 @schema
+class FieldOfViewShift(dj.Manual):
+    definition = """ # Piecewise FOV shift between two sessions. Used to correct CoM coordinates.
+    -> common_img.QualityControl
+    -> CellMatchingParameter
+    matched_session : varchar(64)   # Identifier for the matched session: YYYY-MM-DD_sessionnum_motionid_caimanid
+    ------
+    shifts         : longblob       # 3D array with shape (n_dims, x, y), holding pixel-wise shifts for x (shifts[0]) 
+                                    # and y (shifts[1]) coordinates.
+    """
+
+    def make(self, key: dict, matched_session_id: str) -> None:
+        """
+        Compute FOV-shift map between the queried reference and a target image. Images are split into patches, and the
+        shift is calculated for each patch separately with phase correlation. The resulting shift map is scaled up and
+        missing values interpolated to the original FOV size to get an estimated shift value for each pixel.
+
+        Args:
+            key: Primary keys of the reference session in common_img.QualityControl(), and a CellMatchingParameter entry
+            matched_session_id: Identifier string of the matched session: YYYY-MM-DD_sessionnum_motionid_caimanid. It is
+                                assumed that the reference and matched sessions come from the same individual mouse.
+        """
+
+        from skimage import registration
+        from scipy import ndimage
+
+        # Fetch reference FOV, parameter set, and extract the primary keys of the matched session from the ID string
+        match_keys = matched_session_id.split('_')
+        match_key = dict(username=key['username'], mouse_id=key['mouse_id'], day=match_keys[0],
+                         session_num=match_keys[1], motion_id=[2])
+
+        fov_ref = (common_img.QualityControl & key).fetch1('avg_image')
+        fov_match = (common_img.QualityControl & match_key).fetch1('avg_image')
+        params = (CellMatchingParameter & key).fetch1()
+
+        # Calculate pixel size of each patch
+        img_dim = fov_ref.shape
+        patch_size = int(img_dim[0] / params['fov_shift_patches'])
+
+        # Shift maps are a 2D matrix of shape (n_patch, n_patch), with the phase correlation of each patch
+        shift_map = np.zeros((2, params['fov_shift_patches'], params['fov_shift_patches']))
+        for row in range(params['fov_shift_patches']):
+            for col in range(params['fov_shift_patches']):
+                # Get a view of the current patch by slicing rows and columns of the FOVs
+                curr_ref_patch = fov_ref[row * patch_size:row * patch_size + patch_size,
+                                 col * patch_size:col * patch_size + patch_size]
+                curr_tar_patch = fov_match[row * patch_size:row * patch_size + patch_size,
+                                 col * patch_size:col * patch_size + patch_size]
+                # Perform phase cross correlation to estimate image translation shift for each patch
+                patch_shift = registration.phase_cross_correlation(curr_ref_patch, curr_tar_patch, upsample_factor=100,
+                                                                   return_error=False)
+                shift_map[:, row, col] = patch_shift
+
+        # Use scipy's zoom to upscale single-patch shifts to FOV size and get pixel-wise shifts via spline interpolation
+        shift_map_big = ndimage.zoom(shift_map, patch_size, order=3)
+
+        # Insert shift map into the table
+        self.insert1(dict(**key, matched_session=matched_session_id, shifts=shift_map_big))
+
+@schema
 class MatchingFeatures(dj.Computed):
-    definition = """ # Features of ROIs that are used as input for the cell matching classifier
+    definition = """ # Features of the ROIs that are used for the cell matching algorithm
     -> common_img.Segmentation
     -> CellMatchingParameter
     ------
@@ -56,7 +117,7 @@ class MatchingFeatures(dj.Computed):
     """
 
     class ROI(dj.Part):
-        definition = """ # Features of neurons that are used as input for the cell matching classifier
+        definition = """ # Features of neurons that are used for the cell matching algorithm
         -> master
         mask_id                     : int           # ID of the ROI (same as common_img.Segmentation)
         ------
