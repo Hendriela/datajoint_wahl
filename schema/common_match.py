@@ -24,7 +24,7 @@ schema = dj.schema('common_match', locals(), create_tables=True)
 @schema
 class CellMatchingParameter(dj.Manual):
     definition = """ # Parameters used in the cross-session cell matching pipeline. Defaults are params of Annas model.
-    matching_param_id           : int       # Index of parameter set
+    match_param_id              : int       # Index of parameter set
     ------
     contour_thresh = 0.05       : float     # Intensity threshold of ROI contour finding
     true_binary = 0             : tinyint   # Bool flag whether the footprint should truly be binarized or areas outside 
@@ -34,12 +34,13 @@ class CellMatchingParameter(dj.Manual):
     nearby_neuron_cap = 15      : int       # Maximum nearest neurons found by KDTree nearest-neighbor-analysis
     fov_shift_patches = 8       : tinyint   # Number of patches squared into which the FOV will be split for shift 
                                             # estimation. E.g. with 8, the FOV will be split into 8x8=64 patches.
+    match_param_description  : varchar(512) # Short description of the background and effect of the parameter set
     """
 
 
 @schema
 class CellMatchingClassifier(dj.Manual):
-    definition = """ # Table to store decision tree classifier models for cell matching GUI
+    definition = """ # Table to store decision tree classifier models for cell matching GUI.
     classifier_id   : int           # Index of classifier version
     ------
     description                     : varchar(256)  # Description of the model
@@ -50,13 +51,13 @@ class CellMatchingClassifier(dj.Manual):
 
 @schema
 class FieldOfViewShift(dj.Manual):
-    definition = """ # Piecewise FOV shift between two sessions. Used to correct CoM coordinates.
+    definition = """ # Piecewise FOV shift between two sessions. Used to correct CoM coordinates. Manual table instead 
+    # of Computed, because not every Session needs a shift, it is only computed once it is queried via the GUI. 
     -> common_img.QualityControl
     -> CellMatchingParameter
     matched_session : varchar(64)   # Identifier for the matched session: YYYY-MM-DD_sessionnum_motionid_caimanid
     ------
-    shifts         : longblob       # 3D array with shape (n_dims, x, y), holding pixel-wise shifts for x (shifts[0]) 
-                                    # and y (shifts[1]) coordinates.
+    shifts         : longblob       # 3D array with shape (n_dims, x, y), holding pixel-wise shifts for x (shifts[0]) and y (shifts[1]) coordinates.
     """
 
     def make(self, key: dict) -> None:
@@ -85,7 +86,7 @@ class FieldOfViewShift(dj.Manual):
 
         print_dict = dict(username=key['username'], mouse_id=key['mouse_id'], day=key['day'],
                           session_num=key['session_num'], motion_id=key['motion_id'])
-        print(f"Computing FOV shift between sessions {print_dict} and {match_key}")
+        print(f"Computing FOV shift between sessions\n\t{print_dict} and \n\t{match_key}")
 
         fov_ref = (common_img.QualityControl & key).fetch1('avg_image')
         fov_match = (common_img.QualityControl & match_key).fetch1('avg_image')
@@ -152,6 +153,8 @@ class MatchingFeatures(dj.Computed):
         Args:
             key: Primary keys of the current MatchingFeatures() entry.
         """
+
+        print(f"Computing matching features for ROIs in entry {key}.")
 
         # Fetch relevant data
         footprints = (common_img.Segmentation.ROI & key).get_rois()
