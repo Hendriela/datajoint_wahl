@@ -59,25 +59,33 @@ class FieldOfViewShift(dj.Manual):
                                     # and y (shifts[1]) coordinates.
     """
 
-    def make(self, key: dict, matched_session_id: str) -> None:
+    def make(self, key: dict) -> None:
         """
-        Compute FOV-shift map between the queried reference and a target image. Images are split into patches, and the
-        shift is calculated for each patch separately with phase correlation. The resulting shift map is scaled up and
-        missing values interpolated to the original FOV size to get an estimated shift value for each pixel.
+        Compute FOV-shift map between the queried reference and a target image.
+        Mean intensity images (avg_image) are used instead of local correlation images because they are a better
+        representation of the FOV anatomy, more stable over time, and are less influenced by  activity patterns. Images
+        are split into patches, and the shift is calculated for each patch separately with phase correlation. The
+        resulting shift map is scaled up and missing values interpolated to the original FOV size to get an estimated
+        shift value for each pixel.
 
         Args:
-            key: Primary keys of the reference session in common_img.QualityControl(), and a CellMatchingParameter entry
-            matched_session_id: Identifier string of the matched session: YYYY-MM-DD_sessionnum_motionid_caimanid. It is
-                                assumed that the reference and matched sessions come from the same individual mouse.
+            key: Primary keys of the reference session in common_img.QualityControl(),
+                    ID of the CellMatchingParameter() entry,
+                    and identifier string of the matched session: YYYY-MM-DD_sessionnum_motionid_caimanid.
+                    It is assumed that the reference and matched sessions come from the same individual mouse.
         """
 
         from skimage import registration
         from scipy import ndimage
 
         # Fetch reference FOV, parameter set, and extract the primary keys of the matched session from the ID string
-        match_keys = matched_session_id.split('_')
+        match_keys = key['matched_session'].split('_')
         match_key = dict(username=key['username'], mouse_id=key['mouse_id'], day=match_keys[0],
-                         session_num=match_keys[1], motion_id=[2])
+                         session_num=match_keys[1], motion_id=match_keys[2])
+
+        print_dict = dict(username=key['username'], mouse_id=key['mouse_id'], day=key['day'],
+                          session_num=key['session_num'], motion_id=key['motion_id'])
+        print(f"Computing FOV shift between sessions {print_dict} and {match_key}")
 
         fov_ref = (common_img.QualityControl & key).fetch1('avg_image')
         fov_match = (common_img.QualityControl & match_key).fetch1('avg_image')
@@ -93,19 +101,27 @@ class FieldOfViewShift(dj.Manual):
             for col in range(params['fov_shift_patches']):
                 # Get a view of the current patch by slicing rows and columns of the FOVs
                 curr_ref_patch = fov_ref[row * patch_size:row * patch_size + patch_size,
-                                 col * patch_size:col * patch_size + patch_size]
+                                         col * patch_size:col * patch_size + patch_size]
                 curr_tar_patch = fov_match[row * patch_size:row * patch_size + patch_size,
-                                 col * patch_size:col * patch_size + patch_size]
+                                           col * patch_size:col * patch_size + patch_size]
                 # Perform phase cross correlation to estimate image translation shift for each patch
                 patch_shift = registration.phase_cross_correlation(curr_ref_patch, curr_tar_patch, upsample_factor=100,
                                                                    return_error=False)
                 shift_map[:, row, col] = patch_shift
 
         # Use scipy's zoom to upscale single-patch shifts to FOV size and get pixel-wise shifts via spline interpolation
-        shift_map_big = ndimage.zoom(shift_map, patch_size, order=3)
+        x_shift_map_big = ndimage.zoom(shift_map[0], patch_size, order=3)   # Zoom X and Y shifts separately
+        y_shift_map_big = ndimage.zoom(shift_map[1], patch_size, order=3)
+        # Further smoothing (e.g. Gaussian) is not necessary, the interpolation during zooming smoothes harsh borders
+        shift_map_big = np.stack((x_shift_map_big, y_shift_map_big))
+
+        # If caiman_id is in the primary keys, remove it, because it is not in QualityControl, this table's parent
+        if 'caiman_id' in key:
+            del key['caiman_id']
 
         # Insert shift map into the table
-        self.insert1(dict(**key, matched_session=matched_session_id, shifts=shift_map_big))
+        self.insert1(dict(**key, shifts=shift_map_big))
+
 
 @schema
 class MatchingFeatures(dj.Computed):
@@ -145,10 +161,10 @@ class MatchingFeatures(dj.Computed):
 
         # Convert neighbourhood radius (in microns) to zoom-dependent radius in pixels
         mean_res = np.mean((common_img.CaimanParameter & key).get_parameter_obj(key)['dxy'])
-        margin_px = int(np.round(params['neighbourhood_radius']/mean_res))
+        margin_px = int(np.round(params['neighbourhood_radius'] / mean_res))
 
-        coms_list = [list(com) for com in coms]     # KDTree expects a list of lists as input
-        neighbor_tree = spatial.KDTree(coms_list)   # Build kd-tree to query nearest neighbours of any ROI
+        coms_list = [list(com) for com in coms]  # KDTree expects a list of lists as input
+        neighbor_tree = spatial.KDTree(coms_list)  # Build kd-tree to query nearest neighbours of any ROI
 
         new_entries = []
         for roi_idx in range(coms.shape[0]):
@@ -169,8 +185,8 @@ class MatchingFeatures(dj.Computed):
             closest_roi_angle = math.atan2(com[1] - coms[closest_idx][1], com[0] - coms[closest_idx][0])
 
             # get the number of nearest neighbours in the neighbourhood and their indices
-            num_neurons_in_radius = bisect.bisect(distance, 50) - 1          # -1 to not count the ROI itself
-            index_in_radius = index[1: max(0, num_neurons_in_radius) + 1]    # start at 1 to not count the ROI itself
+            num_neurons_in_radius = bisect.bisect(distance, 50) - 1  # -1 to not count the ROI itself
+            index_in_radius = index[1: max(0, num_neurons_in_radius) + 1]  # start at 1 to not count the ROI itself
 
             # Get the number of neighbours in each neighbourhood quadrant (top left to bottom right)
             neighbours_quadrants = self.neighbours_in_quadrants(coms, roi_idx, index_in_radius)
@@ -273,13 +289,13 @@ class MatchingFeatures(dj.Computed):
             x = coms[idx][0]
             y = coms[idx][1]
             if x_ref <= x and y_ref <= y:
-                quadrant_split[0] += 1      # top-left quadrant
+                quadrant_split[0] += 1  # top-left quadrant
             elif x_ref <= x and y_ref >= y:
-                quadrant_split[1] += 1      # top-right quadrant
+                quadrant_split[1] += 1  # top-right quadrant
             elif x_ref >= x and y_ref >= y:
-                quadrant_split[2] += 1      # bottom-left quadrant
+                quadrant_split[2] += 1  # bottom-left quadrant
             else:
-                quadrant_split[3] += 1      # bottom-right quadrant
+                quadrant_split[3] += 1  # bottom-right quadrant
         return quadrant_split
 
 
