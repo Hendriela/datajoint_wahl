@@ -82,7 +82,7 @@ class FieldOfViewShift(dj.Manual):
         # Fetch reference FOV, parameter set, and extract the primary keys of the matched session from the ID string
         match_keys = key['matched_session'].split('_')
         match_key = dict(username=key['username'], mouse_id=key['mouse_id'], day=match_keys[0],
-                         session_num=match_keys[1], motion_id=match_keys[2])
+                         session_num=int(match_keys[1]), motion_id=int(match_keys[2]))
 
         print_dict = dict(username=key['username'], mouse_id=key['mouse_id'], day=key['day'],
                           session_num=key['session_num'], motion_id=key['motion_id'])
@@ -138,8 +138,8 @@ class MatchingFeatures(dj.Computed):
         -> master
         mask_id                     : int           # ID of the ROI (same as common_img.Segmentation)
         ------
-        contour                     : longblob      # (Semi)-binarized spatial contour of the ROI
-        neighbourhood               : longblob      # Local area crop of the local correlation template around the neuron
+        contour                     : longblob      # (Semi)-binarized spatial contour of the ROI, maximally cropped
+        neighbourhood               : longblob      # Local area of the mean intensity template around the neuron
         rois_nearby                 : int           # Number of neurons in the neighbourhood. Capped by parameter.
         closest_roi                 : int           # Index of the nearest ROI (smallest physical distance)
         closest_roi_angle           : float         # Radial angular distance of the closest ROI
@@ -159,7 +159,7 @@ class MatchingFeatures(dj.Computed):
         # Fetch relevant data
         footprints = (common_img.Segmentation.ROI & key).get_rois()
         coms = np.vstack((common_img.Segmentation.ROI & key).fetch('com'))
-        template = (common_img.QualityControl & key).fetch1("cor_image")
+        template = (common_img.QualityControl & key).fetch1("avg_image")
         params = (CellMatchingParameter & key).fetch1()
 
         # Convert neighbourhood radius (in microns) to zoom-dependent radius in pixels
