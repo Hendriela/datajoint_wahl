@@ -39,14 +39,18 @@ class CellMatchingParameter(dj.Manual):
 
 
 @schema
-class CellMatchingClassifier(dj.Manual):
+class CellMatchingClassifier(dj.Lookup):
     definition = """ # Table to store decision tree classifier models for cell matching GUI.
     classifier_id   : int           # Index of classifier version
     ------
+    model_path                      : varchar(256)  # Path to classifier model, relative to Wahl folder server
     description                     : varchar(256)  # Description of the model
-    model_path                      : varchar(256)  # Path to classifier model, relative to Wahl folder server 
-    train_time = CURRENT_TIMESTAMP  : timestamp     # Timestamp of the training of the model
+    n_cells                         : smallint      # Number of inputs for the classifier
+    n_features                      : tinyint       # Number of features per cell
     """
+    contents = [
+        [0, 'CellMatching\\models\\model0.pkl', 'Original model trained by Anna Schmidt-Rohr', 3, 12]
+    ]
 
 
 @schema
