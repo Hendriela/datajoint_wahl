@@ -1185,7 +1185,6 @@ class Segmentation(dj.Computed):
         nr_masks = masks.shape[1]
 
         from scipy.ndimage.measurements import center_of_mass
-
         # Transform sparse mask into a dense array for CoM and neuron_map calculation
         dense_masks = np.reshape(masks.toarray(), (cnm2.dims[0], cnm2.dims[1], len(cnm2.estimates.C)), order='F')
         # Move axis of ROIs to position 0
@@ -1202,6 +1201,7 @@ class Segmentation(dj.Computed):
         pixel_owners = np.argmax(dense_masks, axis=0)
         pixel_owners = np.where(max_vals > (CaimanParameter & key).fetch1('weight_thresh'), pixel_owners, -1)
 
+        # Extract fluorescent traces
         traces = cnm2.estimates.C + cnm2.estimates.YrA
         residual = cnm2.estimates.YrA
         dff = np.array(cnm2.estimates.F_dff, dtype=np.float32)  # save traces as float32 to save disk space
