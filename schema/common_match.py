@@ -34,6 +34,7 @@ class CellMatchingParameter(dj.Manual):
     nearby_neuron_cap = 15      : int       # Maximum nearest neurons found by KDTree nearest-neighbor-analysis
     fov_shift_patches = 8       : tinyint   # Number of patches squared into which the FOV will be split for shift 
                                             # estimation. E.g. with 8, the FOV will be split into 8x8=64 patches.
+    -> CellMatchingClassifier
     match_param_description  : varchar(512) # Short description of the background and effect of the parameter set
     """
 
@@ -313,4 +314,5 @@ class MatchedIndex(dj.Manual):
     matched_session : varchar(64)   # Identifier for the matched session: YYYY-MM-DD_sessionnum_motionid_caimanid
     ------
     matched_id      : int           # Mask ID of the same neuron in the matched session
+    matched_time = CURRENT_TIMESTAMP  : timestamp
     """
