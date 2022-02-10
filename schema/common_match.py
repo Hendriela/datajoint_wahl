@@ -27,13 +27,10 @@ class CellMatchingParameter(dj.Manual):
     match_param_id              : int       # Index of parameter set
     ------
     contour_thresh = 0.05       : float     # Intensity threshold of ROI contour finding
-    true_binary = 0             : tinyint   # Bool flag whether the footprint should truly be binarized or areas outside 
-                                            # the contour but with weight > 0 should retain their non-zero weights.
-    neighbourhood_radius = 80   : int       # Radius in um of the area around the ROI where matches are considered. 
-                                            # Default of 80 translates to 50 pixels at 1x zoom
+    true_binary = 0             : tinyint   # Bool flag whether the footprint should truly be binarized or areas outside the contour but with weight > 0 should retain their non-zero weights.
+    neighbourhood_radius = 80   : int       # Radius in um of the area around the ROI where matches are considered. Default of 80 translates to 50 pixels at 1x zoom
     nearby_neuron_cap = 15      : int       # Maximum nearest neurons found by KDTree nearest-neighbor-analysis
-    fov_shift_patches = 8       : tinyint   # Number of patches squared into which the FOV will be split for shift 
-                                            # estimation. E.g. with 8, the FOV will be split into 8x8=64 patches.
+    fov_shift_patches = 8       : tinyint   # Number of patches squared into which the FOV will be split for shift estimation. E.g. with 8, the FOV will be split into 8x8=64 patches.
     -> CellMatchingClassifier
     match_param_description  : varchar(512) # Short description of the background and effect of the parameter set
     """
