@@ -137,17 +137,20 @@ def backup_manual_data(backup_dir='DataJoint\\backups'):
     from schema import common_mice, common_exp, common_img, common_match, common_dlc, hheise_behav, hheise_placecell, \
         mpanze_behav, mpanze_mapping, mpanze_widefield
 
-    schemas = {'common_mice': ['Mouse', 'Weight', 'PainManagement', 'Sacrificed', 'Surgery', 'Injection'],
+    schemas = {'common_mice': ['Mouse', 'Weight', 'PainManagement', 'Sacrificed', 'Surgery', 'Injection',
+                               'Investigator', 'Strain', 'Licence', 'CareSubstance', 'Substance', 'SurgeryType'],
                'common_exp': ['Session', 'Anesthesia', 'Setup', 'Task'],
-               'common_img': ['Scan', 'RawImagingFile', 'MotionParameter', 'CaimanParameter', 'Microscope', 'Laser', 'Layer', 'BrainRegion', 'FieldOfViewSize', 'CaIndicator'],
+               'common_img': ['Scan', 'RawImagingFile', 'MotionParameter', 'CaimanParameter', 'Microscope', 'Laser',
+                              'Layer', 'BrainRegion', 'FieldOfViewSize', 'CaIndicator', 'DeconvolutionModel'],
                'common_dlc': ['Video', 'RawVideoFile', 'FrameCountVideoTimeFile', 'CameraPosition', 'FFMPEGParameter',
                               'DLCModel', 'MedianFilterParameter', 'InterpolationParameter'],
-               'common_match': ['CellMatchingParameter', 'MatchedIndex'],
-               'hheise_behav': ['BatchData'],
+               'common_match': ['CellMatchingParameter', 'MatchedIndex', 'CellMatchingClassifier'],
+               'hheise_behav': ['BatchData', 'CorridorPattern', 'PerformanceParameters'],
                'hheise_placecell': ['PlaceCellParameter'],
                'mpanze_behav': ['StrokeDate'],
-               'mpanze_mapping': ['MappingSession', 'RawSynchronisationFile', 'RawParameterFile'],
-               'mpanze_widefield': ['Scan', 'ScanInfo', 'RawImagingFile', 'ReferenceImage', 'AffineRegistration']}
+               'mpanze_mapping': ['MappingSession', 'RawSynchronisationFile', 'RawParameterFile', 'Stimulation'],
+               'mpanze_widefield': ['Scan', 'ScanInfo', 'RawImagingFile', 'ReferenceImage', 'AffineRegistration', 'LED',
+                                    'Objective', 'WidefieldMicroscope', 'Smoothing']}
 
     backup = {}
     for schema in schemas:
