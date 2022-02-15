@@ -105,6 +105,8 @@ class PCAnalysis(dj.Computed):
             key: Primary keys of the current Session() entry.
         """
 
+        print('Populating PCAnalysis for {}'.format(key))
+
         # Get current parameter set
         params = (PlaceCellParameter & key).fetch1()
 
@@ -495,3 +497,13 @@ class PlaceCell(dj.Computed):
         self.insert1(dict(**key, place_cell_ratio=np.sum(p_values < 0.05)/len(traces)))
         self.ROI().insert(pf_roi_entries)
         self.PlaceField().insert(pf_entries)
+
+    def get_placecell_ids(self) -> np.ndarray:
+        """
+        Returns ROI IDs of accepted place cells from the queried entry(s)
+        Returns:
+            1D ndarray with the mask_id of accepted place cells (p < 0.5)
+        """
+
+        ids, p = self.ROI().fetch('mask_id', 'is_place_cell')
+        return ids[np.array(p, dtype=bool)]

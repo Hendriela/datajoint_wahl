@@ -1304,6 +1304,8 @@ class Segmentation(dj.Computed):
                 decon_ids = (Deconvolution & self).fetch('decon_id')
                 if len(decon_ids) == 1:
                     decon_id = decon_ids[0]
+                elif len(decon_ids) == 0:
+                    raise Exception('No deconvolution found. Populate common_img.Deconvolution().')
                 else:
                     raise Exception(
                         'The following decon_ids were found: {}. Please specify using parameter decon_id.'.format(
@@ -1333,21 +1335,21 @@ class Segmentation(dj.Computed):
 
 @schema
 class DeconvolutionModel(dj.Lookup):
-    definition = """ # Table for different deconvolution models
+    definition = """ # Table for different deconvolution models. Except for stimulus-triggered experiments, model 1 is most appropriate.
     decon_id      : int            # index for methods, base 0
     ----
     model_name    : varchar(128)   # Name of the model
     sampling_rate : int            # Sampling rate [Hz]
-    smoothing     : float          # Std of gaussian to smooth ground truth spike rate [in sec]
-    causal        : int            # 0: symmetric smoothing, 1: causal kernel
+    smoothing     : float          # Std of Gaussian to smooth ground truth spike rate [in sec]. For lower frame rates use more smoothing.
+    causal        : int            # 0: symmetric smoothing, 1: causal kernel. Symmetric is default, but causal yields better temporal precision for stimulus-triggered activity patterns in high-quality, high frame rate datasets.
     nr_datasets   : int            # Number of datasets used for training the model
     threshold     : int            # 0: threshold at zero, 1: threshold at height of one spike
     """
     contents = [
         [0, 'Global_EXC_30Hz_smoothing50ms_causalkernel', 30, 0.05, 1, 18, 0],
         [1, 'Global_EXC_30Hz_smoothing50ms', 30, 0.05, 0, 18, 0],
-        [2, 'Global_EXC_30Hz_smoothing100ms_causalkernel', 30, 0.2, 1, 18, 0],
-        [3, 'Global_EXC_30Hz_smoothing100ms', 30, 0.2, 0, 18, 0]
+        [2, 'Global_EXC_30Hz_smoothing100ms_causalkernel', 30, 0.1, 1, 18, 0],
+        [3, 'Global_EXC_30Hz_smoothing100ms', 30, 0.1, 0, 18, 0]
     ]
 
 
