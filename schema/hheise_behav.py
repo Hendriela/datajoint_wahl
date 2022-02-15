@@ -22,8 +22,13 @@ import numpy as np
 import pandas as pd
 from copy import deepcopy
 from scipy import stats
-import statsmodels.api as sm
-import seaborn as sns
+
+try:
+    import statsmodels.api as sm
+    import seaborn as sns
+except ModuleNotFoundError:
+    print("Import hheise_behav with read-only access.")
+
 import matplotlib.pyplot as plt
 
 schema = dj.schema('hheise_behav', locals(), create_tables=True)

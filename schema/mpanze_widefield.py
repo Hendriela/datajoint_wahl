@@ -9,7 +9,10 @@ from mpanze_scripts.widefield import smoothing_functions
 import matplotlib.pyplot as plt
 import numpy as np
 import tifffile as tif
-import cv2
+try:
+    import cv2
+except ModuleNotFoundError:
+    print('Import mpanze_widefield with read-only access.')
 
 schema = dj.schema('mpanze_widefield', locals(), create_tables=True)
 

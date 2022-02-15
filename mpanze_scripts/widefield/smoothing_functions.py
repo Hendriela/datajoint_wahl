@@ -1,4 +1,7 @@
-import cv2
+try:
+    import cv2
+except ModuleNotFoundError:
+    print('Import mpanze_scripts.widefield.smoothing_functions with read-only access.')
 import numpy as np
 import json
 
