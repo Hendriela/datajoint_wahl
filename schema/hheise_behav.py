@@ -114,8 +114,11 @@ class VRSessionInfo(dj.Imported):
 
         # Enter weight if given
         if not pd.isna(sess_entry['weight [g]'].values[0]):
-            common_mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
+            try:
+                common_mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
                                           'date_of_weight': key['day'], 'weight': sess_entry['weight [g]'].values[0]})
+            except dj.errors.DuplicateError:
+                pass
 
         # Get block and condition switch from session_notes string
         note_dict = ast.literal_eval((common_exp.Session & key).fetch1('session_notes'))
@@ -154,10 +157,7 @@ class RawBehaviorFile(dj.Imported):
 
         print("Finding raw behavior files for session {}".format(key))
 
-        # Check if RawImagingFile has already been filled for this session
-        if len(common_img.RawImagingFile() & key) == 0:
-            raise ImportError("No entries for session {} in common_img.RawImagingFile. Fill table before populating "
-                              "RawBehaviorFile.")
+        is_imaging_session = (VRSessionInfo & key).fetch1('imaging_session') == 1
 
         # Get complete path of the current session
         root = os.path.join(login.get_neurophys_data_directory(), (common_exp.Session & key).fetch1('session_path'))
@@ -181,8 +181,13 @@ class RawBehaviorFile(dj.Imported):
             raise ImportError(f'Uneven numbers of encoder, position and trigger files in folder {root}!')
 
         # Catch different numbers of behavior files and raw imaging files
-        if len(encoder_files) != len(common_img.RawImagingFile() & key):
+        if (len(encoder_files) != len(common_img.RawImagingFile() & key)) and is_imaging_session:
             raise ImportError(f'Different numbers of behavior and imaging files in folder {root}!')
+
+        # Check if RawImagingFile has already been filled for this session
+        if (len(common_img.RawImagingFile() & key) > 0) and is_imaging_session:
+            print(f"TIFF files for session {key} already in common_img.RawImagingFile.\n"
+                  f"If faulty trials are found, you have to delete these entries and potentially rerun the imaging pipeline.")
 
         # Check some common bugs of individual trials
         for i in range(len(encoder_files)):
@@ -210,8 +215,8 @@ class RawBehaviorFile(dj.Imported):
             # calculate absolute difference in seconds between the start times
             max_diff = np.max(np.abs(start_times[:, None] - start_times)).total_seconds()
             if max_diff > 2:
-                raise ValueError(
-                    f'Faulty trial (TDT file copied from previous trial), time stamps differed by {int(max(max_diff))}s!')
+                raise ValueError(f'Faulty trial (TDT file copied from previous trial), time stamps differed by '
+                                 f'{int(max(max_diff))}s!')
 
         # Manually curate sessions to weed out trials with e.g. buggy lick sensor
         bad_trials = self.plot_screening(trigger_files, encoder_files, key)
@@ -301,7 +306,10 @@ class RawBehaviorFile(dj.Imported):
         for row in range(nrows):
             for col in range(ncols):
                 if count < n_trials or (row == nrows and col == 0):
-                    curr_ax = ax[row, col]
+                    try:
+                        curr_ax = ax[row, col]
+                    except IndexError:
+                        curr_ax = ax[col]
 
                     # Load the data, (ignore first time stamp)
                     curr_enc = -np.loadtxt(enc_list[count])[1:, 1]
