@@ -10,11 +10,12 @@ import os
 from pathlib import Path
 import re
 from typing import List, Any, Type, Optional
+from glob import glob
 
 import yaml
 
 import datajoint as dj
-from schema import common_mice, common_exp
+from schema import common_mice, common_exp, common_img
 import login
 
 REL_BACKUP_PATH = "Datajoint/manual_submissions"
@@ -104,7 +105,8 @@ def remove_session_path(key: dict, path: str) -> str:
 def add_many_sessions(date: str, mice: List[str], block: Optional[List[int]] = None,
                       switch: Optional[List[List[int]]] = None, **attributes: Any) -> None:
     """
-    Automatically adds sessions of many mice on the same day to common_exp.Session() and creates backup YAML files.
+    Automatically adds sessions of many mice on the same day to common_exp.Session and common_img.Scan (if it was an
+    imaging session) and creates backup YAML files.
     "Block" and "switch" can be left empty or have to be a list with length 'len(mice)'.
 
     Args:
@@ -121,12 +123,22 @@ def add_many_sessions(date: str, mice: List[str], block: Optional[List[int]] = N
     # Set default values for attributes
     session_dict = dict(username='hheise',
                         day=date,
-                        session_num=0,
+                        session_num=1,
                         anesthesia='Awake',
                         setup='VR',
                         task='Active',
                         experimenter='hheise',
                         session_notes='')
+    scan_dict = dict(username='hheise',
+                     day=date,
+                     session_num=1,
+                     microscope='Scientifica',
+                     laser='MaiTai',
+                     layer='CA1',
+                     ca_name='GCaMP6f',
+                     objective='16x',
+                     nr_channels=1,
+                     network_id=1)
 
     if block is None:
         block = [1] * len(mice)
@@ -137,16 +149,23 @@ def add_many_sessions(date: str, mice: List[str], block: Optional[List[int]] = N
     for key in session_dict:
         if key in attributes:
             session_dict[key] = attributes[key]
+    for key in scan_dict:
+        if key in attributes:
+            scan_dict[key] = attributes[key]
 
     for idx, mouse in enumerate(mice):
 
         # Expand dict for mouse-specific values
         mouse_session_dict = dict(**session_dict, mouse_id=mouse)
+        mouse_scan_dict = dict(**scan_dict, mouse_id=mouse)
 
         # Set values for each mouse if multiple were provided
         for key, value in session_dict.items():
             if (type(value) == list) or (type(value) == tuple):
                 mouse_session_dict[key] = session_dict[key][idx]
+        for key, value in scan_dict.items():
+            if (type(value) == list) or (type(value) == tuple):
+                mouse_scan_dict[key] = scan_dict[key][idx]
         # Enter block and switch values in session_notes
         mouse_session_dict['session_notes'] = "{" + "'block':'{}', " \
                                                     "'switch':'{}', 'notes':'{}'".format(block[idx], switch[idx],
@@ -158,6 +177,13 @@ def add_many_sessions(date: str, mice: List[str], block: Optional[List[int]] = N
 
         # Insert entry into Session()
         print(common_exp.Session().helper_insert1(mouse_session_dict))
+
+        # Find TIFF files in the session folder or subfolder to determine whether this was a imaging session
+        if len(glob(str(mouse_session_dict['session_path']) + '\\file_*.tif') +
+               glob(str(mouse_session_dict['session_path']) + '\\*\\file_*.tif')) > 0:
+            common_img.Scan().insert1(mouse_scan_dict)
+        else:
+            print(f'No TIFF files found for {mouse_session_dict}, assuming that no imaging was performed. Check this!')
 
         # Save data in YAML
         make_yaml_backup(mouse_session_dict)
@@ -196,3 +222,11 @@ def add_column(table: Type[dj.table.Table], name: str, dtype: str, default_value
     print('Be sure to add following entry to your table definition')
     print(definition)
     table.__class__._heading = None
+
+
+def add_scan():
+
+    server = login.get_neurophys_data_directory()
+    paths = common_exp.Session().fetch('session_path')
+
+    return
