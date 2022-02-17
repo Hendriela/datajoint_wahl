@@ -27,7 +27,7 @@ __cwd__ = ""
 
 def get_ip() -> str:
     """Return ip address of the server"""
-    return '130.60.53.47'  # Ubuntu server in Anna-Sophias room
+    return '130.60.53.48'  # Ubuntu server in Anna-Sophias room
 
 
 def get_user() -> str:
