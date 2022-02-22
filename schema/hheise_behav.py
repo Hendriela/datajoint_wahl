@@ -180,9 +180,10 @@ class RawBehaviorFile(dj.Imported):
         if not (len(encoder_files) == len(position_files)) & (len(encoder_files) == len(trigger_files)):
             raise ImportError(f'Uneven numbers of encoder, position and trigger files in folder {root}!')
 
-        # Catch different numbers of behavior files and raw imaging files
-        if (len(encoder_files) != len(common_img.RawImagingFile() & key)) and is_imaging_session:
-            raise ImportError(f'Different numbers of behavior and imaging files in folder {root}!')
+        # Commented out because RawImagingFile should be filled AFTER trials are curated
+        # # Catch different numbers of behavior files and raw imaging files
+        # if (len(encoder_files) != len(common_img.RawImagingFile() & key)) and is_imaging_session:
+        #     raise ImportError(f'Different numbers of behavior and imaging files in folder {root}!')
 
         # Check if RawImagingFile has already been filled for this session
         if (len(common_img.RawImagingFile() & key) > 0) and is_imaging_session:
@@ -826,6 +827,11 @@ class VRSession(dj.Computed):
         cond = (common_exp.Session & key).fetch1('task')  # Task condition
         cond_switch = (VRSessionInfo & key).fetch1('condition_switch')  # First trial of new condition
 
+        # Detect if there are different numbers of behavior vs imaging trials
+        if imaging and len(trial_ids) != len(common_img.RawImagingFile & key):
+            raise ValueError(f'Found {len(trial_ids)} behavior trials, but {len(common_img.RawImagingFile & key)} '
+                             f'imaging trials in an imaging session!')
+
         trial_entries = []
 
         for trial_id in trial_ids:
@@ -986,21 +992,30 @@ class VRSession(dj.Computed):
                     idx_list = np.arange(start=idx_start + 1, stop=first_frame, step=median_frame_time)
                     if idx_list.shape[0] != frames_to_prepend:
                         raise ValueError(f'Frame correction failed for {trial_key}!')
-                    trigger[idx_list, 1] = 1
+                    else:
+                        trigger[idx_list, 1] = 1
 
-                # if frames dont fit, and less than 30 frames missing, put them in steps of 2 equally in the start and end
+                # if frames dont fit, and less than 30 frames missing, put them before the beginning at the biggest possible step size
                 elif frames_to_prepend < 30:
-                    for i in range(1, frames_to_prepend + 1):
-                        if i % 2 == 0:  # for every even step, put the frame in the beginning
-                            if trigger[i * 2, 1] != 1:
-                                trigger[i * 2, 1] = 1
-                            else:
-                                trigger[i + 2 * 2, 1] = 1
-                        else:  # for every uneven step, put the frame in the end
-                            if trigger[-(i * 2), 1] != 1:
-                                trigger[-(i * 2), 1] = 1
-                            else:
-                                trigger[-((i + 1) * 2), 1] = 1
+
+                    # int rounds down and avoids overestimation of step size
+                    max_step_size = int(first_frame/frames_to_prepend)
+
+                    # Get 99th quantile of TDT sample time to conservatively estimate if 2 frames would be within the
+                    # 8 ms bin window (and thus lost during resampling)
+                    tdt_time_diff = data[0][2:,0] - data[0][1:-1,0]
+                    tdt_sample_time = np.quantile(tdt_time_diff, 0.99)
+                    tdt_step_limit = int(np.ceil(0.008/tdt_sample_time))
+
+                    # Create indices of new frame triggers with given step size, going backwards from the first real frame
+                    idx_list = [i for i in range(first_frame-max_step_size, 0, -max_step_size)]
+
+                    # Exit conditions: Max step size is smaller than the step limit (cant fit enough frames in the beginning)
+                    if (max_step_size <= tdt_step_limit) or len(idx_list) != frames_to_prepend:
+                        raise ValueError(f"Could not prepend {frames_to_prepend} frames for {trial_key}")
+                    else:
+                        trigger[idx_list, 1] = 1
+
                 else:
                     # correction does not work if the whole log file is not large enough to include all missing frames
                     raise ImportError(f'{int(abs(more_frames_in_TDT))} too few frames imported from TDT, could not be corrected.')
@@ -1164,7 +1179,7 @@ class VRPerformance(dj.Computed):
         # Combine primary dict "key" with attributes "trial_data" and insert entry
         self.insert1({**key, **trial_data})
 
-    def get_mean(self, attr: str) -> List[float]:
+    def get_mean(self, attr: str, ignore_validation: bool=True) -> List[float]:
         """
         Get a list of the mean of a given performance attribute of the queried sessions.
         
@@ -1174,8 +1189,10 @@ class VRPerformance(dj.Computed):
         Returns:
             Means of a performance attribute of the queried sessions
         """
+        # Todo: Implement filtering out validation trials
         sess = self.fetch(attr)
-        return [np.mean(x) for x in sess]
+        # return [np.mean(x) for x in sess]
+        return print("Implement filtering out validation trials")
 
     def plot_performance(self, attr: str = 'binned_lick_ratio') -> None:
         """
