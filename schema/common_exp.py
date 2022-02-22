@@ -158,18 +158,21 @@ class Session(dj.Manual):
                           'login.get_neurophys_data_directory() are set correctly.\n'
                           'Absolute path used for now.'.format(abs_path))
 
-    def helper_insert1(self, new_entry_dict: dict) -> str:
+    def helper_insert1(self, entry_dict: dict) -> str:
         """
         Simplified insert function that takes care of id and counter values.
         Adrian 2019-08-19
 
         Args:
-            new_entry_dict: Dictionary containing all key, value pairs for the session except for
+            entry_dict: Dictionary containing all key, value pairs for the session except for
                                 the id and counter
 
         Returns:
             Status update string confirming successful insertion.
         """
+
+        # Make copy so that changes do not affect original dict
+        new_entry_dict = entry_dict.copy()
 
         sess_id = self.create_id(new_entry_dict['username'], new_entry_dict['mouse_id'], new_entry_dict['day'],
                                  new_entry_dict['session_num'])
