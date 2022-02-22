@@ -9,9 +9,10 @@ Utility functions for Hendriks DataJoint section
 import os
 from pathlib import Path
 import re
-from typing import List, Any, Type, Optional
+from typing import List, Any, Type, Optional, Iterable
 from glob import glob
 
+import datajoint.errors
 import yaml
 
 import datajoint as dj
@@ -102,7 +103,7 @@ def remove_session_path(key: dict, path: str) -> str:
     return os.path.relpath(path, sess_path)
 
 
-def add_many_sessions(date: str, mice: List[str], block: Optional[List[int]] = None,
+def add_many_sessions(date: str, mice: Iterable[str], block: Optional[List[int]] = None,
                       switch: Optional[List[List[int]]] = None, **attributes: Any) -> None:
     """
     Automatically adds sessions of many mice on the same day to common_exp.Session and common_img.Scan (if it was an
@@ -173,18 +174,25 @@ def add_many_sessions(date: str, mice: List[str], block: Optional[List[int]] = N
                                                                                              'session_notes']) + "}"
 
         # Create session folder path
-        mouse_session_dict['session_path'] = Path(get_autopath(mouse_session_dict))
+        abs_session_path = Path(get_autopath(mouse_session_dict))
+        mouse_session_dict['session_path'] = abs_session_path
 
-        # Insert entry into Session()
-        print(common_exp.Session().helper_insert1(mouse_session_dict))
+        try:
+            # Insert entry into Session()
+            print(common_exp.Session().helper_insert1(mouse_session_dict))
+        except datajoint.errors.DuplicateError as ex:
+            print('Entry already exists in common_exp.Session(), skipping insert:\n', ex)
 
         # Find TIFF files in the session folder or subfolder to determine whether this was a imaging session
-        if len(glob(str(mouse_session_dict['session_path']) + '\\file_*.tif') +
-               glob(str(mouse_session_dict['session_path']) + '\\*\\file_*.tif')) > 0:
-            common_img.Scan().insert1(mouse_scan_dict)
+        if len(glob(str(abs_session_path) + '\\file_*.tif') +
+               glob(str(abs_session_path) + '\\*\\file_*.tif')) > 0:
+            try:
+                common_img.Scan().insert1(mouse_scan_dict)
+            except datajoint.errors.DuplicateError as ex:
+                print('Entry already exists in common_img.Scan(), skipping insert:\n', ex)
         else:
-            print(f'No TIFF files found for {mouse_session_dict}, assuming that no imaging was performed. Check this!')
-
+            print(f'No TIFF files found, assuming that no imaging was performed. Check this!')
+        print(' ')
         # Save data in YAML
         make_yaml_backup(mouse_session_dict)
 
