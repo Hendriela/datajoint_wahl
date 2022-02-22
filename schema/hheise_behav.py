@@ -959,9 +959,10 @@ class VRSession(dj.Computed):
             if abs(more_frames_in_TDT) > 5:
                 print("Trial {}:\n{} more frames imported from TDT than in raw imaging file "
                       "({} frames)".format(trial_key, more_frames_in_TDT, frame_count))
-
+            
+            # This means that the TDT file has less frames than the TIFF file
             if more_frames_in_TDT < 0:
-                # first check if TDT has been logging shorter than TCP
+                # first check if TDT stopped logging earlier than TCP
                 tdt_offset = position[-1, 0] - trigger[-1, 0]
                 # if all missing frames would fit in the offset (time where tdt was not logging), print out warning
                 if tdt_offset / 0.033 > abs(more_frames_in_TDT):
@@ -970,6 +971,7 @@ class VRSession(dj.Computed):
                 # these frames are added after merge array has been filled
                 frames_to_prepend = abs(more_frames_in_TDT)
 
+            # This means that the TDT file has more frames than the TIFF file
             elif more_frames_in_TDT > 0:
                 # if TDT included too many frames, its assumed that the false-positive frames are from the end of recording
                 if more_frames_in_TDT < 5:
@@ -995,7 +997,7 @@ class VRSession(dj.Computed):
                     else:
                         trigger[idx_list, 1] = 1
 
-                # if frames dont fit, and less than 30 frames missing, put them before the beginning at the biggest possible step size
+                # Try to prepend frames to the beginning of the file
                 elif frames_to_prepend < 30:
 
                     # int rounds down and avoids overestimation of step size
@@ -1007,12 +1009,26 @@ class VRSession(dj.Computed):
                     tdt_sample_time = np.quantile(tdt_time_diff, 0.99)
                     tdt_step_limit = int(np.ceil(0.008/tdt_sample_time))
 
-                    # Create indices of new frame triggers with given step size, going backwards from the first real frame
-                    idx_list = [i for i in range(first_frame-max_step_size, 0, -max_step_size)]
+                    # If the time before the first frame is not enough to fit all frames in there without crossing the
+                    # step limit, we interleave the new frames in the beginning half-way between the original frames
+                    if max_step_size <= tdt_step_limit:
 
-                    # Exit conditions: Max step size is smaller than the step limit (cant fit enough frames in the beginning)
-                    if (max_step_size <= tdt_step_limit) or len(idx_list) != frames_to_prepend:
-                        raise ValueError(f"Could not prepend {frames_to_prepend} frames for {trial_key}")
+                        # Check where the actual frame triggers are and find half-way points
+                        actual_frame_idx = np.where(trigger[1:, 1] == 1)[0] + 1     # +1 because we ignore the first row
+                        # Get the distance between the first "n_frames_to_prepend" frames where we have to interleave fake frames
+                        interframe_idx = actual_frame_idx[1:frames_to_prepend+1] - actual_frame_idx[:frames_to_prepend]
+                        # The new indices are the first actual frame indices plus half of the interframe indices
+                        idx_list = actual_frame_idx[:frames_to_prepend] + interframe_idx//2
+
+                    # Otherwise, put them before the beginning at the biggest possible step size
+                    else:
+                        # Create indices of new frame triggers with given step size, going backwards from the first real frame
+                        idx_list = np.array([i for i in range(first_frame-max_step_size, 0, -max_step_size)])
+
+                    # Exit condition: New indices are somehow not enough
+                    if len(idx_list) != frames_to_prepend:
+                        raise ValueError(f"Could not prepend {frames_to_prepend} frames for {trial_key}, because "
+                                         f"only {len(idx_list)} new indices could be generated.")
                     else:
                         trigger[idx_list, 1] = 1
 
