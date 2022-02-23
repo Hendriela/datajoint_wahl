@@ -960,7 +960,7 @@ class VRSession(dj.Computed):
                 print("Trial {}:\n{} more frames imported from TDT than in raw imaging file "
                       "({} frames)".format(trial_key, more_frames_in_TDT, frame_count))
             
-            # This means that the TDT file has less frames than the TIFF file
+            # This means that the TDT file has less frames than the TIFF file (common)
             if more_frames_in_TDT < 0:
                 # first check if TDT stopped logging earlier than TCP
                 tdt_offset = position[-1, 0] - trigger[-1, 0]
@@ -971,7 +971,7 @@ class VRSession(dj.Computed):
                 # these frames are added after merge array has been filled
                 frames_to_prepend = abs(more_frames_in_TDT)
 
-            # This means that the TDT file has more frames than the TIFF file
+            # This means that the TDT file has more frames than the TIFF file (rare)
             elif more_frames_in_TDT > 0:
                 # if TDT included too many frames, its assumed that the false-positive frames are from the end of recording
                 if more_frames_in_TDT < 5:
@@ -980,61 +980,104 @@ class VRSession(dj.Computed):
                 else:
                     raise ImportError(f'{more_frames_in_TDT} too many frames imported from TDT, could not be corrected!')
 
+            # This section deals with how to add the missing frames to the trigger array
             if frames_to_prepend > 0:
+
+                # We first have to do some preprocessing to figure out which method of frame insertion is best
+
+                # Get the index of the first recorded frame
                 first_frame = np.where(trigger[1:, 1] == 1)[0][0] + 1
-                # first_frame_start = np.where(raw_trig[:, 2] == 1)[0][0]
+
+                # Get the median distance between frames, and correct if its off
                 median_frame_time = int(np.median([len(frame) for frame in trig_blocks]))
                 if median_frame_time > 70:
-                    median_frame_time = 66
-                if first_frame > frames_to_prepend * median_frame_time:
-                    # if frames would fit in the merge array before the first recorded frame, prepend them with proper steps
-                    # make a list of the new indices (in steps of median_frame_time before the first frame)
-                    idx_start = first_frame - frames_to_prepend * median_frame_time
-                    # add 1 to indices because we do not count the first index of the trigger signal
-                    idx_list = np.arange(start=idx_start + 1, stop=first_frame, step=median_frame_time)
-                    if idx_list.shape[0] != frames_to_prepend:
-                        raise ValueError(f'Frame correction failed for {trial_key}!')
+                    print(f'Median distance between frames is {median_frame_time}! Maybe check file for errors.')
+                    median_frame_time = 68
+
+                # Get 99th quantile of TDT sample time to conservatively estimate if 2 frames would be within the
+                # 8 ms bin window (and thus lost during resampling)
+                tdt_time_diff = data[0][2:, 0] - data[0][1:-1, 0]
+                tdt_sample_time = np.quantile(tdt_time_diff, 0.99)
+                tdt_step_limit = int(np.ceil(0.008 / tdt_sample_time))
+
+                # Find gaps in frame trigger where frames might have been missed (distance between frames > 45 ms)
+                frames_idx = np.where(trigger[1:, 1] == 1)[0]
+                frame_dist = frames_idx[1:] - frames_idx[:-1]
+
+                # 95 sample steps (~45 ms) is much higher than two normal frames should be apart
+                # The gap is AFTER the frames at these indices, +1 because we ignore first line during slicing
+                frame_gap_idx = frames_idx[np.where(frame_dist > 95)[0]]+1
+
+                if len(frame_gap_idx) > 0:
+                    # Fill large gaps if any were found
+                    # First, fill all large gaps with new frames (or enough to offset the mismatch)
+                    frames_to_add = frames_to_prepend if len(frame_gap_idx) >= frames_to_prepend else len(frame_gap_idx)
+
+                    # Get the indices of gaps, sorted by gap size
+                    frame_dist_argsort = np.argsort(frame_dist)
+                    # Get the index of the start of the largest gaps in "trigger" array (again +1)
+                    largest_gap_start = frames_idx[frame_dist_argsort[-frames_to_add:]]+1
+                    # Get the distance in samples of these gaps and divide them by 2 to find middle point
+                    largest_gap_middle = frame_dist[frame_dist_argsort[-frames_to_add:]] // 2
+
+                    # Safety check that the smallest gap is still larger than the step limit, then insert frames there
+                    # Only use gaps whose middle point is larger than the step limit
+                    gap_mask = largest_gap_middle > tdt_step_limit
+                    # Add gap start and half-size of gap to get indices of new frames
+                    new_idx = largest_gap_start[gap_mask] + largest_gap_middle[gap_mask]
+                    trigger[new_idx, 1] = 1
+
+                    # Re-calculate frames_to_prepend to see if any more frames have to be added
+                    frames_to_prepend = int(frame_count - np.sum(trigger[1:, 1]))
+
+                # If there are still frames missing, prepend frames to the beginning of the file
+                if frames_to_prepend > 0:
+                    if first_frame > frames_to_prepend * median_frame_time:
+                        # if frames would fit in the merge array before the first recorded frame, prepend them with proper steps
+                        # make a list of the new indices (in steps of median_frame_time before the first frame)
+                        idx_start = first_frame - frames_to_prepend * median_frame_time
+                        # add 1 to indices because we do not count the first index of the trigger signal
+                        idx_list = np.arange(start=idx_start + 1, stop=first_frame, step=median_frame_time)
+                        if idx_list.shape[0] != frames_to_prepend:
+                            raise ValueError(f'Frame correction failed for {trial_key}!')
+                        else:
+                            trigger[idx_list, 1] = 1
+
+                    # Try to prepend frames to the beginning of the file
+                    elif frames_to_prepend < 30:
+
+                        # int rounds down and avoids overestimation of step size
+                        max_step_size = int(first_frame/frames_to_prepend)
+
+                        # If the time before the first frame is not enough to fit all frames in there without crossing the
+                        # step limit, we interleave the new frames in the beginning half-way between the original frames
+                        if max_step_size <= tdt_step_limit:
+
+                            # Check where the actual frame triggers are and find half-way points
+                            actual_frame_idx = np.where(trigger[1:, 1] == 1)[0] + 1     # +1 because we ignore the first row
+                            # Get the distance between the first "n_frames_to_prepend" frames where we have to interleave fake frames
+                            interframe_idx = actual_frame_idx[1:frames_to_prepend+1] - actual_frame_idx[:frames_to_prepend]
+                            # The new indices are the first actual frame indices plus half of the interframe indices
+                            idx_list = actual_frame_idx[:frames_to_prepend] + interframe_idx//2
+
+                        # Otherwise, put them before the beginning at the biggest possible step size
+                        else:
+                            # Create indices of new frame triggers with given step size, going backwards from the first real frame
+                            idx_list = np.array([i for i in range(first_frame-max_step_size, 0, -max_step_size)])
+
+                        # Exit condition: New indices are somehow not enough
+                        if len(idx_list) != frames_to_prepend:
+                            raise ValueError(f"Could not prepend {frames_to_prepend} frames for {trial_key}, because "
+                                             f"only {len(idx_list)} new indices could be generated.")
+                        else:
+                            trigger[idx_list, 1] = 1
+
                     else:
-                        trigger[idx_list, 1] = 1
-
-                # Try to prepend frames to the beginning of the file
-                elif frames_to_prepend < 30:
-
-                    # int rounds down and avoids overestimation of step size
-                    max_step_size = int(first_frame/frames_to_prepend)
-
-                    # Get 99th quantile of TDT sample time to conservatively estimate if 2 frames would be within the
-                    # 8 ms bin window (and thus lost during resampling)
-                    tdt_time_diff = data[0][2:,0] - data[0][1:-1,0]
-                    tdt_sample_time = np.quantile(tdt_time_diff, 0.99)
-                    tdt_step_limit = int(np.ceil(0.008/tdt_sample_time))
-
-                    # If the time before the first frame is not enough to fit all frames in there without crossing the
-                    # step limit, we interleave the new frames in the beginning half-way between the original frames
-                    if max_step_size <= tdt_step_limit:
-
-                        # Check where the actual frame triggers are and find half-way points
-                        actual_frame_idx = np.where(trigger[1:, 1] == 1)[0] + 1     # +1 because we ignore the first row
-                        # Get the distance between the first "n_frames_to_prepend" frames where we have to interleave fake frames
-                        interframe_idx = actual_frame_idx[1:frames_to_prepend+1] - actual_frame_idx[:frames_to_prepend]
-                        # The new indices are the first actual frame indices plus half of the interframe indices
-                        idx_list = actual_frame_idx[:frames_to_prepend] + interframe_idx//2
-
-                    # Otherwise, put them before the beginning at the biggest possible step size
-                    else:
-                        # Create indices of new frame triggers with given step size, going backwards from the first real frame
-                        idx_list = np.array([i for i in range(first_frame-max_step_size, 0, -max_step_size)])
-
-                    # Exit condition: New indices are somehow not enough
-                    if len(idx_list) != frames_to_prepend:
-                        raise ValueError(f"Could not prepend {frames_to_prepend} frames for {trial_key}, because "
-                                         f"only {len(idx_list)} new indices could be generated.")
-                    else:
-                        trigger[idx_list, 1] = 1
-
+                        # correction does not work if the whole log file is not large enough to include all missing frames
+                        raise ImportError(f'{int(abs(more_frames_in_TDT))} too few frames imported from TDT, could not be corrected.')
                 else:
-                    # correction does not work if the whole log file is not large enough to include all missing frames
-                    raise ImportError(f'{int(abs(more_frames_in_TDT))} too few frames imported from TDT, could not be corrected.')
+                    if abs(more_frames_in_TDT) > 5:
+                        print('Found enough gaps in frame trigger to add missing frames')
 
         ### Preprocess position signal
         pos_to_be_del = np.arange(np.argmax(position[:, 1]) + 1,
