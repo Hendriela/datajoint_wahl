@@ -283,8 +283,6 @@ class ScanInfo(dj.Computed):
     def make(self, key: dict) -> None:
         """
         Automatically populate the ScanInfo table. RawImagingFile has to be populated beforehand.
-        # TODO: Save locations of scan fields in part tables
-                Create part tables for channel information
         Adrian 2019-08-21
 
         Args:
@@ -296,7 +294,19 @@ class ScanInfo(dj.Computed):
         if (Scan & key).fetch1('microscope') == 'Scientifica':
             # Extract meta-information from imaging .tif file
             path = (RawImagingFile & key & 'part=0').get_path()  # Extract only from first file
-            info = scanimage.get_meta_info_as_dict(path)
+
+            try:
+                info = scanimage.get_meta_info_as_dict(path)
+            except NameError:
+                # Function should throw a NameError if the loaded TIFF file has no metadata (eg. because it was re-saved with ImageJ)
+                # In this case, load the previous session's metadata
+                prev_key = key.copy()
+                del prev_key['day']
+                prev_key['day'] = np.max((RawImagingFile & f'day<"{key["day"]}"').fetch('day'))
+                path = (RawImagingFile & prev_key & 'part=0').get_path()
+                info = scanimage.get_meta_info_as_dict(path)
+                print(f'TIFF file in {key} did not contain metadata. Loaded metadata from {prev_key}.')
+
             info['pockels'] = info['powers'][0]  # TODO: remove hardcoding of MaiTai laser
             info['gain'] = info['gains'][0]
 
