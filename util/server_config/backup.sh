@@ -1,6 +1,6 @@
 #!/bin/sh
 # Shell script that creates a full backup of the DataJoint database, stores it locally, and then copies it to
-# the Neurophysiology-Storage1 Wahl server, which is mounted under /media/
+# the Neurophysiology-Storage1 Wahl server, which is mounted under /media/ (backup takes <3 min)
 # Arguments used:
 # - "--login-path=root" tells mysqldump to use the login credentials for the root account when connecting to the database,
 #   avoiding permission errors. For this to work, the root credentials have to be added with the mysql_config_editor
@@ -13,10 +13,10 @@
 # - "| gzip > filename" together with the ".gz" in the sql file name compresses the dump file with gzip, which saves
 #   disk space and transfer time to the server. When restoring a zipped dump file, you have to add
 #   "gunzip < datajoint_backup.sql.gz | mysql..." before the mysql command
-echo "starting db backup"
 day="$(date +'%A')"
 db_backup="Datajoint_Backup_${day}.sql.gz"
-sudo mysqldump --login-path=root --single-transaction --skip-lock-tables --all-databases | gzip >/home/hheise/datajoint_backups/${db_backup}
+echo "Starting backup of ${db_backup}"
+sudo mysqldump --single-transaction --skip-lock-tables --all-databases | gzip >/home/hheise/datajoint_backups/${db_backup}
 echo "Created backup at ${db_backup}."
 sudo cp /home/hheise/datajoint_backups/${db_backup} /media/neurophysiology-storage1/Wahl/Datajoint/backups/daily
-echo "Copied backup to Wahl server."
+echo "Copied backup to Wahl server. Done!"
