@@ -20,11 +20,10 @@ start=`date +%s`
 mysqldump --login-path=root --single-transaction --skip-lock-tables --all-databases | gzip >/home/hheise/datajoint_backups/${db_backup}
 end=`date +%s`
 runtime=$((end-start))
-echo "Created backup at ${db_backup}. Runtime: ${runtime}"
+echo "Created backup at ${db_backup}. Runtime: ${runtime} s"
 
 start=`date +%s`
 sudo cp /home/hheise/datajoint_backups/${db_backup} /media/neurophysiology-storage1/Wahl/Datajoint/backups/daily
 end=`date +%s`
 runtime=$((end-start))
-echo "Created backup at ${db_backup}. Runtime: ${runtime}"
-echo "Copied backup to Wahl server (runtime: ${runtime}). Done!"
+echo "Copied backup to Wahl server (runtime: ${runtime} s). Done!"
