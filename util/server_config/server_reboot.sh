@@ -7,4 +7,4 @@ export TERM=xterm-color
 # start the Datajoint MySQL database.
 cd /db/mysql-docker
 docker-compose up -d
-python3 /home/hheise/datajoint_wahl/util/notify_server_restart.py
+python3 /home/hheise/datajoint_wahl/util/server_config/notify_server_restart.py
