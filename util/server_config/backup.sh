@@ -15,8 +15,8 @@
 #   "gunzip < datajoint_backup.sql.gz | mysql..." before the mysql command
 echo "starting db backup"
 day="$(date +'%A')"
-db_backup="datajoint_backup_${day}.sql.gz"
-sudo mysqldump --login-path=root --single-transaction --skip-lock-tables --all-databases | gzip >/home/datajoint_backups/${db_backup}
+db_backup="Datajoint_Backup_${day}.sql.gz"
+sudo mysqldump --login-path=root --single-transaction --skip-lock-tables --all-databases | gzip >/home/hheise/datajoint_backups/${db_backup}
 echo "Created backup at ${db_backup}."
-sudo cp /home/datajoint_backups/${db_backup} /media/neurophysiology-storage1/Wahl/Datajoint/backups/daily
+sudo cp /home/hheise/datajoint_backups/${db_backup} /media/neurophysiology-storage1/Wahl/Datajoint/backups/daily
 echo "Copied backup to Wahl server."
