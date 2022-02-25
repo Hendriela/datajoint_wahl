@@ -16,7 +16,7 @@
 day="$(date +'%A')"
 db_backup="Datajoint_Backup_${day}.sql.gz"
 echo "Starting backup of ${db_backup}"
-sudo mysqldump --single-transaction --skip-lock-tables --all-databases | gzip >/home/hheise/datajoint_backups/${db_backup}
+mysqldump --login-path=root --single-transaction --skip-lock-tables --all-databases | gzip >/home/hheise/datajoint_backups/${db_backup}
 echo "Created backup at ${db_backup}."
 sudo cp /home/hheise/datajoint_backups/${db_backup} /media/neurophysiology-storage1/Wahl/Datajoint/backups/daily
 echo "Copied backup to Wahl server. Done!"
