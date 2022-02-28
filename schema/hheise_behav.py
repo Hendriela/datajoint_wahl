@@ -68,7 +68,7 @@ class VRSessionInfo(dj.Imported):
     -> common_exp.Session
     ---
     imaging_session     : tinyint           # bool flag whether imaging was performed during this session
-    condition_switch    : longblob          # List of ints indicating the first trial(s) of the new condition
+    condition_switch    : longblob          # List of ints indicating the first trial(s) of the new condition (base 0)
     valve_duration      : smallint          # Duration of valve opening during reward in ms
     length              : smallint          # Track length in cm
     running             : enum('none', 'very bad', 'bad', 'medium', 'okay', 'good', 'very good') 
@@ -124,6 +124,10 @@ class VRSessionInfo(dj.Imported):
         note_dict = ast.literal_eval((common_exp.Session & key).fetch1('session_notes'))
         new_key['block'] = note_dict['block']
         new_key['condition_switch'] = eval(note_dict['switch'])  # eval turns string into list
+
+        # Turn manual ID (base 1) into pythonic ID (base 0)
+        if new_key['condition_switch'] != [-1]:
+            new_key['condition_switch'] = [x-1 for x in new_key['condition_switch']]
 
         # Check if this is an imaging session (session has to be inserted into common_img.Scan() first)
         if len((common_img.Scan & key).fetch()) == 1:
