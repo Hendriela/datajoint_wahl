@@ -50,7 +50,7 @@ def parse_line(meta_info: str, tag: str) -> Union[float, str, np.ndarray]:
     matches = [s for s in list_meta if tag in s]
 
     if len(matches) != 1:
-        raise Exception('The tag "%s" was found %d times (should be only 1)' % (tag, len(matches)))
+        raise NameError('The tag "%s" was found %d times (should be only 1)' % (tag, len(matches)))
 
     str_value = matches[0].split(' = ')[1]  # get part right of = in this line
 

@@ -447,8 +447,6 @@ class MotionCorrection(dj.Computed):
     def make(self, key: dict) -> None:
         """
         Automatically populate the MotionCorrection for all networks of this scan
-        TODO:   - include motion correction of the second channel with the same parameters as primary channel
-                - for multiple planes, remove the black stripe in the middle
         Adrian 2019-08-21
 
         Args:
@@ -752,7 +750,6 @@ class QualityControl(dj.Computed):
         Args:
             key: Primary keys of the current MotionCorrection() entry.
         """
-
         # log('Populating QualityControl for key: {}.'.format(key))
 
         if len(MemoryMappedFile() & key) == 0:

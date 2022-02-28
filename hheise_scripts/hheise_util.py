@@ -230,11 +230,3 @@ def add_column(table: Type[dj.table.Table], name: str, dtype: str, default_value
     print('Be sure to add following entry to your table definition')
     print(definition)
     table.__class__._heading = None
-
-
-def add_scan():
-
-    server = login.get_neurophys_data_directory()
-    paths = common_exp.Session().fetch('session_path')
-
-    return

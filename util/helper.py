@@ -31,6 +31,11 @@ def alphanumerical_sort(x: List[str]) -> List[str]:
     """
     x_sort = x.copy()
 
+    has_dir = [True if os.path.sep in i else False for i in x_sort]
+    if any(has_dir) and not all(has_dir):
+        print('\033[93m' + 'WARNING: Some, but not all provided file names include directories.\n'
+                           'Correct sorting cannot be guaranteed, please check manually!' + '\033[0m')
+
     def atoi(text):
         return int(text) if text.isdigit() else text
 
