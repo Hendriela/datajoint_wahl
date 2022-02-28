@@ -68,7 +68,7 @@ class VRSessionInfo(dj.Imported):
     -> common_exp.Session
     ---
     imaging_session     : tinyint           # bool flag whether imaging was performed during this session
-    condition_switch    : longblob          # List of ints indicating the first trial(s) of the new condition (base 0)
+    condition_switch    : longblob          # List of trial IDs of the first trial(s) of the new condition (base 0, -1 if no switch)
     valve_duration      : smallint          # Duration of valve opening during reward in ms
     length              : smallint          # Track length in cm
     running             : enum('none', 'very bad', 'bad', 'medium', 'okay', 'good', 'very good') 

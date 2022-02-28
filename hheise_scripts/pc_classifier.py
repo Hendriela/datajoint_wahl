@@ -147,7 +147,8 @@ def pre_screen_place_fields(trace: np.ndarray, bin_baseline: float,
 
 
 def apply_pf_criteria(trace: np.ndarray, place_blocks: List[np.ndarray], trans: np.ndarray, params: dict,
-                      sess_key: dict) -> List[Tuple[np.ndarray, bool, bool, bool]]:
+                      sess_key: dict, accepted_trials: Optional[Iterable[int]] = None) \
+        -> List[Tuple[np.ndarray, bool, bool, bool]]:
     """
     Applies the criteria of place fields to potential place fields of a single neuron. A place field is accepted when...
         1) it stretches at least 'min_bin_size' bins (default 10)
@@ -162,6 +163,7 @@ def apply_pf_criteria(trace: np.ndarray, place_blocks: List[np.ndarray], trans: 
         trans: Transient-only dF/F trace from the current neuron, shape (n_frames_in_session)
         params: Current hheise_placecell.PlaceCellParameter() entry
         sess_key: Primary keys of the current hheise_placecell.PlaceCells make() call
+        accepted_trials: List of trial IDs that should be used. If None, all IDs will be used.
 
     Returns:
         List of results, Tuple with (place_field_idx, criterion1_result, criterion2_result, criterion3_result)
@@ -170,7 +172,7 @@ def apply_pf_criteria(trace: np.ndarray, place_blocks: List[np.ndarray], trans: 
     for pot_place in place_blocks:
         bin_size = is_large_enough(pot_place, params['min_bin_size'])
         intensity = is_strong_enough(trace, pot_place, place_blocks, params['fluo_infield'])
-        transients = has_enough_transients(trans, pot_place, sess_key, params['trans_time'])
+        transients = has_enough_transients(trans, pot_place, sess_key, params['trans_time'], accepted_trials)
 
         results.append((pot_place, bin_size, intensity, transients))
 
@@ -211,7 +213,8 @@ def is_strong_enough(trace: np.ndarray, place_field: np.ndarray, all_fields: Lis
     return np.mean(trace[pot_place_idx]) >= fluo_factor * np.mean(trace[~all_place_idx])
 
 
-def has_enough_transients(trans: np.ndarray, place_field: np.ndarray, key: dict, trans_time: float) -> bool:
+def has_enough_transients(trans: np.ndarray, place_field: np.ndarray, key: dict, trans_time: float,
+                          accepted_trials: Optional[Iterable[int]]) -> bool:
     """
     Checks if of the time during which the mouse is located in the potential field, at least 'trans_time'%
     consist of significant transients (criterion 3).
@@ -221,6 +224,7 @@ def has_enough_transients(trans: np.ndarray, place_field: np.ndarray, key: dict,
         place_field: 1D array of indices of data points that form the potential place field
         key: Primary keys of the current hheise_placecell.PlaceCells make() call
         trans_time: Fraction of the time spent in the place field that should consist of significant transients.
+        accepted_trials: List of trial IDs that should be used. If None, all IDs will be used.
 
     Returns:
         Flag whether the criterion is passed or not (place field consists of enough significant transients)
@@ -232,13 +236,14 @@ def has_enough_transients(trans: np.ndarray, place_field: np.ndarray, key: dict,
 
     place_frames_trace = []  # stores the trace of all trials when the mouse was in a place field as one data row
     for trial in np.unique(trial_mask):
-        # Get frame indices of first and last place field bin
-        frame_borders = (np.sum(frames_per_bin[trial][:place_field[0]]),
-                         np.sum(frames_per_bin[trial][:place_field[-1] + 1]))
-        # Mask transient-only trace for correct trial and running-only frames (like frames_per_bin)
-        trans_masked = trans[trial_mask == trial][running_masks[trial]]
-        # Add frames that were in the bin to the list
-        place_frames_trace.append(trans_masked[frame_borders[0]:frame_borders[1] + 1])
+        if (accepted_trials is None) or ((accepted_trials is not None) and (trial in accepted_trials)):
+            # Get frame indices of first and last place field bin
+            frame_borders = (np.sum(frames_per_bin[trial][:place_field[0]]),
+                             np.sum(frames_per_bin[trial][:place_field[-1] + 1]))
+            # Mask transient-only trace for correct trial and running-only frames (like frames_per_bin)
+            trans_masked = trans[trial_mask == trial][running_masks[trial]]
+            # Add frames that were in the bin to the list
+            place_frames_trace.append(trans_masked[frame_borders[0]:frame_borders[1] + 1])
 
     # create one big 1D array that includes all frames during which the mouse was located in the place field.
     place_frames_trace = np.hstack(place_frames_trace)
@@ -246,7 +251,8 @@ def has_enough_transients(trans: np.ndarray, place_field: np.ndarray, key: dict,
     return np.sum(place_frames_trace) >= trans_time * place_frames_trace.shape[0]
 
 
-def run_classifier(traces: np.ndarray, trans_only: np.ndarray, key: dict, params: Optional[dict] = None) -> dict:
+def run_classifier(traces: np.ndarray, trans_only: np.ndarray, key: dict, accepted_trials: Optional[Iterable[int]],
+                   params: Optional[dict] = None) -> dict:
     """
     Prepares binned and trial-averaged traces for place cell classification (smoothing) and runs classification by
     applying place field criteria. Called by hheise_placecell.PlaceCells().make() for initial classification and by
@@ -258,6 +264,7 @@ def run_classifier(traces: np.ndarray, trans_only: np.ndarray, key: dict, params
         trans_only: 2D array with shape (n_neurons, n_frames_in_session), transient-only traces from
                     hheise_placecell.TransientOnly().
         key:        Primary keys of the current BinnedActivity() entry.
+        accepted_trials: List of trial IDs that should be used. If None, all IDs will be used.
         params:     Current parameter set, from hheise_placecell.PlaceCellParameter(). If not provided, function
                     attempts to query it itself.
 
@@ -280,7 +287,7 @@ def run_classifier(traces: np.ndarray, trans_only: np.ndarray, key: dict, params
     for neuron_id, (neuron_pf, neuron_trace, neuron_trans_only) in enumerate(zip(potential_pf, smooth, trans_only)):
 
         # Apply criteria
-        results = apply_pf_criteria(neuron_trace, neuron_pf, neuron_trans_only, params, key)
+        results = apply_pf_criteria(neuron_trace, neuron_pf, neuron_trans_only, params, key, accepted_trials)
         # If any place field passed all three criteria (bool flags sum to 3), save data for later bootstrapping
         if any([sum(entry[1:]) == 3 for entry in results]):
             passed_cells[neuron_id] = results
@@ -288,8 +295,8 @@ def run_classifier(traces: np.ndarray, trans_only: np.ndarray, key: dict, params
     return passed_cells
 
 
-def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, key: dict, n_iter: int = 1000,
-                          split_size: int = 50) -> np.ndarray:
+def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, accepted_trials: Optional[Iterable[int]],
+                          key: dict, n_iter: int, split_size: int) -> np.ndarray:
     """
     Performs bootstrapping on unbinned dF/F traces and returns p-values of putative place cells.
     For bootstrapping, the trace is divided in parts with 'split_size' length which are randomly shuffled n_iter times.
@@ -302,9 +309,10 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, key:
             passed the initial PC classification and have to be validated. Queried from common_img.Segmentation.ROI().
         pc_trans_only: Same shape as pc_traces, contains transient-only traces of only passed ROIs from
             hheise_placecell.TransientOnly.ROI().
+        accepted_trials: List of trial IDs that should be used. If None, all IDs will be used.
         key: Primary keys of the current BinnedActivity() entry. Passed down from hheise_placecell.PlaceCells().make().
-        n_iter: Number of bootstrap iterations. Passed down from current PlaceCellParameter() entry, defaults to 1000.
-        split_size: Size in frames of shuffle segments. Passed down like n_iter, defaults to 50.
+        n_iter: Number of bootstrap iterations. Passed down from current PlaceCellParameter() entry.
+        split_size: Size in frames of shuffle segments. Passed down like n_iter.
 
     Returns:
         1D array with shape (n_passed_cells,), holding p-values for all passed ROIs
@@ -321,15 +329,16 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, key:
         # Shuffle pc_traces for every trial separately
         shuffle = []
         for trial_id in np.unique(trial_mask):
-            trial = pc_traces[:, trial_mask == trial_id]
+            if (accepted_trials is None) or ((accepted_trials is not None) and (trial in accepted_trials)):
+                trial = pc_traces[:, trial_mask == trial_id]
 
-            # divide the trial trace into splits of 'split_size' size and manually append the remainder
-            clean_div_length = trial.shape[1] - trial.shape[1] % split_size
-            split_trace = np.split(trial[:, :clean_div_length], clean_div_length / split_size, axis=1)
-            split_trace.append(trial[:, clean_div_length:])
+                # divide the trial trace into splits of 'split_size' size and manually append the remainder
+                clean_div_length = trial.shape[1] - trial.shape[1] % split_size
+                split_trace = np.split(trial[:, :clean_div_length], clean_div_length / split_size, axis=1)
+                split_trace.append(trial[:, clean_div_length:])
 
-            # shuffle the list of trial-bits with random.sample, and concatenate to a new, now shuffled, array
-            shuffle.append(np.hstack(random.sample(split_trace, len(split_trace))))
+                # shuffle the list of trial-bits with random.sample, and concatenate to a new, now shuffled, array
+                shuffle.append(np.hstack(random.sample(split_trace, len(split_trace))))
 
         # The binning function requires the whole session in one row, so we stack the single-trial-arrays
         shuffle = np.hstack(shuffle)
@@ -343,7 +352,7 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, key:
         bin_avg_act = np.vstack([np.mean(x, axis=1) for x in bin_act])
 
         # Run the classifier on the shuffled traces
-        passed_shuffles = run_classifier(bin_avg_act, pc_trans_only, key)
+        passed_shuffles = run_classifier(bin_avg_act, pc_trans_only, key, accepted_trials)
         # Add 1 to the counter of each cell that passed the criteria
         p_counter[np.array(list(passed_shuffles.keys()))] += 1
 

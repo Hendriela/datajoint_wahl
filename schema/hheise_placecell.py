@@ -28,29 +28,24 @@ schema = dj.schema('hheise_placecell', locals(), create_tables=True)
 @schema
 class PlaceCellParameter(dj.Manual):
     definition = """ # Parameters for place cell classification
-    place_cell_id       : smallint              # index for unique parameter set, base 0
+    place_cell_id           : smallint              # index for unique parameter set, base 0
     ----
-    description         : varchar(1024)         # Short description of the effect of this parameter set
-    encoder_unit = 'raw': enum('raw', 'speed')  # Which value to use to determine resting frames (encoder data or cm/s)
-    running_thresh = 3.0: float     # Running speed threshold under which a frame counts as "resting", calculated from
-                                    # time points between the previous to the current frame.
-                                    # If encoder_unit = 'raw', value is summed encoder data.
-                                    # If encoder_unit = 'speed', value is average speed [cm/s].
-    exclude_rest = 1    : tinyint   # bool flag whether immobile periods of the mouse should be included in analysis
-    trans_length = 0.5  : float     # minimum length in seconds of a significant transient
-    trans_thresh = 4    : tinyint   # factor of sigma above which a dF/F transient is considered significant
-    bin_length = 5      : tinyint   # Spatial bin length for dF/F traces [cm]. Has to be divisor of track length. 
-    bin_window_avg = 3  : tinyint   # half-size of symmetric sliding window of position bins for binned trace smoothing
-    bin_base = 0.25     : float     # fraction of lowest bins that are averaged for baseline calculation
-    place_thresh = 0.25 : float     # place field threshold, factor for difference between max and baseline dF/F
-    min_pf_size = 15    : tinyint   # minimum size [cm] for a place field
-    fluo_infield = 7    : tinyint   # threshold factor of mean DF/F in the place field compared to outside the field
-    trans_time = 0.2    : float     # fraction of the (unbinned) signal while the mouse is located in the place field 
-                                    # that should consist of significant transients
-    split_size = 50     : int       # Number of frames in bootstrapping segments
-    boot_iter = 1000    : int       # Number of shuffles for bootstrapping (default 1000, after Dombeck et al., 2010)
-    min_bin_size        : int       # Min_pf_size transformed into number of bins (rounded up). Calculated before 
-                                    # insertion and raises an error if given by user.
+    description             : varchar(1024)         # Short description of the effect of this parameter set
+    exclude_rest = 1        : tinyint   # bool flag whether immobile periods of the mouse should be excluded from analysis
+    encoder_unit = 'raw'    : enum('raw', 'speed')  # Which value to use to determine resting frames (encoder data or cm/s)
+    running_thresh = 3.0    : float     # Running speed threshold under which a frame counts as "resting", calculated from time points between the previous to the current frame. If encoder_unit = 'raw', value is summed encoder data. If encoder_unit = 'speed', value is average speed [cm/s].
+    trans_length = 0.5      : float     # minimum length in seconds of a significant transient
+    trans_thresh = 4        : tinyint   # factor of sigma above which a dF/F transient is considered significant
+    bin_length = 5          : tinyint   # Spatial bin length for dF/F traces [cm]. Has to be divisor of track length. 
+    bin_window_avg = 3      : tinyint   # half-size of symmetric sliding window of position bins for binned trace smoothing
+    bin_base = 0.25         : float     # fraction of lowest bins that are averaged for baseline calculation
+    place_thresh = 0.25     : float     # place field threshold, factor for difference between max and baseline dF/F
+    min_pf_size = 15        : tinyint   # minimum size [cm] for a place field
+    fluo_infield = 7        : tinyint   # threshold factor of mean DF/F in the place field compared to outside the field
+    trans_time = 0.2        : float     # fraction of the (unbinned) signal while the mouse is located in the place field that should consist of significant transients
+    split_size = 50         : int       # Number of frames in bootstrapping segments
+    boot_iter = 1000        : int       # Number of shuffles for bootstrapping (default 1000, after Dombeck et al., 2010)
+    min_bin_size            : int       # Min_pf_size transformed into number of bins (rounded up). Calculated before insertion and raises an error if given by user.
     """
 
     def helper_insert1(self, entry: dict) -> None:
@@ -381,13 +376,15 @@ class BinnedActivity(dj.Computed):
         # Enter part table entries
         self.ROI().insert(part_entries)
 
-    def get_trial_avg(self, trace: str) -> np.array:
+    def get_trial_avg(self, trace: str, trial_mask: Optional[np.ndarray] = None) -> np.array:
         """
         Compute trial-averaged VR position bin values for a given trace of one queried session.
 
         Args:
             trace: Trace type. Has to be attr of self.ROI(): bin_activity (dF/F), bin_spikes (spikes, decon),
                     bin_spikerate (spikerate).
+            trial_mask: Optional boolean array which specifies which trials to include in the averaging. Used to
+                    separate trials with condition switches. If not provided, all trials will be used.
 
         Returns:
             Numpy array with shape (n_neurons, n_bins) with traces averaged over queried trials (one session).
@@ -410,8 +407,14 @@ class BinnedActivity(dj.Computed):
 
         data = self.ROI().fetch(trace)  # Fetch requested data arrays from all neurons
 
-        # Take average across trials (axis 1) and return array with shape (n_neurons, n_bins)
-        return np.vstack([np.mean(x, axis=1) for x in data])
+        if trial_mask is None:
+            trial_mask = np.ones(data[0].shape[1], dtype=bool)
+
+        if len(trial_mask) != data[0].shape[1]:
+            raise IndexError(f"Provided trial mask has {len(trial_mask)} entries, but traces have {data[0].shape[1]} trials.")
+        else:
+            # Take average across trials (axis 1) and return array with shape (n_neurons, n_bins)
+            return np.vstack([np.mean(x[:, trial_mask], axis=1) for x in data])
 
 
 @schema
@@ -419,6 +422,7 @@ class PlaceCell(dj.Computed):
     definition = """ # Place cell analysis and results (PC criteria mainly from Hainmüller (2018) and Dombeck/Tank lab)
     -> BinnedActivity
     -> TransientOnly
+    corridor_type   : tinyint   # Code for including different corridors in one session in the analysis. 0=only standard corridor; 1=both; 2=only changed condition 1; 3=only changed condition 2
     ------
     place_cell_ratio                    : float         # Ratio of accepted place cells to total detected components
     time_place_cell = CURRENT_TIMESTAMP : timestamp     # automatic timestamp
@@ -455,48 +459,96 @@ class PlaceCell(dj.Computed):
         print(f"Classifying place cells for {key}.")
 
         # Fetch data and parameters of the current session
-        traces = (BinnedActivity & key).get_trial_avg('bin_activity')  # Get spatially binned dF/F (n_cells, n_bins)
+        # traces = (BinnedActivity & key).get_trial_avg('bin_activity')  # Get spatially binned dF/F (n_cells, n_bins)
         mask_ids = (BinnedActivity.ROI & key).fetch('mask_id')
         trans_only = np.vstack((TransientOnly.ROI & key).fetch('trans'))  # Get transient-only dF/F (n_cells, n_frames)
         params = (PlaceCellParameter & key).fetch1()
+        n_trials = len(common_img.RawImagingFile & key)
 
-        # Smooth binned data
-        smooth = pc_classifier.smooth_trace(traces, params['bin_window_avg'])
+        # Check if the corridor condition changed during the session (validation trials), and trials have to be treated separately
+        switch = (hheise_behav.VRSessionInfo & key).fetch1('condition_switch')
 
-        # Screen for potential place fields
-        potential_pf = pc_classifier.pre_screen_place_fields(smooth, params['bin_base'], params['place_thresh'])
+        trial_mask = np.ones(n_trials, dtype=bool)      # by default, all trials will be processed
 
-        passed_cells = {}
-        # For each cell, apply place cell criteria on the potential place fields, and do bootstrapping if necessary
-        for neuron_id, (neuron_pf, neuron_trace, neuron_trans_only) in enumerate(zip(potential_pf, smooth, trans_only)):
+        # No switch, include all trials
+        if switch == [-1]:
+            corridor_types = [0]
+            trace_list = [(BinnedActivity & key).get_trial_avg('bin_activity')]
+            accepted_trials = [None]
 
-            # Apply criteria
-            results = pc_classifier.apply_pf_criteria(neuron_trace, neuron_pf, neuron_trans_only, params, key)
-            # If any place field passed all three criteria (bool flags sum to 3), save data for later bootstrapping
-            if any([sum(entry[1:]) == 3 for entry in results]):
-                passed_cells[neuron_id] = results
+        # One condition switch occurred, process conditions separately
+        elif len(switch) == 1:
+            corridor_types = [0, 1, 2]          # corridor_type label of the following traces arrays (0=only normal, 1=all trials, 2=only changed condition 1, 3=only changed condition 2)
+            trial_mask[switch[0]:] = False    # Exclude trials with different condition
+            trace_list = [(BinnedActivity.ROI & key).fetch('mask_id', trial_mask=trial_mask),   # First array includes all normal trials (mask)
+                          (BinnedActivity.ROI & key).fetch('mask_id'),                          # Second array includes all trials (no mask)
+                          (BinnedActivity.ROI & key).fetch('mask_id', trial_mask=~trial_mask)]  # Third array includes all changed trials (inverse mask)
+            accepted_trials = [np.where(trial_mask)[0],
+                               None,
+                               np.where(~trial_mask)[0]]
 
-        print(f"\t{len(passed_cells)} potential place cells found. Performing bootstrapping...")
-        # Perform bootstrapping on all cells with passed place fields
-        pc_traces = (common_img.Segmentation & key).get_traces()[np.array(list(passed_cells.keys()))]
-        pc_trans_only = trans_only[np.array(list(passed_cells.keys()))]
-        p_values = pc_classifier.perform_bootstrapping(pc_traces, pc_trans_only, key, n_iter=params['boot_iter'],
-                                                       split_size=params['split_size'])
-        print(f"\tBootstrapping complete. {np.sum(p_values <= 0.05)} cells with p<=0.05.")
-        # Prepare single-ROI entries
-        pf_roi_entries = []
-        pf_entries = []
-        for idx, (cell_id, place_fields) in enumerate(passed_cells.items()):
-            pf_roi_entries.append(dict(**key, mask_id=mask_ids[cell_id], is_place_cell=int(p_values[idx] <= 0.05),
-                                       p=p_values[idx]))
-            for field_idx, field in enumerate(place_fields):
-                pf_entries.append(dict(**key, mask_id=mask_ids[cell_id], place_field_id=field_idx, bin_idx=field[0],
-                                       large_enough=int(field[1]), strong_enough=int(field[2]), transients=int(field[3])))
+        # Two switches occurred
+        elif len(switch) == 2:
+            corridor_types = [0, 1, 2, 3]       # corridor_type label of the following traces arrays
+            trial_mask[switch[0]:] = False      # Only normal trials
+            cond1 = np.zeros(trial_mask.shape, dtype=bool)
+            cond1[switch[0]:switch[1]] = True       # Only trials with no pattern
+            cond2 = np.zeros(trial_mask.shape, dtype=bool)
+            cond2[switch[1]:] = True       # Only trials with no tone and no pattern
+            trace_list = [(BinnedActivity.ROI & key).fetch('mask_id', trial_mask=trial_mask),
+                          (BinnedActivity.ROI & key).fetch('mask_id'),
+                          (BinnedActivity.ROI & key).fetch('mask_id', trial_mask=cond1),
+                          (BinnedActivity.ROI & key).fetch('mask_id', trial_mask=cond2)]
+            accepted_trials = [np.where(trial_mask)[0],
+                               None,
+                               np.where(cond1)[0],
+                               np.where(cond2)[0]]
 
-        # Insert entries into tables
-        self.insert1(dict(**key, place_cell_ratio=np.sum(p_values < 0.05)/len(traces)))
-        self.ROI().insert(pf_roi_entries)
-        self.PlaceField().insert(pf_entries)
+        else:
+            raise IndexError(f"Trial {key}:\nCondition switch {switch} not recognized.")
+
+        # Make separate entries for each corridor type
+        for corridor_type, traces, accepted_trial in zip(corridor_types, trace_list, accepted_trials):
+            print('\tProcessing place cells for the following corridor type:', corridor_type)
+            # Smooth binned data
+            smooth = pc_classifier.smooth_trace(traces, params['bin_window_avg'])
+
+            # Screen for potential place fields
+            potential_pf = pc_classifier.pre_screen_place_fields(smooth, params['bin_base'], params['place_thresh'])
+
+            passed_cells = {}
+            # For each cell, apply place cell criteria on the potential place fields, and do bootstrapping if necessary
+            for neuron_id, (neuron_pf, neuron_trace, neuron_trans_only) in enumerate(zip(potential_pf, smooth, trans_only)):
+
+                # Apply criteria
+                results = pc_classifier.apply_pf_criteria(neuron_trace, neuron_pf, neuron_trans_only, params, key,
+                                                          accepted_trial)
+                # If any place field passed all three criteria (bool flags sum to 3), save data for later bootstrapping
+                if any([sum(entry[1:]) == 3 for entry in results]):
+                    passed_cells[neuron_id] = results
+
+            print(f"\t{len(passed_cells)} potential place cells found. Performing bootstrapping...")
+            # Perform bootstrapping on all cells with passed place fields
+            pc_traces = (common_img.Segmentation & key).get_traces()[np.array(list(passed_cells.keys()))]
+            pc_trans_only = trans_only[np.array(list(passed_cells.keys()))]
+            p_values = pc_classifier.perform_bootstrapping(pc_traces, pc_trans_only, accepted_trial, key,
+                                                           n_iter=params['boot_iter'], split_size=params['split_size'])
+            print(f"\tBootstrapping complete. {np.sum(p_values <= 0.05)} cells with p<=0.05.")
+            # Prepare single-ROI entries
+            pf_roi_entries = []
+            pf_entries = []
+            for idx, (cell_id, place_fields) in enumerate(passed_cells.items()):
+                pf_roi_entries.append(dict(**key, corridor_type=corridor_type, mask_id=mask_ids[cell_id],
+                                           is_place_cell=int(p_values[idx] <= 0.05), p=p_values[idx]))
+                for field_idx, field in enumerate(place_fields):
+                    pf_entries.append(dict(**key, corridor_type=corridor_type, mask_id=mask_ids[cell_id],
+                                           place_field_id=field_idx, bin_idx=field[0], large_enough=int(field[1]),
+                                           strong_enough=int(field[2]), transients=int(field[3])))
+
+            # Insert entries into tables
+            self.insert1(dict(**key, corridor_type=corridor_type, place_cell_ratio=np.sum(p_values < 0.05)/len(traces)))
+            self.ROI().insert(pf_roi_entries)
+            self.PlaceField().insert(pf_entries)
 
     def get_placecell_ids(self) -> np.ndarray:
         """
