@@ -23,7 +23,7 @@ runtime=$((end-start))
 echo "Created backup at ${db_backup}. Runtime: ${runtime} s"
 
 start=`date +%s`
-sudo cp /home/hheise/datajoint_backups/${db_backup} /media/neurophysiology-storage1/Wahl/Datajoint/backups/daily
+cp /home/hheise/datajoint_backups/${db_backup} /media/neurophysiology-storage1/Wahl/Datajoint/backups/daily
 end=`date +%s`
 runtime=$((end-start))
 echo "Copied backup to Wahl server (runtime: ${runtime} s). Done!"
