@@ -1338,6 +1338,13 @@ class PerformanceTrend(dj.Computed):
             normality = corr = p = r2 = p_r2 = intercept = slope = x_fit = perf = None
 
         # TODO: maybe pickle the OLS object to store it directly in the database
+
+        # Replace infinity values that cannot be stored in the database
+        if r2 == -np.inf:
+            r2 = 0
+
         # Insert entry into the table
-        self.insert1(dict(key, p_normality=normality, perf_corr=corr, p_perf_corr=p, perf_r2=r2, prob_lin_reg=p_r2,
-                          perf_intercept=intercept, perf_slope=slope, perf_ols_x=x_fit, perf_ols_y=perf))
+        entry = dict(key, p_normality=normality, perf_corr=corr, p_perf_corr=p, perf_r2=r2, prob_lin_reg=p_r2,
+                          perf_intercept=intercept, perf_slope=slope, perf_ols_x=x_fit, perf_ols_y=perf)
+
+        self.insert1(entry)
