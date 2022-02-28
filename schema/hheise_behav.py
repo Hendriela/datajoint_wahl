@@ -151,12 +151,14 @@ class RawBehaviorFile(dj.Imported):
     enc_filename        : varchar(128)      # filename of the Enc file (running speed)
     """
 
-    def make(self, key: dict) -> None:
+    def make(self, key: dict, skip_curation: bool = False) -> None:
         """
         Automatically looks up file names for behavior files of a single VRSessionInfo() entry.
 
         Args:
             key: Primary keys of the queried VRSessionInfo() entry.
+            skip_curation: Optional bool flag passed down from populate(). If True, all trials are automatically
+                            accepted and not shown to the user. Useful if a session has already been curated.
         """
 
         print("Finding raw behavior files for session {}".format(key))
@@ -223,8 +225,11 @@ class RawBehaviorFile(dj.Imported):
                 raise ValueError(f'Faulty trial (TDT file copied from previous trial), time stamps differed by '
                                  f'{int(max(max_diff))}s!')
 
-        # Manually curate sessions to weed out trials with e.g. buggy lick sensor
-        bad_trials = self.plot_screening(trigger_files, encoder_files, key)
+        if not skip_curation:
+            # Manually curate sessions to weed out trials with e.g. buggy lick sensor
+            bad_trials = self.plot_screening(trigger_files, encoder_files, key)
+        else:
+            bad_trials = []
 
         if len(bad_trials) > 0:
             print("Session {}:\nThe following trials will be excluded from further analysis.\n"
