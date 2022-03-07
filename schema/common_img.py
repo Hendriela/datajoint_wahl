@@ -1262,7 +1262,7 @@ class Segmentation(dj.Computed):
         #### insert results in master table first
         new_master_entry = dict(**key,
                                 nr_masks=nr_masks,
-                                target_dim=np.array(dims),
+                                target_dim=np.array(cnm2.dims),
                                 s_background=np.array(s_background, dtype=np.float32),
                                 f_background=np.array(f_background, dtype=np.float32),
                                 roi_map=pixel_owners,
