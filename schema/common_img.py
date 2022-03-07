@@ -389,7 +389,7 @@ class MotionParameter(dj.Manual):
             scan_key: Primary keys of ScanInfo() entry that is being processed
 
         Returns:
-            CNMFParams-type dictionary that CaImAn uses for its pipeline
+            CNMFParams-type dictionary that CaImAn uses for its pipeline (type hinting not possible due to import conflict)
         """
         frame_rate = (ScanInfo & scan_key).fetch1('fr')
         decay_time = (CaIndicator & scan_key).fetch1('decay')
@@ -572,6 +572,23 @@ class MotionCorrection(dj.Computed):
 
         print('Finished populating MotionCorrection for key: {}'.format(key))
 
+    def get_parameter_obj(self):
+        """
+        Wrapper function for MotionParameter.get_parameter_obj() that returns the parameters that were used for the
+        single-queried MotionCorrection() entry as a CNMFParams object.
+
+        Returns:
+            CNMFParams object of the parameters that were used in the queried entry.
+        """
+
+        motion_id = self.fetch('motion_id')
+
+        if len(motion_id) > 1:
+            raise IndexError(
+                f'More than one Motion ID found for {self.fetch("KEY")}.\nQuery only a single MotionCorrection entry.')
+        else:
+            return (MotionParameter & dict(motion_id=motion_id[0])).get_parameter_obj(self.fetch1("KEY"))
+
 
 @schema
 class MemoryMappedFile(dj.Imported):
@@ -727,6 +744,19 @@ class MemoryMappedFile(dj.Imported):
 
         print('Saved file at {}'.format(path))
 
+    def load_mmap_file(self) -> Tuple[np.ndarray, str]:
+        """
+        Load single-queried entry from disk into memory for manual processing.
+
+        Returns:
+            Queried single-session imaging file as memory-mapped numpy array with shape (n_frames, x, y), and absolute
+            directory path of the file.
+        """
+        mmap_path = self.fetch1('mmap_path')
+        Yr, dims, T = cm.load_memmap(mmap_path)  # Load flattened memory-mapped file
+        images = np.reshape(Yr.T, [T] + list(dims), order='F')  # Reshape it to shape (n_frames, x, y)
+        return images, os.path.dirname(mmap_path)
+
 
 @schema
 class QualityControl(dj.Computed):
@@ -762,16 +792,16 @@ class QualityControl(dj.Computed):
         stack = cm.load(mmap_file)
 
         new_entry = dict(**key,
-                         avg_image=np.mean(stack, axis=0, dtype=np.float16),
-                         std_image=np.std(stack, axis=0, dtype=np.float16),
-                         min_image=np.min(stack, axis=0, dtype=np.float16),
-                         max_image=np.max(stack, axis=0, dtype=np.float16),
-                         percentile_999_image=np.percentile(stack, 99.9, axis=0, dtype=np.float16),
-                         mean_time=np.mean(stack, axis=(1, 2), dtype=np.float16),
+                         avg_image=np.mean(stack, axis=0, dtype=np.float32),
+                         std_image=np.std(stack, axis=0, dtype=np.float32),
+                         min_image=np.min(stack, axis=0),
+                         max_image=np.max(stack, axis=0),
+                         percentile_999_image=np.percentile(stack, 99.9, axis=0),
+                         mean_time=np.mean(stack, axis=(1, 2), dtype=np.float32),
                          )
 
         # calculate correlation with 8 neighboring pixels in parallel
-        new_entry['cor_image'] = np.array(motion_correction.parallel_all_neighbor_correlations(stack), dtype=np.float16)
+        new_entry['cor_image'] = np.array(motion_correction.parallel_all_neighbor_correlations(stack), dtype=np.float32)
 
         self.insert1(new_entry)
 
@@ -813,7 +843,7 @@ class CaimanParameter(dj.Manual):
     stride_cnmf = 6 :       smallint    # amount of overlap between the patches in pixels
     k = 18:                 smallint    # number of components per patch
     g_sig = 4:              smallint    # expected half size of neurons in pixels
-    method_init = 'greedy_roi' : varchar(128)   # initialization method (if analyzing dendritic data using 'sparse_nmf')
+    method_init='greedy_roi': enum('greedy_roi', 'corr_pnr', 'sparse_nmf', 'local_nmf', 'graph_nmf', 'pca_ica')   # Initialization method. Use cases-> 'greedy_roi': default for 2p, 'corr_pnr': default for endoscopic 1p, 'sparse_nmf': useful for sparse dendritic imaging data
     ssub = 2:               tinyint     # spatial subsampling during initialization
     tsub = 2:               tinyint     # temporal subsampling during initialization
     # parameters for component evaluation
@@ -824,9 +854,7 @@ class CaimanParameter(dj.Manual):
     cnn_lowest = 0.1:       float       # rejection threshold of CNN-based classifier
     cnn_thr = 0.9:          float       # upper threshold for CNN based classifier
     # Parameters for deltaF/F computation
-    flag_auto = 1:          tinyint     # flag for using provided or computed percentile as baseline fluorescence. If 
-                                        # True, Caiman estimates best percentile as the cumulative distribution function 
-                                        # of a kernel density estimation.
+    flag_auto = 1:          tinyint     # flag for using provided or computed percentile as baseline fluorescence. If 1, Caiman estimates best percentile as the cumulative distribution function of a kernel density estimation.
     quantile_min = 8:       tinyint     # Quantile to use as baseline fluorescence. Only used if flag_auto is False.
     frame_window = 2000:    int         # Sliding window size of fluorescence normalization
     # Custom parameters that are not directly part of Caimans CNMFParams object
@@ -921,7 +949,7 @@ class Segmentation(dj.Computed):
     -> MotionCorrection
     -> CaimanParameter
     ------
-    nr_masks                        : smallint      # Number of total detected masks in this FOV (includes rejected masks)
+    nr_masks                        : smallint      # Number of accepted masks in this FOV
     target_dim                      : longblob      # FOV dimensions as tuple (dim_y, dim_x) to reconstruct mask from linearized index
     s_background                    : longblob      # Spatial background component(s) weight mask (dim_y, dim_x, nb) 
     f_background                    : longblob      # Background fluorescence (nb, nr_frames)
@@ -1077,7 +1105,8 @@ class Segmentation(dj.Computed):
                 channel = Scan().select_channel_if_necessary(key, 0)
                 MemoryMappedFile().make(key, channel)
 
-        mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')  # locally cached file
+        # load memory mapped file
+        images, mmap_file = (MemoryMappedFile & key).load_mmap_file()  # locally cached file
         folder = (common_exp.Session() & key).get_absolute_path()  # Session folder on the Neurophys server
 
         # Get Caiman parameters and include it into the parameters of the motion correction
@@ -1088,11 +1117,6 @@ class Segmentation(dj.Computed):
         # log('Using the following parameters: {}'.format(opts.to_dict()))
         p = opts.get('temporal', 'p')  # save for later
         cn = (QualityControl() & key).fetch1('cor_image')  # Local correlation image for FOV background
-
-        # load memory mapped file
-        Yr, dims, T = cm.load_memmap(mmap_file)
-        images = np.reshape(Yr.T, [T] + list(dims), order='F')
-        # load frames in python format (T x X x Y)
 
         # start new cluster
         c, dview, n_processes = cm.cluster.setup_cluster(
@@ -1120,22 +1144,17 @@ class Segmentation(dj.Computed):
         # log('Starting CaImAn on the whole recording...')
         cnm2 = cnm.refit(images, dview=dview)
 
+        # evaluate components
+        cnm2.estimates.evaluate_components(images, cnm2.params, dview=dview)
+
         if save_overviews:
             print("Saving plots at: {}".format(folder))
             cnm2.estimates.plot_contours(img=cn, display_numbers=False)
             plt.tight_layout()
             fig = plt.gcf()
             fig.set_size_inches((10, 10))
-            plt.savefig(os.path.join(folder, 'pre_sel_components.png'))
+            plt.savefig(os.path.join(folder, 'eval_components.png'))
             plt.close()
-
-        # evaluate components
-        cnm2.estimates.evaluate_components(images, cnm2.params, dview=dview)
-
-        cnm2.estimates.plot_contours(img=cn, idx=cnm2.estimates.idx_components, display_numbers=False)
-        plt.tight_layout()
-        fig = plt.gcf()
-        fig.set_size_inches((10, 10))
 
         # discard rejected components
         cnm2.estimates.select_components(use_object=True)
@@ -1223,6 +1242,22 @@ class Segmentation(dj.Computed):
         residuals_filename = "residuals.npy"
         np.save(os.path.join(folder, traces_filename), np.array(traces, dtype=np.float32))
         np.save(os.path.join(folder, residuals_filename), np.array(residual, dtype=np.float32))
+
+        # Print warning if the number of accepted ROIs diverges >20% from the previous session
+        # Find date of previous session for this mouse
+        prev_sess_keys = key.copy()
+        del prev_sess_keys['day']
+        prev_sess_keys['day'] = np.max((self & prev_sess_keys & f'day<"{key["day"]}"').fetch('day'))
+        nr_masks_diff = (self & prev_sess_keys).fetch1('nr_frames') / nr_masks
+
+        # Construct and print message
+        msg = [f'Warning!\nSegmentation of trial {key}\naccepted more than 20%',
+               f'ROIs than in the previous trial {prev_sess_keys}\n({nr_masks} vs {(self & prev_sess_keys).fetch1("nr_frames")}).\n'
+               f'Check sessions manually for irregularities!']
+        if nr_masks_diff > 1.2:
+            print(msg[0], 'fewer', msg[1])
+        elif nr_masks_diff < 0.8:
+            print(msg[0], 'more', msg[1])
 
         #### insert results in master table first
         new_master_entry = dict(**key,
