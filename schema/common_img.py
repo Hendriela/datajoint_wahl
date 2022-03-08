@@ -1248,11 +1248,11 @@ class Segmentation(dj.Computed):
         prev_sess_keys = key.copy()
         del prev_sess_keys['day']
         prev_sess_keys['day'] = np.max((self & prev_sess_keys & f'day<"{key["day"]}"').fetch('day'))
-        nr_masks_diff = (self & prev_sess_keys).fetch1('nr_frames') / nr_masks
+        nr_masks_diff = (self & prev_sess_keys).fetch1('nr_masks') / nr_masks
 
         # Construct and print message
         msg = [f'Warning!\nSegmentation of trial {key}\naccepted more than 20%',
-               f'ROIs than in the previous trial {prev_sess_keys}\n({nr_masks} vs {(self & prev_sess_keys).fetch1("nr_frames")}).\n'
+               f'ROIs than in the previous trial {prev_sess_keys}\n({nr_masks} vs {(self & prev_sess_keys).fetch1("nr_masks")}).\n'
                f'Check sessions manually for irregularities!']
         if nr_masks_diff > 1.2:
             print(msg[0], 'fewer', msg[1])
