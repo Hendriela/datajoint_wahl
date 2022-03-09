@@ -1149,7 +1149,7 @@ class Segmentation(dj.Computed):
 
         if save_overviews:
             print("Saving plots at: {}".format(folder))
-            cnm2.estimates.plot_contours(img=cn, display_numbers=False)
+            cnm2.estimates.plot_contours(img=cn, idx=cnm2.estimates.idx_components, display_numbers=False)
             plt.tight_layout()
             fig = plt.gcf()
             fig.set_size_inches((10, 10))
@@ -1247,17 +1247,20 @@ class Segmentation(dj.Computed):
         # Find date of previous session for this mouse
         prev_sess_keys = key.copy()
         del prev_sess_keys['day']
-        prev_sess_keys['day'] = np.max((self & prev_sess_keys & f'day<"{key["day"]}"').fetch('day'))
-        nr_masks_diff = (self & prev_sess_keys).fetch1('nr_masks') / nr_masks
+        prev_days = (self & prev_sess_keys & f'day<"{key["day"]}"').fetch('day')
 
-        # Construct and print message
-        msg = [f'Warning!\nSegmentation of trial {key}\naccepted more than 20%',
-               f'ROIs than in the previous trial {prev_sess_keys}\n({nr_masks} vs {(self & prev_sess_keys).fetch1("nr_masks")}).\n'
-               f'Check sessions manually for irregularities!']
-        if nr_masks_diff > 1.2:
-            print(msg[0], 'fewer', msg[1])
-        elif nr_masks_diff < 0.8:
-            print(msg[0], 'more', msg[1])
+        if len(prev_days) > 0:
+            prev_sess_keys['day'] = np.max(prev_days)
+            nr_masks_diff = (self & prev_sess_keys).fetch1('nr_masks') / nr_masks
+
+            # Construct and print message
+            msg = [f'Warning!\nSegmentation of trial {key}\naccepted more than 20%',
+                   f'ROIs than in the previous trial {prev_sess_keys}\n({nr_masks} vs {(self & prev_sess_keys).fetch1("nr_masks")}).\n'
+                   f'Check sessions manually for irregularities!']
+            if nr_masks_diff > 1.2:
+                print(msg[0], 'fewer', msg[1])
+            elif nr_masks_diff < 0.8:
+                print(msg[0], 'more', msg[1])
 
         #### insert results in master table first
         new_master_entry = dict(**key,
