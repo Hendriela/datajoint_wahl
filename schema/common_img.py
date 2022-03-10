@@ -677,6 +677,37 @@ class MemoryMappedFile(dj.Imported):
         self.insert1(new_entry, allow_direct_insert=True)
         # log('Finished creating memory mapped file.')
 
+    def flexible_make(self, key) -> None:
+        """
+        Wrapper function that looks for an existing memory-mapped file for a single ScanInfo entry in the local cache and
+        in the MemoryMappedFile table, and only creates a new file if none is found. This is useful when populating
+        many tables (QualityControl and Segmentation) for the same MotionCorrection() entry and avoids computing the
+        memory-mapped file several times.
+
+        Args:
+            key: Primary keys of the current session (ScanInfo entry)
+        """
+
+        if len(MemoryMappedFile() & key) == 0:
+            # If no entry exists, look for a locally cached mmap file (one layer deep)
+            mmap_path = glob(login.get_cache_directory() + "\\*.mmap") + glob(login.get_cache_directory() + "\\*\\*.mmap")
+            mmap_frames = [int(mmap.split("_")[-2]) for mmap in mmap_path]
+            try:
+                # N_frames of the found mmap files are matched with the session's nr_frames to find correct mmap file
+                mmap = mmap_path[mmap_frames.index((ScanInfo & key).fetch1('nr_frames'))]
+                # If a mmap file with the correct nr of frames exists, force-insert it into the table for later deletion
+                self.insert1(dict(**{i: key[i] for i in key if i != 'caiman_id'}, mmap_path=mmap),
+                             allow_direct_insert=True)
+                print("\tFound existing mmap file, skipping motion correction.")
+            except ValueError:
+                # If no fitting mmap file has been found in the temp folder, re-create the mmap file.
+                # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
+                channel = Scan().select_channel_if_necessary(key, 0)
+                self.make(key, channel)
+        else:
+            # If an entry exists, we don't have to do anything, the mmap file will just be queried
+            pass
+
     def delete_mmap_file(self) -> None:
         """
         Delete single-queried memory-mapped file from cache and remove entry.
@@ -772,20 +803,21 @@ class QualityControl(dj.Computed):
     mean_time:              longblob        # 1d array: Average intensity over time
     """
 
-    def make(self, key: dict) -> None:
+    def make(self, key: dict, chain_pipeline: bool = False, **make_kwargs) -> None:
         """
         Automatically compute quality control metrics for a motion corrected mmap file.
         Adrian 2020-07-22
 
         Args:
             key: Primary keys of the current MotionCorrection() entry.
+            chain_pipeline: kwarg, if True, the locally cached mmap file will not be deleted, but passed on to
+                Segmentation.make(), which is called instead. This enables a chained processing pipeline for a single
+                session without repeated re-computation of the mmap file.
+            make_kwargs: additional optional make_kwargs that are can be passed down to Segmentation.make().
         """
-        # log('Populating QualityControl for key: {}.'.format(key))
+        print('Populating QualityControl for key: {}.'.format(key))
 
-        if len(MemoryMappedFile() & key) == 0:
-            # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
-            channel = Scan().select_channel_if_necessary(key, 0)
-            MemoryMappedFile().make(key, channel=channel)
+        MemoryMappedFile().flexible_make(key)  # Create the motion-corrected mmap file only if it does not exist already
 
         mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')  # locally cached file
 
@@ -805,13 +837,41 @@ class QualityControl(dj.Computed):
 
         self.insert1(new_entry)
 
-        # delete MemoryMappedFile to save storage
-        try:
-            # Clean up movie variables to close mmap file for deletion
-            stack = None
-            (MemoryMappedFile & key).delete_mmap_file()
-        except PermissionError:
-            print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
+        # Clean up movie variables to close mmap file for deletion
+        stack = None
+
+        if chain_pipeline:
+            # If a chained pipeline is being processed, do not delete the mmap file, but call Segmentation.make() for
+            # the current session instead
+
+            # Apply changes to primary keys to a copy
+            seg_key = key.copy()
+
+            # In the chain_pipeline mode, caiman_id is not included in the "key" dict (only PKs of QualityControl or MotionCorrection)
+            # We thus have to figure out which caiman_id to use.
+            # First, check if caiman_id was provided in kwargs
+            if 'caiman_id' in make_kwargs:
+                if type(make_kwargs['caiman_id']) != int:
+                    raise TypeError('caiman_id in make_kwargs has to be an integer.')
+                seg_key['caiman_id'] = make_kwargs['caiman_id']
+            # If not, and there is only one parameter set for this mouse, use that one
+            else:
+                try:
+                    seg_key['caiman_id'] = (CaimanParameter() & key).fetch1('caiman_id')
+                    print('Caiman_id not provided. Use only param set on record instead, with caiman_id', seg_key['caiman_id'])
+                # If there is more than one (fetch1 fails), throw an error
+                except dj.errors.DataJointError:
+                    raise IndexError(f'More than one CaimanParameter entry for keys {key}.\nDefine which to use in make_kwargs.')
+
+            # Finally, call Segmentation().make()
+            Segmentation().make(seg_key, **make_kwargs)
+
+        else:
+            # delete MemoryMappedFile to save storage
+            try:
+                (MemoryMappedFile & key).delete_mmap_file()
+            except PermissionError:
+                print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
 
         # log('Finished populating QualityControl for key: {}.'.format(key))
 
@@ -1085,25 +1145,8 @@ class Segmentation(dj.Computed):
 
         print('Populating Segmentation for {}.'.format(key))
 
-        # Create the memory mapped file if it does not exist yet
-
-        # Look for mmap files in the temp folder that might be leftover from a previously cancelled make() call
-        mmap_path = glob(login.get_cache_directory() + "\\*.mmap")
-        mmap_frames = [int(mmap.split("_")[-2]) for mmap in mmap_path]
-        try:
-            # N_frames of the found mmap files are matched with the session's nr_frames to find correct mmap file
-            mmap = mmap_path[mmap_frames.index((ScanInfo & key).fetch1('nr_frames'))]
-            # If a mmap file with the correct nr of frames exists, force-insert it into the table for later deletion
-            MemoryMappedFile().insert1(dict(**{i: key[i] for i in key if i != 'caiman_id'}, mmap_path=mmap),
-                                       allow_direct_insert=True)
-            print("\tFound existing mmap file, skipping motion correction.")
-        except ValueError:
-            # If no fitting mmap file has been found in the temp folder, check if an entry already exists somewhere else
-            # If no entry exists, re-create the mmap file.
-            if len(MemoryMappedFile() & key) == 0:
-                # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
-                channel = Scan().select_channel_if_necessary(key, 0)
-                MemoryMappedFile().make(key, channel)
+        # Create the memory mapped file if it does not exist already
+        MemoryMappedFile().flexible_make(key)
 
         # load memory mapped file
         images, mmap_file = (MemoryMappedFile & key).load_mmap_file()  # locally cached file
@@ -1271,7 +1314,7 @@ class Segmentation(dj.Computed):
                                 roi_map=pixel_owners,
                                 traces=traces_filename,
                                 residuals=residuals_filename)
-        self.insert1(new_master_entry)
+        self.insert1(new_master_entry, allow_direct_insert=True)
 
         #### insert the masks and traces in the part table
         for i in range(nr_masks):
@@ -1285,7 +1328,7 @@ class Segmentation(dj.Computed):
                             snr=snr[i],
                             r=r[i],
                             cnn=cnn[i])
-            self.ROI().insert1(new_part)
+            self.ROI().insert1(new_part, allow_direct_insert=True)
 
         # delete MemoryMappedFile to save storage
         try:
