@@ -9,8 +9,10 @@ Utility functions for Hendriks DataJoint section
 import os
 from pathlib import Path
 import re
-from typing import List, Any, Type, Optional, Iterable
+from typing import List, Any, Type, Optional, Iterable, Union
 from glob import glob
+import numpy as np
+import matplotlib.pyplot as plt
 
 import datajoint.errors
 import yaml
@@ -195,6 +197,61 @@ def add_many_sessions(date: str, mice: Iterable[str], block: Optional[List[int]]
         print(' ')
         # Save data in YAML
         make_yaml_backup(mouse_session_dict)
+
+def validate_segmentation(mice: Optional[Iterable[int]] = None, plot_all: Optional[bool] = False,
+                          thr: Optional[int] = 20):
+
+    thr_up = 1 + thr/100
+    thr_low = 1 - thr / 100
+
+    entries = common_img.Segmentation & 'username="hheise"'
+
+    if mice is None:
+        mice = np.unique(entries.fetch('mouse_id'))
+
+    # For each mouse, compare nr of masks between sessions and raise alarm if the nr differs by > 20%
+    for mouse in mice:
+        print(f'Validating sessions of mouse {mouse}...')
+
+        found_diff = False
+
+        days = (entries & f'mouse_id={mouse}').fetch('day')         # Fetch days of all sessions of this mouse
+        # Fetch nr of masks from the first day which is not directly queried
+        prev_mask = (entries & f'mouse_id={mouse}' & f'day="{days[0]}"').fetch1('nr_masks')
+
+        for day in days[1:]:
+            # Fetch number of current mask and get relative difference
+            curr_mask = (entries & f'mouse_id={mouse}' & f'day="{day}"').fetch1('nr_masks')
+            nr_masks_diff = curr_mask / prev_mask
+
+            # Construct and print message
+            msg = [f'On day {day}, {thr}%', f'ROIs than on the previous session were found. ({curr_mask} vs {prev_mask}).']
+            if nr_masks_diff > thr_up:
+                print('\t', msg[0], 'more', msg[1])
+                found_diff = True
+            elif nr_masks_diff < thr_low:
+                print('\t', msg[0], 'fewer', msg[1])
+                found_diff = True
+            prev_mask = curr_mask
+
+        if found_diff or plot_all:
+            # If a difference was found between neighboring sessions, plot nr_masks across sessions to spot outliers
+
+            nr_masks = (entries & f'mouse_id={mouse}').fetch('nr_masks')
+
+            fig, ax = plt.subplots(2, 1, figsize=(10, 8))
+            ax[0].plot(days, nr_masks, 'o-')
+            ax[0].set_title(f'Mouse {mouse}')
+            ax[0].set_ylabel('accepted masks')
+
+            ax[1].plot(days, np.hstack((1, nr_masks[1:]/nr_masks[:-1])), 'o-', c='orange')
+            ax[1].set_ylabel('relative change between sessions')
+            ax[1].set_xlabel('session dates')
+            ax[1].axhline(1, c='black', linestyle='--')
+            ax[1].axhline(thr_up, c='r', linestyle='--')
+            ax[1].axhline(thr_low, c='r', linestyle='--')
+
+
 
 
 # dj.table.Table should be the master class of all Datajoint tables, and as such the proper type hinting class
