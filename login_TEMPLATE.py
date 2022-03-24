@@ -16,7 +16,7 @@ This has to be the same password you used when registering at the MySQL database
 Adapted by Hendrik 2021-05-04
 """
 import os
-
+from typing import List
 import keyring
 import datajoint as dj
 import yaml
