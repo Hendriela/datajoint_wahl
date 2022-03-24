@@ -12,6 +12,7 @@ Schemas for the CaImAn 2-photon image analysis pipeline
 # imports
 import datajoint as dj
 import login
+login.connect()
 
 # Only import Caiman-specific modules if code is run inside a caiman environment
 try:
@@ -235,8 +236,6 @@ class RawImagingFile(dj.Imported):
 
             self.insert1(dict(**key, part=idx, file_name=rel_filename, nr_frames=nr_frames, file_size=file_size))
 
-
-
     def get_path(self) -> str:
         """
         Returns a string with the absolute file path for a single file on given system.
@@ -454,13 +453,17 @@ class MotionCorrection(dj.Computed):
     align_time=CURRENT_TIMESTAMP : timestamp     # Automatic timestamp of alignment
     """
 
-    def make(self, key: dict) -> None:
+    def make(self, key: dict, chain_pipeline: bool = False, **make_kwargs) -> None:
         """
         Automatically populate the MotionCorrection for all networks of this scan
         Adrian 2019-08-21
 
         Args:
             key: Primary keys of the current NetworkScan() entry.
+            chain_pipeline: kwarg, if True, the locally cached mmap file will not be deleted, but passed on to
+                QualityControl.make(), which is called instead. This enables a chained processing pipeline for a single
+                session without repeated re-computation of the mmap file.
+            make_kwargs: additional optional make_kwargs that are can be passed down to QualityControl.make().
         """
         print('Populating MotionCorrection for key: {}'.format(key))
 
@@ -542,10 +545,6 @@ class MotionCorrection(dj.Computed):
                 mmap_file, template, sigma=2))
         template_correlation = np.concatenate(template_correlations)
 
-        # delete memory mapped files
-        for file in mmap_files:
-            os.remove(file)
-
         new_part_entries.append(
             dict(**key,
                  # motion_id=0, Todo: check if this attribute is needed or automatically filled
@@ -579,6 +578,19 @@ class MotionCorrection(dj.Computed):
                          line_shift=line_shift,
                          outlier_frames=outlier_frames)
         self.insert1(new_entry)
+
+        if chain_pipeline:
+            # If a chained pipeline is being processed, do not delete the mmap file, but call QualityControl.make() for
+            # the current session instead
+            QualityControl().make(key, chain_pipeline, **make_kwargs)
+
+        else:
+            # delete MemoryMappedFile to save storage
+            try:
+                for file in mmap_files:
+                    os.remove(file)
+            except PermissionError:
+                print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
 
         print('Finished populating MotionCorrection for key: {}'.format(key))
 
