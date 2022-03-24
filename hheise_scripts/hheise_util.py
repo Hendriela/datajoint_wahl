@@ -105,8 +105,9 @@ def remove_session_path(key: dict, path: str) -> str:
     return os.path.relpath(path, sess_path)
 
 
-def add_many_sessions(date: str, mice: Iterable[str], block: Optional[List[int]] = None,
-                      switch: Optional[List[List[int]]] = None, **attributes: Any) -> None:
+def add_many_sessions(date: Union[str, Iterable[str]], mice: Union[int, Iterable[int]],
+                      block: Optional[Union[int, List[int]]] = None, switch: Optional[List[List[int]]] = None,
+                      **attributes: Any) -> None:
     """
     Automatically adds sessions of many mice on the same day to common_exp.Session and common_img.Scan (if it was an
     imaging session) and creates backup YAML files.
@@ -116,16 +117,25 @@ def add_many_sessions(date: str, mice: Iterable[str], block: Optional[List[int]]
         date:           Date of the sessions in format (YYYY-MM-DD)
         mice:           Mouse_ids of mice that had a session on that day
         block:          Block number of the session, in case sessions are grouped. Defaults to 1 if left empty.
-                        If set, needs one entry (int) per mouse).
+                        If set, needs one entry for all mice, or a list of entries, one per mouse).
         switch:         The first trial index of a new condition. List of lists, outer list has 'len(mice)' entries,
                         with each entry being a list with integers of condition-switched trials (multiple switches per
                         session are possible). If no condition switch in this session, leave empty, defaults to -1.
         **attributes:   Optional values for the Session() attributes.
     """
 
+    # Figure out if sessions should be added day-wise (many mice on one day) or mouse-wise (many sessions for one mouse)
+    if type(date) == str and type(mice) != int:
+        iterator = mice
+        mouse_wise = False
+    elif type(date) != str and type(mice) == int:
+        iterator = date
+        mouse_wise = True
+    else:
+        raise TypeError("Either date or mice has to be a string, the other an ")
+
     # Set default values for attributes
     session_dict = dict(username='hheise',
-                        day=date,
                         session_num=1,
                         anesthesia='Awake',
                         setup='VR',
@@ -133,7 +143,6 @@ def add_many_sessions(date: str, mice: Iterable[str], block: Optional[List[int]]
                         experimenter='hheise',
                         session_notes='')
     scan_dict = dict(username='hheise',
-                     day=date,
                      session_num=1,
                      microscope='Scientifica',
                      laser='MaiTai',
@@ -143,10 +152,19 @@ def add_many_sessions(date: str, mice: Iterable[str], block: Optional[List[int]]
                      nr_channels=1,
                      network_id=1)
 
+    if mouse_wise:
+        session_dict['mouse_id'] = mice
+        scan_dict['mouse_id'] = mice
+    else:
+        session_dict['day'] = date
+        scan_dict['day'] = date
+
     if block is None:
-        block = [1] * len(mice)
+        block = [1] * len(iterator)
+    elif type(block) == int:
+        block = [block] * len(iterator)
     if switch is None:
-        switch = [[-1]] * len(mice)
+        switch = [[-1]] * len(iterator)
 
     # Change default values if provided in attributes
     for key in session_dict:
@@ -156,47 +174,53 @@ def add_many_sessions(date: str, mice: Iterable[str], block: Optional[List[int]]
         if key in attributes:
             scan_dict[key] = attributes[key]
 
-    for idx, mouse in enumerate(mice):
+    for idx, element in enumerate(iterator):
 
         # Expand dict for mouse-specific values
-        mouse_session_dict = dict(**session_dict, mouse_id=mouse)
-        mouse_scan_dict = dict(**scan_dict, mouse_id=mouse)
+        if mouse_wise:
+            element_session_dict = dict(**session_dict, day=element)
+            element_scan_dict = dict(**scan_dict, day=element)
+        else:
+            element_session_dict = dict(**session_dict, mouse_id=element)
+            element_scan_dict = dict(**scan_dict, mouse_id=element)
 
         # Set values for each mouse if multiple were provided
         for key, value in session_dict.items():
             if (type(value) == list) or (type(value) == tuple):
-                mouse_session_dict[key] = session_dict[key][idx]
+                element_session_dict[key] = session_dict[key][idx]
         for key, value in scan_dict.items():
             if (type(value) == list) or (type(value) == tuple):
-                mouse_scan_dict[key] = scan_dict[key][idx]
+                element_scan_dict[key] = scan_dict[key][idx]
         # Enter block and switch values in session_notes
-        mouse_session_dict['session_notes'] = "{" + "'block':'{}', " \
+        element_session_dict['session_notes'] = "{" + "'block':'{}', " \
                                                     "'switch':'{}', 'notes':'{}'".format(block[idx], switch[idx],
-                                                                                         mouse_session_dict[
+                                                                                         element_session_dict[
                                                                                              'session_notes']) + "}"
 
         # Create session folder path
-        abs_session_path = Path(get_autopath(mouse_session_dict))
-        mouse_session_dict['session_path'] = abs_session_path
+        abs_session_path = Path(get_autopath(element_session_dict))
+        element_session_dict['session_path'] = abs_session_path
+
+        # Check if the folder exists, otherwise skip
+        if not os.path.isdir(abs_session_path):
+            print(f'ImportError: Could not find directory {abs_session_path}, skipping insert.')
 
         try:
             # Insert entry into Session()
-            print(common_exp.Session().helper_insert1(mouse_session_dict))
+            print(common_exp.Session().helper_insert1(element_session_dict))
         except datajoint.errors.DuplicateError as ex:
             print('Entry already exists in common_exp.Session(), skipping insert:\n', ex)
 
         # Find TIFF files in the session folder or subfolder to determine whether this was a imaging session
-        if len(glob(str(abs_session_path) + '\\file_*.tif') +
-               glob(str(abs_session_path) + '\\*\\file_*.tif')) > 0:
+        if len(glob(str(abs_session_path) + '\\*.tif') +
+               glob(str(abs_session_path) + '\\*\\*.tif')) > 0:
             try:
-                common_img.Scan().insert1(mouse_scan_dict)
+                common_img.Scan().insert1(element_scan_dict)
             except datajoint.errors.DuplicateError as ex:
                 print('Entry already exists in common_img.Scan(), skipping insert:\n', ex)
         else:
             print(f'No TIFF files found, assuming that no imaging was performed. Check this!')
         print(' ')
-        # Save data in YAML
-        make_yaml_backup(mouse_session_dict)
 
 def validate_segmentation(mice: Optional[Iterable[int]] = None, plot_all: Optional[bool] = False,
                           thr: Optional[int] = 20):
