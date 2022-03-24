@@ -194,21 +194,31 @@ class RawImagingFile(dj.Imported):
 
         print('Finding raw imaging files for entry {}'.format(key))
 
-        # Get session path
-        path = (common_exp.Session() & key).get_absolute_path()
+        # Get possible session paths
+        try:
+            data_paths = [login.get_neurophys_data_directory(), *login.get_alternative_data_directories()]
+        except AttributeError:
+            data_paths = [login.get_neurophys_data_directory()]
+        session_paths = [os.path.join(x, (common_exp.Session() & key).fetch1('session_path')) for x in data_paths]
 
         # Load default parameters
         default_params = login.get_default_parameters()
 
-        # Iterate through the session directory and subdirectories and find files with the matching naming pattern
-        file_list = []
-        for step in os.walk(path):
-            for file_pattern in default_params['imaging']['scientifica_file']:
-                file_list.extend(glob(step[0] + f'\\{file_pattern}'))
+        for poss_dir in session_paths:
+            # Iterate through the session directory and subdirectories and find files with the matching naming pattern
+            file_list = []
+            for step in os.walk(poss_dir):
+                for file_pattern in default_params['imaging']['scientifica_file']:
+                    file_list.extend(glob(step[0] + f'\\{file_pattern}'))
 
-        if len(file_list) == 0:
-            raise ImportError("No files found in {} that fit the patterns {}!".format(path, default_params['imaging'][
-                'scientifica_file']))
+            # If files are found, stop searching the other directories, otherwise raise Error
+            if len(file_list) > 0:
+                tiff_dir = poss_dir
+                break
+            elif poss_dir == session_paths[-1]:
+                raise ImportError(
+                    "No files found in {} that fit patterns {}!".format(session_paths,
+                                                                        default_params['imaging']['scientifica_file']))
 
         # Sort list by postfix number
         file_list_sort = helper.alphanumerical_sort(file_list)
@@ -221,11 +231,11 @@ class RawImagingFile(dj.Imported):
             file_size = int(np.round(os.stat(file).st_size / 1024))
 
             # get relative file path compared to session directory
-            base_directory = login.get_working_directory()
-            sess_folder = (common_exp.Session() & key).fetch1('session_path')
-            rel_filename = os.path.relpath(file, os.path.join(base_directory, sess_folder))
+            rel_filename = os.path.relpath(file, tiff_dir)
 
             self.insert1(dict(**key, part=idx, file_name=rel_filename, nr_frames=nr_frames, file_size=file_size))
+
+
 
     def get_path(self) -> str:
         """
