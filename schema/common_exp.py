@@ -60,6 +60,7 @@ class Task(dj.Lookup):
         ['No tone', 'hheise', 2, 'Like active, but tone cue is removed after X trials.'],
         ['No pattern', 'hheise', 2, 'Like "active", but tone cue is removed after X trials.'],
         ['No pattern and tone', 'hheise', 2, 'Like "No pattern", but tone cue is removed after Y trials.'],
+        ['No pattern, tone and shifted', 'hheise', 2, 'Like "No pattern and tone", but reward zones shifted additionally.'],
         ['No reward at RZ3', 'hheise', 2, 'Like active, but water reward is disabled at RZ3.'],
         ['Changed distances', 'hheise', 2, 'Like active, but the distances between reward zones are changed.'],
         # Todo: enter Jithins wheel tasks

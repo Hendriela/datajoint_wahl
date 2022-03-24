@@ -235,8 +235,6 @@ class RawImagingFile(dj.Imported):
 
             self.insert1(dict(**key, part=idx, file_name=rel_filename, nr_frames=nr_frames, file_size=file_size))
 
-
-
     def get_path(self) -> str:
         """
         Returns a string with the absolute file path for a single file on given system.
@@ -251,12 +249,20 @@ class RawImagingFile(dj.Imported):
         if len(self) != 1:
             raise Exception('Only length one allowed (not {})'.format(len(self)))
 
-        # Return file at remote location
-        base_directory = login.get_working_directory()
+        # Return file at remote location: check all possible locations, starting with neurophys server
+        directories = [login.get_working_directory(), *login.get_alternative_data_directories()]
+
         folder = (common_exp.Session() & self).fetch1('session_path')
         file = self.fetch1('file_name')
 
-        return os.path.join(base_directory, folder, file)
+        for directory in directories:
+            filepath = os.path.join(directory, folder, file)
+
+            # If the file exists, return the absolute file path
+            if os.path.isfile(filepath):
+                return filepath
+
+        raise FileNotFoundError(f'File {file} for session {folder} not found in possible directories: {directories}')
 
     def get_paths(self) -> List[str]:
         """
