@@ -100,7 +100,7 @@ class PCAnalysis(dj.Computed):
             key: Primary keys of the current Session() entry.
         """
 
-        print('Populating PCAnalysis for {}'.format(key))
+        # print('Populating PCAnalysis for {}'.format(key))
 
         # Get current parameter set
         params = (PlaceCellParameter & key).fetch1()
@@ -152,7 +152,7 @@ class TransientOnly(dj.Computed):
             key: Primary keys of the current PCAnalysis() (and by inheritance common_img.Segmentation()) entry.
         """
 
-        print('Populating TransientOnly for {}'.format(key))
+        # print('Populating TransientOnly for {}'.format(key))
 
         traces, unit_ids = (common_img.Segmentation & key).get_traces(include_id=True)
         params = (PlaceCellParameter & key).fetch1()
@@ -236,7 +236,7 @@ class Synchronization(dj.Computed):
             key: Primary keys of the current PCAnalysis() entry.
         """
 
-        print('Populating Synchronization for {}'.format(key))
+        # print('Populating Synchronization for {}'.format(key))
 
         # Load parameters and data
         params = (PlaceCellParameter & key).fetch1()
@@ -348,7 +348,7 @@ class BinnedActivity(dj.Computed):
 
         # from scipy.ndimage.filters import gaussian_filter1d
 
-        print('Populating BinnedActivity for {}'.format(key))
+        # print('Populating BinnedActivity for {}'.format(key))
 
         # Fetch activity traces and parameter sets
         traces, unit_ids = (common_img.Segmentation & key).get_traces(include_id=True)
@@ -456,7 +456,7 @@ class PlaceCell(dj.Computed):
             key: Primary keys of the current BinnedActivity() entry (one per session).
         """
 
-        print(f"Classifying place cells for {key}.")
+        # print(f"Classifying place cells for {key}.")
 
         # Fetch data and parameters of the current session
         # traces = (BinnedActivity & key).get_trial_avg('bin_activity')  # Get spatially binned dF/F (n_cells, n_bins)
