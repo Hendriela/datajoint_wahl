@@ -113,7 +113,7 @@ class VRSessionInfo(dj.Imported):
         new_key['vr_notes'] = sess_entry['Notes'].values[0]
 
         # Enter weight if given
-        if not pd.isna(sess_entry['weight [g]'].values[0]):
+        if ('weight [g]' in sess_entry.columns) and not pd.isna(sess_entry['weight [g]'].values[0]):
             try:
                 common_mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
                                           'date_of_weight': key['day'], 'weight': sess_entry['weight [g]'].values[0]})
@@ -136,6 +136,9 @@ class VRSessionInfo(dj.Imported):
             new_key['imaging_session'] = 0
             print(f"Could not find session {key} in common_img.Scan, thus assuming that the session is not an imaging"
                   f"session. If it is, enter session into Scan() before populating VRSession()!")
+
+        # Replace NaNs with empty strings
+        new_key = {k: ('' if v is np.nan else v) for k, v in new_key.items()}
 
         self.insert1(new_key)
 
