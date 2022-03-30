@@ -15,10 +15,6 @@ import numpy as np
 from schema import common_img, common_exp
 from caiman.source_extraction.cnmf import cnmf
 
-
-username='hheise'
-mouse_ids=[33,38,39,41]
-
 def load_pcf(root, fname=None):
     if fname is not None:
         pcf_path = glob(os.path.join(root, fname+'.pickle'))
@@ -88,8 +84,10 @@ def pipeline_with_imported_params(username, mouse_ids):
                                                 f'M{session["mouse_id"]}_{session["day"]}',
                              **motion_params)
                 common_img.MotionParameter().insert1(entry)
+                print(f'\tMotion parameters are unique, new entry added (motion_id={mot_id}).')
             else:
                 mot_id = (common_img.MotionParameter & motion_params).fetch1('motion_id')
+                print(f'\tMotion parameters already in database (motion_id={mot_id}).')
 
             caiman_params = dict(username=username,
                                  mouse_id=session['mouse_id'],
@@ -102,31 +100,45 @@ def pipeline_with_imported_params(username, mouse_ids):
                                  method_init=params.init['method_init'],
                                  ssub=params.init['ssub'],
                                  tsub=params.init['tsub'],
-                                 snr_lowest=params.quality['SNR_lowest'],
-                                 snr_thr=params.quality['min_SNR'],
-                                 rval_lowest=params.quality['rval_lowest'],
-                                 rval_thr=params.quality['rval_thr'],
-                                 cnn_lowest=params.quality['cnn_lowest'],
-                                 cnn_thr=params.quality['min_cnn_thr'])
+                                 snr_lowest=float(params.quality['SNR_lowest']),
+                                 snr_thr=float(params.quality['min_SNR']),
+                                 rval_lowest=float(params.quality['rval_lowest']),
+                                 rval_thr=float(params.quality['rval_thr']),
+                                 cnn_lowest=float(params.quality['cnn_lowest']),
+                                 cnn_thr=float(params.quality['min_cnn_thr']))
 
             if params.patch['rf'] is not None:
                 caiman_params['rf'] = params.patch['rf']
 
-            if len(common_img.CaimanParameter & caiman_params) == 0:
+            # Todo: figure out why filtering CaimanParameter with caiman_params does not work? (something with rval_thr, cnn_lowest and cnn_thresh that does not work when comparing)
+            # if len(common_img.CaimanParameter & caiman_params) == 0:
+
+            existing_params = (common_img.CaimanParameter & f'username="{username}"' &
+                               f'mouse_id={session["mouse_id"]}').fetch(as_dict=True)
+            # Check if the current parameter set already exists (is a subset of a CaimanParameter entry)
+            is_subset = [caiman_params.items() <= x.items() for x in existing_params]
+
+            if len(existing_params) == 0 or not any(is_subset):
                 # If the current set of parameters are not in the database, enter them with an automatic description
                 cnm_ids = (common_img.CaimanParameter & f'username="{username}"' & f'mouse_id={session["mouse_id"]}').fetch('caiman_id')
                 cnm_id = 0 if len(cnm_ids) == 0 else np.max(cnm_ids)+1
                 entry = dict(caiman_id=cnm_id, **caiman_params)
                 common_img.CaimanParameter().insert1(entry)
+                print(f'\tCaiman parameters are unique, new entry added (caiman_id={cnm_id}).')
+
+            elif sum(is_subset) == 1:
+                # If there is one matching parameter set, take its ID as the caiman_id for this session
+                cnm_id = existing_params[is_subset.index(True)]['caiman_id']
+                print(f'\tCaiman parameters already in database (caiman_id={cnm_id}).')
+
+            elif sum(is_subset) > 1:
+                raise ValueError(f'More than one set found that matches all Caiman parameters for session {session}')
+
             else:
-                cnm_id = (common_img.CaimanParameter & caiman_params).fetch1('caiman_id')
+                raise NotImplementedError(f'This should not occur: Session {session}')
 
             # Now we can fill the entries for MotionCorrection, QualityControl and Segmentation via chain-piping
             session['motion_id'] = mot_id
             session['caiman_id'] = cnm_id
 
-            common_img.MotionCorrection().populate(session, make_kwargs=dict(chain_pipeline=True))
-
-
-
-
+            common_img.MotionCorrection().populate(session, make_kwargs=dict(chain_pipeline=True, caiman_id=cnm_id))
