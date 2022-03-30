@@ -157,16 +157,13 @@ class TransientOnly(dj.Computed):
         traces, unit_ids = (common_img.Segmentation & key).get_traces(include_id=True)
         params = (PlaceCellParameter & key).fetch1()
 
-        # Enter master table entry
-        self.insert1(key)
-
         # Create part table entries
         part_entries = []
         for i, unit_id in enumerate(unit_ids):
 
             # Get noise level of current neuron
             kernel = stats.gaussian_kde(traces[i])
-            x_data = np.arange(min(traces[i]), max(traces[i]), 0.02)
+            x_data = np.linspace(min(traces[i]), max(traces[i]), 1000)
             y_data = kernel(x_data)
             y_max = y_data.argmax()  # get idx of half maximum
 
@@ -205,6 +202,9 @@ class TransientOnly(dj.Computed):
                             sigma=sigma,
                             trans=trans_only)
             part_entries.append(new_part)
+
+        # Enter master table entry
+        self.insert1(key)
 
         # Enter part-table entries
         self.ROI().insert(part_entries)
