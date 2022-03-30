@@ -473,7 +473,7 @@ class MotionCorrection(dj.Computed):
             make_kwargs: additional optional make_kwargs that are can be passed down to QualityControl.make().
         """
         print('Populating MotionCorrection for key: {}'.format(key))
-
+        print('Chain pipeline:', chain_pipeline)
         # start the cluster (if a cluster already exists terminate it)
         if 'dview' in locals():
             cm.stop_server(dview=dview)
@@ -541,6 +541,8 @@ class MotionCorrection(dj.Computed):
         # the result of the motion correction is saved in a memory mapped file
         mmap_files = mc.mmap_file  # list of files
 
+        print('Mmap files:', mmap_files)
+
         # extract and calculate information about the motion correction
         shifts = np.array(mc.shifts_rig).T  # caiman output: list with x,y shift tuples, shape (2, nr_frames)
         template = mc.total_template_rig  # 2D np array, mean intensity image
@@ -586,18 +588,17 @@ class MotionCorrection(dj.Computed):
                          outlier_frames=outlier_frames)
         self.insert1(new_entry)
 
+        try:
+            # delete MemoryMappedFile to save storage
+            for file in mmap_files:
+                os.remove(file)
+        except PermissionError:
+            print("Deleting mmap file failed, file is being used: {}".format(file))
+
         if chain_pipeline:
             # If a chained pipeline is being processed, do not delete the mmap file, but call QualityControl.make() for
             # the current session instead
             QualityControl().make(key, chain_pipeline, **make_kwargs)
-
-        else:
-            # delete MemoryMappedFile to save storage
-            try:
-                for file in mmap_files:
-                    os.remove(file)
-            except PermissionError:
-                print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
 
         print('Finished populating MotionCorrection for key: {}'.format(key))
 
@@ -740,6 +741,7 @@ class MemoryMappedFile(dj.Imported):
                 self.make(key, channel)
         else:
             # If an entry exists, we don't have to do anything, the mmap file will just be queried
+            print('MemoryMappedFile entry already exists, skipping motion correction.')
             pass
 
     def delete_mmap_file(self) -> None:
@@ -869,12 +871,15 @@ class QualityControl(dj.Computed):
         # calculate correlation with 8 neighboring pixels in parallel
         new_entry['cor_image'] = np.array(motion_correction.parallel_all_neighbor_correlations(stack), dtype=np.float32)
 
-        self.insert1(new_entry)
+
 
         # Clean up movie variables to close mmap file for deletion
         stack = None
 
         if chain_pipeline:
+
+            self.insert1(new_entry, allow_direct_insert=True)
+
             # If a chained pipeline is being processed, do not delete the mmap file, but call Segmentation.make() for
             # the current session instead
 
@@ -888,6 +893,7 @@ class QualityControl(dj.Computed):
                 if type(make_kwargs['caiman_id']) != int:
                     raise TypeError('caiman_id in make_kwargs has to be an integer.')
                 seg_key['caiman_id'] = make_kwargs['caiman_id']
+                del make_kwargs['caiman_id']    # remove from make_kwargs because Segmentation does not expect it
             # If not, and there is only one parameter set for this mouse, use that one
             else:
                 try:
@@ -901,6 +907,9 @@ class QualityControl(dj.Computed):
             Segmentation().make(seg_key, **make_kwargs)
 
         else:
+
+            self.insert1(new_entry)
+
             # delete MemoryMappedFile to save storage
             try:
                 (MemoryMappedFile & key).delete_mmap_file()
@@ -1164,7 +1173,7 @@ class Segmentation(dj.Computed):
         #     return np.array([np.round(center1), np.round(center2)], dtype=int)
 
     # make of main table Segmentation
-    def make(self, key: dict, save_results: bool = False, save_overviews: bool = False) -> None:
+    def make(self, key: dict, save_results: bool = False, save_overviews: bool = False, del_mmap: bool = True) -> None:
         """
         Automatically populate the segmentation for the scan.
         Adrian 2019-08-21
@@ -1175,6 +1184,7 @@ class Segmentation(dj.Computed):
                             data in Segmentation() and ROI().
             save_overviews: Flag to plot overview graphs during Segmentation (pre- and post-evaluation components)
                             and save them in the session folder.
+            del_mmap:       Flag if mmap file should be deleted afterwards.
         """
 
         print('Populating Segmentation for {}.'.format(key))
@@ -1365,13 +1375,14 @@ class Segmentation(dj.Computed):
             self.ROI().insert1(new_part, allow_direct_insert=True)
 
         # delete MemoryMappedFile to save storage
-        try:
-            # Clean up movie variables to close mmap file for deletion
-            Yr = None
-            images = None
-            (MemoryMappedFile & key).delete_mmap_file()
-        except PermissionError:
-            print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
+        if del_mmap:
+            try:
+                # Clean up movie variables to close mmap file for deletion
+                Yr = None
+                images = None
+                (MemoryMappedFile & key).delete_mmap_file()
+            except PermissionError:
+                print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
 
         print('Finished populating Segmentation for {}.'.format(key))
 
