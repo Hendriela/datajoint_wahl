@@ -405,7 +405,7 @@ class BinnedActivity(dj.Computed):
             raise dj.errors.QueryError('You have to query a single session when computing trial averages. '
                                        f'{len(self)} sessions queried.')
 
-        data = self.ROI().fetch(trace)  # Fetch requested data arrays from all neurons
+        data = (self.ROI() & self.restriction).fetch(trace)  # Fetch requested data arrays from all neurons
 
         if trial_mask is None:
             trial_mask = np.ones(data[0].shape[1], dtype=bool)
@@ -422,7 +422,7 @@ class PlaceCell(dj.Computed):
     definition = """ # Place cell analysis and results (PC criteria mainly from Hainmüller (2018) and Dombeck/Tank lab)
     -> BinnedActivity
     -> TransientOnly
-    corridor_type   : tinyint   # Code for including different corridors in one session in the analysis. 0=only standard corridor; 1=both; 2=only changed condition 1; 3=only changed condition 2
+    corridor_type   : tinyint   # allows different corridors in one session in the analysis. 0=only standard corridor; 1=both; 2=only changed condition 1; 3=only changed condition 2
     ------
     place_cell_ratio                    : float         # Ratio of accepted place cells to total detected components
     time_place_cell = CURRENT_TIMESTAMP : timestamp     # automatic timestamp
@@ -456,7 +456,7 @@ class PlaceCell(dj.Computed):
             key: Primary keys of the current BinnedActivity() entry (one per session).
         """
 
-        # print(f"Classifying place cells for {key}.")
+        print(f"Classifying place cells for {key}.")
 
         # Fetch data and parameters of the current session
         # traces = (BinnedActivity & key).get_trial_avg('bin_activity')  # Get spatially binned dF/F (n_cells, n_bins)
@@ -480,9 +480,9 @@ class PlaceCell(dj.Computed):
         elif len(switch) == 1:
             corridor_types = [0, 1, 2]          # corridor_type label of the following traces arrays (0=only normal, 1=all trials, 2=only changed condition 1, 3=only changed condition 2)
             trial_mask[switch[0]:] = False    # Exclude trials with different condition
-            trace_list = [(BinnedActivity.ROI & key).fetch('mask_id', trial_mask=trial_mask),   # First array includes all normal trials (mask)
-                          (BinnedActivity.ROI & key).fetch('mask_id'),                          # Second array includes all trials (no mask)
-                          (BinnedActivity.ROI & key).fetch('mask_id', trial_mask=~trial_mask)]  # Third array includes all changed trials (inverse mask)
+            trace_list = [(BinnedActivity & key).get_trial_avg('bin_activity', trial_mask=trial_mask),   # First array includes all normal trials (mask)
+                          (BinnedActivity & key).get_trial_avg('bin_activity'),                                       # Second array includes all trials (no mask)
+                          (BinnedActivity & key).get_trial_avg('bin_activity', trial_mask=~trial_mask)]               # Third array includes all changed trials (inverse mask)
             accepted_trials = [np.where(trial_mask)[0],
                                None,
                                np.where(~trial_mask)[0]]
@@ -495,10 +495,10 @@ class PlaceCell(dj.Computed):
             cond1[switch[0]:switch[1]] = True       # Only trials with no pattern
             cond2 = np.zeros(trial_mask.shape, dtype=bool)
             cond2[switch[1]:] = True       # Only trials with no tone and no pattern
-            trace_list = [(BinnedActivity.ROI & key).fetch('mask_id', trial_mask=trial_mask),
-                          (BinnedActivity.ROI & key).fetch('mask_id'),
-                          (BinnedActivity.ROI & key).fetch('mask_id', trial_mask=cond1),
-                          (BinnedActivity.ROI & key).fetch('mask_id', trial_mask=cond2)]
+            trace_list = [(BinnedActivity & key).get_trial_avg('bin_activity', trial_mask=trial_mask),
+                          (BinnedActivity & key).get_trial_avg('bin_activity'),
+                          (BinnedActivity & key).get_trial_avg('bin_activity', trial_mask=cond1),
+                          (BinnedActivity & key).get_trial_avg('bin_activity', trial_mask=cond2)]
             accepted_trials = [np.where(trial_mask)[0],
                                None,
                                np.where(cond1)[0],

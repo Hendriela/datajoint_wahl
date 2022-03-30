@@ -329,7 +329,13 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, acce
         # Shuffle pc_traces for every trial separately
         shuffle = []
         for trial_id in np.unique(trial_mask):
-            if (accepted_trials is None) or ((accepted_trials is not None) and (trial in accepted_trials)):
+            if (accepted_trials is None) or ((accepted_trials is not None) and (trial_id in accepted_trials)):
+
+                # TODO: When trials are ignored, "shuffle" only is appended with accepted trials and its length is reduced.
+                #   Running masks are not, and thus indexing during binning does not work.
+                #   Adjust algorithm to also split and shuffle "running_mask" in the same way as "trial".
+                #   This problem likely appears also for "bin_frame_counts", so remove certain trials from it as well
+
                 trial = pc_traces[:, trial_mask == trial_id]
 
                 # divide the trial trace into splits of 'split_size' size and manually append the remainder
@@ -354,6 +360,7 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, acce
         # Run the classifier on the shuffled traces
         passed_shuffles = run_classifier(bin_avg_act, pc_trans_only, key, accepted_trials)
         # Add 1 to the counter of each cell that passed the criteria
-        p_counter[np.array(list(passed_shuffles.keys()))] += 1
+        if passed_shuffles:
+            p_counter[np.array(list(passed_shuffles.keys()))] += 1
 
     return p_counter / n_iter  # return p-value of all neurons (ratio of accepted place fields out of n_iter shuffles)
