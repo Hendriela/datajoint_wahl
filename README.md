@@ -30,6 +30,8 @@ If the database is unreachable, but the server machine is running (SSH works), i
 
 To access the MySQL database directly (for maintenance, user creation etc.), connect to the server via SSH and type: <pre>mysql -h 127.0.0.1 -u YourAccountName -p</pre> and enter your password. Then the <code>mysql></code> prompt should appear and you can start using MySQL commands to interact with the database.
 
+If you have already set up a credentials profile (see [Server Guide](server_guide.pdf)), you can use this to connect to the database faster.
+
 ### User management
 Consult the <a href="https://docs.datajoint.io/matlab/v3.4/admin/3-accounts.html">DataJoint Documentation</a> for creating new users and granting privileges. To create new users or change privileges, you have to use the <code>root</code> account to log into the database.
 
