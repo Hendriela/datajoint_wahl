@@ -46,7 +46,7 @@ class PlaceCellParameter(dj.Manual):
     trans_time = 0.2        : float     # fraction of the (unbinned) signal while the mouse is located in the place field that should consist of significant transients
     split_size = 50         : int       # Number of frames in bootstrapping segments
     boot_iter = 1000        : int       # Number of shuffles for bootstrapping (default 1000, after Dombeck et al., 2010)
-    min_bin_size            : int       # Min_pf_size transformed into number of bins (rounded up). Calculated before insertion and raises an error if given by user.
+    min_bin_size            : int       # Min_pf_size transformed into number of bins (rounded up). Depends on bin_length, and is calculated before insertion. Raises an error if given by user.
     sigma = 1               : tinyint   # Standard deviation of Gaussian kernel used to smooth activity trace.
     """
 
@@ -324,8 +324,7 @@ class Synchronization(dj.Computed):
                         raise ValueError(f"Encoder unit {params['encoder_unit']} not recognized, behavior not aligned.")
 
             # Get frame counts for each bin for complete trial (moving and resting frames)
-            bin_frame_count = np.zeros((params['n_bins']), 'int')
-
+            bin_frame_count = np.zeros((params['n_bins']), dtype=int)
             # bin data in distance chunks
             bin_borders = np.linspace(-10, 110, params['n_bins'])
             idx = np.digitize(behavior[trial_idx][:, 1], bin_borders)  # get indices of bins
@@ -342,17 +341,17 @@ class Synchronization(dj.Computed):
                 # related to an earlier actual position. (or the previous bin in case its the last bin)
                 for zero_idx in all_zero_idx:
                     # If the bin with no frames is the last bin, take one frame from the second-last bin
-                    if zero_idx == 79 and bin_frame_count[78] > 1:
-                        bin_frame_count[78] -= 1
-                        bin_frame_count[79] += 1
+                    if zero_idx == params['n_bins']-1 and bin_frame_count[-2] > 1:
+                        bin_frame_count[-2] -= 1
+                        bin_frame_count[-1] += 1
                     # Otherwise, take it from the next bin, but only if the next bin has more than 1 frame itself
-                    elif zero_idx < 79 and bin_frame_count[zero_idx + 1] > 1:
+                    elif zero_idx < params['n_bins']-1 and bin_frame_count[zero_idx + 1] > 1:
                         bin_frame_count[zero_idx + 1] -= 1
                         bin_frame_count[zero_idx] += 1
                     # This error is raised if two consecutive bins have no frames
                     else:
-                        raise ValueError('Error in {}:\nNo frame in this bin, could not be corrected: {}'.format(key,
-                                                                                                                 zero_idx))
+                        raise ValueError('Error in {}:\nNo frame in this bin, '
+                                         'could not be corrected: {}'.format(key, zero_idx))
 
             # Save trial entry for later combined insertion
             trial_entries.append(dict(**key, trial_id=trial_id, running_mask=running_mask,
