@@ -211,6 +211,49 @@ class TransientOnly(dj.Computed):
         # Enter part-table entries
         self.ROI().insert(part_entries)
 
+    def get_traces(self, include_id: bool = False) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], None]:
+        """
+        Main function to get fluorescent traces in format (nr_traces, timepoints)
+        Adrian 2020-03-16
+
+        Args:
+            trace_type      : Type of the trace: 'dff', 'trace' (absolute signal values), 'decon' (Cascade spike rates)
+            include_id      : Flag to return a second argument with the ROI ID's of the returned signals
+            decon_id        : Additional restriction, in case trace_type 'decon' is selected and multiple deconvolution
+                                models have been run. In case of only one model, function selects this one.
+
+        Returns:
+            2D numpy array (nr_traces, timepoints): Fluorescent traces
+            optional: 1D numpy array (nr_traces): Only if include_id==True, contains mask ID's of the rows i
+        """
+
+        # check if multiple caiman_ids are selected with self
+        caiman_ids = self.fetch('caiman_id')
+        if len(set(caiman_ids)) != 1:  # set returns unique entries in list
+            raise Exception('You requested traces from more the following caiman_ids: {}\n'.format(set(caiman_ids)) + \
+                            'Choose only one of them with & "caiman_id = ID"!')
+
+        selected_rois = TransientOnly.ROI() & self
+
+        traces_list = selected_rois.fetch('trans', order_by='mask_id')
+
+        # some more sanity checks to catch common errors
+        if len(traces_list) == 0:
+            print('Warning: The query hheise_placecell.TransientOnly().get_traces() resulted in no traces!')
+            return None
+        # check if all traces have the same length and can be transformed into 2D array
+        if not all(len(trace) == len(traces_list[0]) for trace in traces_list):
+            raise Exception(
+                'Error: The traces in traces_list had different lengths (probably from different recordings)!')
+
+        traces = np.array([trace for trace in traces_list])  # (nr_traces, timepoints) array
+
+        if not include_id:
+            return traces
+
+        else:  # include mask_id as well
+            mask_ids = selected_rois.fetch('mask_id', order_by='mask_id')
+            return traces, mask_ids
 
 @schema
 class Synchronization(dj.Computed):
