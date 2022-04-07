@@ -329,6 +329,10 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, acce
     for i in range(n_iter):
         # Shuffle pc_traces for every trial separately
         shuffle = []
+        bf_counts = []  # Holds bin frame counts for accepted trials
+        trial_mask_accepted = []  # Holds trial mask for accepted trials
+        dummy_running_masks = []  # Hold running masks for accepted trials
+
         for trial_id in np.unique(trial_mask):
             if (accepted_trials is None) or ((accepted_trials is not None) and (trial_id in accepted_trials)):
 
@@ -347,12 +351,18 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, acce
                 # shuffle the list of trial-bits with random.sample, and concatenate to a new, now shuffled, array
                 shuffle.append(np.hstack(random.sample(split_trace, len(split_trace))))
 
+                # Add entries of bin_frame_counts and trial_mask for accepted trials
+                bf_counts.append(bin_frame_counts[trial_id])
+                trial_mask_accepted.append(np.array([trial_id] * trial.shape[1], dtype=int))
+                dummy_running_masks.append(np.ones(trial.shape[1], dtype=bool))
+
         # The binning function requires the whole session in one row, so we stack the single-trial-arrays
         shuffle = np.hstack(shuffle)
+        trial_mask_accepted = np.hstack(trial_mask_accepted)
 
         # bin trials to VR position
         # parse shuffle twice as a spike rate and discard spike rate output
-        bin_act, _, _ = bin_activity_to_vr(shuffle, shuffle, n_bins, n_trials, trial_mask, running_masks,
+        bin_act, _, _ = bin_activity_to_vr(shuffle, shuffle, n_bins, trial_mask_accepted, dummy_running_masks,
                                            bin_frame_counts, key)
 
         # Average binned activity across trials

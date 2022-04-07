@@ -390,8 +390,6 @@ class BinnedActivity(dj.Computed):
             key: Primary keys of the current Synchronization() entry (one per session).
         """
 
-        # from scipy.ndimage.filters import gaussian_filter1d
-
         # print('Populating BinnedActivity for {}'.format(key))
 
         # Fetch activity traces and parameter sets
