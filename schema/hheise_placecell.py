@@ -571,7 +571,7 @@ class SpatialInformation(dj.Computed):
             shuman = np.sum(p_occ * act_rel.T * np.log2(act_rel.T), axis=1)  # Shuman scales SI by activity level to make SI value more comparable between cells
             return skaggs, shuman
 
-        def compute_within_session_stability(act_map: np.ndarray) -> np.ndarray:
+        def compute_within_session_stability(act_map: np.ndarray, sigma: int) -> np.ndarray:
             """
             Computes within-session stability of spikerates across trials after Shuman (2020). Trials are averaged and
             correlated across two timescales: First vs. second half of the session and even vs. odd trials. The Pearson
@@ -581,6 +581,7 @@ class SpatialInformation(dj.Computed):
             Args:
                 act_map: Spatially binned spikerates with shape (n_cells, n_bins, n_trials). From
                     data_util.get_accepted_trials().
+                sigma: Standard deviation of Gaussian kernel for binned spikerate smoothing.
 
             Returns:
                 Np.ndarray with shape (n_cells) with stability value of each cell.
@@ -720,14 +721,14 @@ class SpatialInformation(dj.Computed):
 
             ### WITHIN-SESSION STABILITY ###
             # Compute stability of real data
-            real_stab = compute_within_session_stability(traces)
+            real_stab = compute_within_session_stability(traces, sigma_gauss)
 
             # Perform circular shuffling and get stability of shuffled data
             shuffled_data = circular_shuffle(curr_decon, curr_trial_mask, curr_running_masks, curr_bin_frame_counts,
                                              key, n_bins, n_iter)
             shuffle_stab = np.zeros((shuffled_data.shape[0], shuffled_data.shape[1])) * np.nan
             for i, shuffle in enumerate(shuffled_data):
-                shuffle_stab[i] = compute_within_session_stability(shuffle)
+                shuffle_stab[i] = compute_within_session_stability(shuffle, sigma_gauss)
 
             # Find percentile -> stability of how many shuffles were higher than the real stability
             stab_perc = np.sum(shuffle_stab > real_stab[None, :], axis=0) / n_iter
