@@ -7,7 +7,7 @@ Created on 07/12/2021 15:32
 Functions that constitute the place cell classification pipeline for hheise_placecell.PlaceCells.
 """
 import numpy as np
-from typing import List, Optional, Tuple, Iterable
+from typing import List, Optional, Tuple, Iterable, Union
 import random
 
 from schema import common_img, hheise_placecell
@@ -147,8 +147,9 @@ def pre_screen_place_fields(trace: np.ndarray, bin_baseline: float,
 
 
 def apply_pf_criteria(trace: np.ndarray, place_blocks: List[np.ndarray], trans: np.ndarray, params: dict,
-                      sess_key: dict, accepted_trials: Optional[Iterable[int]] = None) \
-        -> List[Tuple[np.ndarray, bool, bool, bool]]:
+                      sess_key: dict, accepted_trials: Optional[Iterable[int]],
+                      trial_mask: Optional[Iterable[int]] = None,
+                      running_masks: Optional[Iterable[np.ndarray]] = None) -> List[Tuple[np.ndarray, bool, bool, bool]]:
     """
     Applies the criteria of place fields to potential place fields of a single neuron. A place field is accepted when...
         1) it stretches at least 'min_bin_size' bins (default 10)
@@ -172,7 +173,8 @@ def apply_pf_criteria(trace: np.ndarray, place_blocks: List[np.ndarray], trans: 
     for pot_place in place_blocks:
         bin_size = is_large_enough(pot_place, params['min_bin_size'])
         intensity = is_strong_enough(trace, pot_place, place_blocks, params['fluo_infield'])
-        transients = has_enough_transients(trans, pot_place, sess_key, params['trans_time'], accepted_trials)
+        transients = has_enough_transients(trans, pot_place, sess_key, params['trans_time'], accepted_trials,
+                                           trial_mask, running_masks)
 
         results.append((pot_place, bin_size, intensity, transients))
 
@@ -214,7 +216,8 @@ def is_strong_enough(trace: np.ndarray, place_field: np.ndarray, all_fields: Lis
 
 
 def has_enough_transients(trans: np.ndarray, place_field: np.ndarray, key: dict, trans_time: float,
-                          accepted_trials: Optional[Iterable[int]]) -> bool:
+                          accepted_trials: Optional[Iterable[int]], trial_mask: Optional[Iterable[int]],
+                          running_masks: Optional[Iterable[np.ndarray]]) -> bool:
     """
     Checks if of the time during which the mouse is located in the potential field, at least 'trans_time'%
     consist of significant transients (criterion 3).
@@ -230,9 +233,13 @@ def has_enough_transients(trans: np.ndarray, place_field: np.ndarray, key: dict,
         Flag whether the criterion is passed or not (place field consists of enough significant transients)
     """
 
-    trial_mask = (hheise_placecell.PCAnalysis & key).fetch1('trial_mask')
-    frames_per_bin, running_masks = (hheise_placecell.Synchronization.VRTrial & key).fetch('aligned_frames',
-                                                                                           'running_mask')
+    # If trial_mask and running_masks have not been provided (not bootstrapping), fetch them from the database
+    if trial_mask is None:
+        trial_mask = (hheise_placecell.PCAnalysis & key).fetch1('trial_mask')
+    frames_per_bin, orig_running_masks = (hheise_placecell.Synchronization.VRTrial & key).fetch('aligned_frames',
+                                                                                                'running_mask')
+    if running_masks is None:
+        running_masks = orig_running_masks
 
     place_frames_trace = []  # stores the trace of all trials when the mouse was in a place field as one data row
     for trial in np.unique(trial_mask):
@@ -252,7 +259,8 @@ def has_enough_transients(trans: np.ndarray, place_field: np.ndarray, key: dict,
 
 
 def run_classifier(traces: np.ndarray, trans_only: np.ndarray, key: dict, accepted_trials: Optional[Iterable[int]],
-                   params: Optional[dict] = None) -> dict:
+                   params: Optional[dict] = None, trial_mask: Optional[Iterable[int]] = None,
+                   running_masks: Optional[Iterable[np.ndarray]] = None) -> dict:
     """
     Prepares binned and trial-averaged traces for place cell classification (smoothing) and runs classification by
     applying place field criteria. Called by hheise_placecell.PlaceCells().make() for initial classification and by
@@ -287,7 +295,8 @@ def run_classifier(traces: np.ndarray, trans_only: np.ndarray, key: dict, accept
     for neuron_id, (neuron_pf, neuron_trace, neuron_trans_only) in enumerate(zip(potential_pf, smooth, trans_only)):
 
         # Apply criteria
-        results = apply_pf_criteria(neuron_trace, neuron_pf, neuron_trans_only, params, key, accepted_trials)
+        results = apply_pf_criteria(neuron_trace, neuron_pf, neuron_trans_only, params, key, accepted_trials,
+                                    trial_mask, running_masks)
         # If any place field passed all three criteria (bool flags sum to 3), save data for later bootstrapping
         if any([sum(entry[1:]) == 3 for entry in results]):
             passed_cells[neuron_id] = results
@@ -296,7 +305,7 @@ def run_classifier(traces: np.ndarray, trans_only: np.ndarray, key: dict, accept
 
 
 def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, accepted_trials: Optional[Iterable[int]],
-                          key: dict, n_iter: int, split_size: int) -> np.ndarray:
+                          key: dict, n_iter: int) -> np.ndarray:
     """
     Performs bootstrapping on unbinned dF/F traces and returns p-values of putative place cells.
     For bootstrapping, the trace is divided in parts with 'split_size' length which are randomly shuffled n_iter times.
@@ -312,7 +321,6 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, acce
         accepted_trials: List of trial IDs that should be used. If None, all IDs will be used.
         key: Primary keys of the current BinnedActivity() entry. Passed down from hheise_placecell.PlaceCells().make().
         n_iter: Number of bootstrap iterations. Passed down from current PlaceCellParameter() entry.
-        split_size: Size in frames of shuffle segments. Passed down like n_iter.
 
     Returns:
         1D array with shape (n_passed_cells,), holding p-values for all passed ROIs
@@ -321,13 +329,25 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, acce
     n_bins, trial_mask = (hheise_placecell.PCAnalysis & key).fetch1('n_bins', 'trial_mask')
     running_masks, bin_frame_counts = (hheise_placecell.Synchronization.VRTrial & key).fetch('running_mask',
                                                                                              'aligned_frames')
-    n_trials = len(running_masks)
+
+    # Filter out stationary frames
+    traces = pc_traces[:, np.hstack(running_masks)]
+    trans = pc_trans_only[:, np.hstack(running_masks)]
+    trial_mask = trial_mask[np.hstack(running_masks)]
 
     # This array keeps track of whether a shuffled trace passed the PC criteria
     p_counter = np.zeros(pc_traces.shape[0])
     for i in range(n_iter):
         # Shuffle pc_traces for every trial separately
-        shuffle = []
+        shift = []
+        shift_trans = []
+        bf_counts = []
+        trial_mask_accepted = []
+
+        # Make dummy running masks that are True for all frames. This is necessary because during bootstrapping
+        # we remove resting frames before shuffling and binning, but the binning function needs a mask.
+        dummy_running_masks = []
+
         for trial_id in np.unique(trial_mask):
             if (accepted_trials is None) or ((accepted_trials is not None) and (trial_id in accepted_trials)):
 
@@ -335,30 +355,59 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, acce
                 #   Running masks are not, and thus indexing during binning does not work.
                 #   Adjust algorithm to also split and shuffle "running_mask" in the same way as "trial".
                 #   This problem likely appears also for "bin_frame_counts", so remove certain trials from it as well
+                # Get traces of all neurons for one trial
+                trial = traces[:, trial_mask == trial_id]
+                trial_trans = trans[:, trial_mask == trial_id]
 
-                trial = pc_traces[:, trial_mask == trial_id]
+                # Create dummy mask for the current trial
+                dummy_running_masks.append(np.ones(trial.shape[1], dtype=bool))
 
-                # divide the trial trace into splits of 'split_size' size and manually append the remainder
-                clean_div_length = trial.shape[1] - trial.shape[1] % split_size
-                split_trace = np.split(trial[:, :clean_div_length], clean_div_length / split_size, axis=1)
-                split_trace.append(trial[:, clean_div_length:])
+                # Get the shift distance: a number between +/- half of the trial length
+                d = np.random.randint(-trial.shape[1]//2, trial.shape[1]//2+1)
 
-                # shuffle the list of trial-bits with random.sample, and concatenate to a new, now shuffled, array
-                shuffle.append(np.hstack(random.sample(split_trace, len(split_trace))))
+                # Circularly shift traces
+                if (trial_id == np.unique(trial_mask)[0] or trial_id == np.unique(trial_mask)[-1] or
+                        ((accepted_trials is not None) and (trial_id == accepted_trials[-1] or trial_id == accepted_trials[0]))):
+                    # The first and last trials have to be treated differently: traces are circulated in-trial
+                    shift.append(np.roll(trial, d, axis=1))
+                    shift_trans.append(np.roll(trial_trans, d, axis=1))
+                else:
+                    # For all other trials, we shift them together with the previous and next trial
+                    prev_trial = traces[:, trial_mask == trial_id-1]
+                    next_trial = traces[:, trial_mask == trial_id+1]
+                    # Make the previous, current and next trials into one array
+                    neighbor_trials = np.hstack((prev_trial, trial, next_trial))
+                    # Roll that array and take the values at the indices of the current trial
+                    shift.append(np.roll(neighbor_trials, d, axis=1)[:, prev_trial.shape[1]:-next_trial.shape[1]])
+
+                    # Same thing with transient-only traces
+                    prev_trial = trans[:, trial_mask == trial_id-1]
+                    next_trial = trans[:, trial_mask == trial_id+1]
+                    # Make the previous, current and next trials into one array
+                    neighbor_trials = np.hstack((prev_trial, trial_trans, next_trial))
+                    # Roll that array and take the values at the indices of the current trial
+                    shift_trans.append(np.roll(neighbor_trials, d, axis=1)[:, prev_trial.shape[1]:-next_trial.shape[1]])
+
+                # Add entries of bin_frame_counts and trial_mask for accepted trials
+                bf_counts.append(bin_frame_counts[trial_id])
+                trial_mask_accepted.append(np.array([trial_id]*trial.shape[1], dtype=int))
 
         # The binning function requires the whole session in one row, so we stack the single-trial-arrays
-        shuffle = np.hstack(shuffle)
+        shift = np.hstack(shift)
+        shift_trans = np.hstack(shift_trans)
+        trial_mask_accepted = np.hstack(trial_mask_accepted)
 
-        # bin trials to VR position
-        # parse shuffle twice as a spike rate and discard spike rate output
-        bin_act, _, _ = bin_activity_to_vr(shuffle, shuffle, n_bins, n_trials, trial_mask, running_masks,
-                                           bin_frame_counts, key)
+        # bin trials to VR position (discard binned trans-only and spikerate, we don't need them here)
+        bin_act, _, _ = bin_activity_to_vr(shift, shift_trans, n_bins, trial_mask_accepted, dummy_running_masks,
+                                           bf_counts, key)
 
         # Average binned activity across trials
         bin_avg_act = np.vstack([np.mean(x, axis=1) for x in bin_act])
 
-        # Run the classifier on the shuffled traces
-        passed_shuffles = run_classifier(bin_avg_act, pc_trans_only, key, accepted_trials)
+        # Run the classifier on the shuffled traces. Set accepted_trials=None because we already filtered for them.
+        passed_shuffles = run_classifier(bin_avg_act, shift_trans, key, accepted_trials=None,
+                                         trial_mask=trial_mask_accepted, running_masks=dummy_running_masks)
+
         # Add 1 to the counter of each cell that passed the criteria
         if passed_shuffles:
             p_counter[np.array(list(passed_shuffles.keys()))] += 1
