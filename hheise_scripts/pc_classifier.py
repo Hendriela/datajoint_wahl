@@ -7,14 +7,14 @@ Created on 07/12/2021 15:32
 Functions that constitute the place cell classification pipeline for hheise_placecell.PlaceCells.
 """
 import numpy as np
-from typing import List, Optional, Tuple, Iterable
+from typing import List, Optional, Tuple, Iterable, Union
 import random
 
 from schema import common_img, hheise_placecell
 
 
-def bin_activity_to_vr(traces: np.ndarray, spikes: np.ndarray, n_bins: int, n_trials: int,
-                       trial_mask: np.ndarray, running_masks: Iterable, bin_frame_counts: Iterable,
+def bin_activity_to_vr(traces: np.ndarray, spikes: np.ndarray, n_bins: int,
+                       trial_mask: np.ndarray, running_masks: Union[np.recarray, list], bin_frame_counts: Iterable,
                        key: Optional[dict] = None) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Spatially bins the dF/F and deconvolved traces of many neurons to the VR position. Extracted from
@@ -24,9 +24,8 @@ def bin_activity_to_vr(traces: np.ndarray, spikes: np.ndarray, n_bins: int, n_tr
         traces: dF/F traces with shape (n_neurons, n_frames_in_session), queried from common_img.Segmentation.ROI().
         spikes: CASCADE spike prediction of the trace, same shape and source as races.
         n_bins: Number of bins into which the trace should be binned, queried from PCAnalysis().
-        n_trials: Number of bins into which the trace should be binned, derived from len(running_masks).
         trial_mask: 1D array with length n_frames_in_session, queried from PCAnalysis().
-        running_masks: Np.recarray, one elements per trial, queried from Synchronization.VRTrial()
+        running_masks: One element per trial, usually queried from Synchronization.VRTrial()
         bin_frame_counts: Same as running_masks, same as "aligned_frames" from Synchronization.VRTrial()
         key: Primary keys of the current query
 
@@ -34,6 +33,8 @@ def bin_activity_to_vr(traces: np.ndarray, spikes: np.ndarray, n_bins: int, n_tr
         Three ndarrays with shape (n_neurons, n_bins, n_trials), spatially binned activity metrics for N neurons
             - dF/F, spikes, spikerate, fitting for entry of BinnedActivity.ROI().
     """
+
+    n_trials = len(running_masks)
 
     binned_trace = np.zeros((traces.shape[0], n_bins, n_trials))
     binned_spike = np.zeros((spikes.shape[0], n_bins, n_trials))
