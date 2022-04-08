@@ -16,7 +16,7 @@
 db_backup="Daily_Datajoint_Backup.sql.gz"
 echo "Starting backup of ${db_backup}"
 start=`date +%s`
-mysqldump --login-path=root --single-transaction --skip-lock-tables --all-databases | gzip >/home/hheise/datajoint_backups/${db_backup}
+mysqldump --login-path=backup --single-transaction --skip-lock-tables --all-databases | gzip >/home/hheise/datajoint_backups/${db_backup}
 end=`date +%s`
 runtime=$((end-start))
 echo "Created backup at ${db_backup}. Runtime: ${runtime} s"
