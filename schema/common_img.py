@@ -1047,6 +1047,15 @@ class CaimanParameter(dj.Manual):
 
 
 @schema
+class CaimanParameterSession(dj.Manual):
+    definition = """ # Table which specifies which CaimanParameter set is used for a session. Sessions not mentioned here are assumed to be caiman_id=0.
+        -> CaimanParameter
+        -> ScanInfo
+        ----
+        """
+
+
+@schema
 class Segmentation(dj.Computed):
     definition = """ # Table to store results of Caiman segmentation into ROIs
     -> MotionCorrection
@@ -1186,6 +1195,23 @@ class Segmentation(dj.Computed):
                             and save them in the session folder.
             del_mmap:       Flag if mmap file should be deleted afterwards.
         """
+
+        ## Check if the currently queried caiman_id is the correct caiman_id for this session
+        session_key = {k: v for k, v in key.items() if k in ['username', 'mouse_id', 'day', 'session_num']}
+        if len(CaimanParameter & session_key) > 1:
+            # If more than one CaimanParameter entry for this mouse exist, get all specified caiman_ids for this session
+            correct_ids = (CaimanParameterSession & session_key).fetch('caiman_id')
+            if len(correct_ids) == 0:
+                # If no ID was specified, use 0 by default
+                correct_ids = [0]
+        else:
+            correct_ids = [0]
+
+        # If the currently queried caiman_id is NOT among the correct IDs (either specifically set in CaimanParameterSession
+        # or defaulted to 0), skip the current query by exiting the function. Otherwise, start Segmentation.
+        if key['caiman_id'] not in correct_ids:
+            # print(f'\tcaiman_id={key["caiman_id"]} not found in CaimanParameterSession, skipping...')
+            return
 
         print('Populating Segmentation for {}.'.format(key))
 
