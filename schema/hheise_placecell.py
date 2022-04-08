@@ -531,7 +531,7 @@ class PlaceCell(dj.Computed):
             pc_traces = (common_img.Segmentation & key).get_traces()[np.array(list(passed_cells.keys()))]
             pc_trans_only = trans_only[np.array(list(passed_cells.keys()))]
             p_values = pc_classifier.perform_bootstrapping(pc_traces, pc_trans_only, accepted_trial, key,
-                                                           n_iter=params['boot_iter'])
+                                                           n_iter=params['boot_iter'], split_size=params['split_size'])
             print(f"\tBootstrapping complete. {np.sum(p_values <= 0.05)} cells with p<=0.05.")
 
             # Prepare single-ROI entries
@@ -679,8 +679,8 @@ class SpatialInformation(dj.Computed):
                 trial_mask_accepted = []    # Holds trial mask for accepted trials
                 dummy_running_masks = []    # Hold running masks for accepted trials
 
-                for trial_id in np.unique(t_mask):
-                    curr_trace = data[:, t_mask == trial_id][:, r_mask[trial_id]]
+                for rel_idx, trial_id in enumerate(np.unique(t_mask)):
+                    curr_trace = data[:, t_mask == trial_id][:, r_mask[rel_idx]]
                     # Possible shifts are +/- half of the trial length (Aleksejs suggestion)
                     d = np.random.randint(-data.shape[1] // 2, data.shape[1] // 2 + 1)
 
@@ -700,8 +700,8 @@ class SpatialInformation(dj.Computed):
                         shift.append(np.roll(neighbor_trials, d, axis=1)[:, prev_trial.shape[1]:-next_trial.shape[1]])
 
                     # Add entries of bin_frame_counts and trial_mask for accepted trials
-                    bf_counts.append(occupancy[trial_id])
-                    trial_mask_accepted.append(np.array([trial_id] * curr_trace.shape[1], dtype=int))
+                    bf_counts.append(occupancy[rel_idx])
+                    trial_mask_accepted.append(np.array([rel_idx] * curr_trace.shape[1], dtype=int))
 
                 # The binning function requires the whole session in one row, so we stack the single-trial-arrays
                 shift = np.hstack(shift)

@@ -322,7 +322,6 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, acce
     n_bins, trial_mask = (hheise_placecell.PCAnalysis & key).fetch1('n_bins', 'trial_mask')
     running_masks, bin_frame_counts = (hheise_placecell.Synchronization.VRTrial & key).fetch('running_mask',
                                                                                              'aligned_frames')
-    n_trials = len(running_masks)
 
     # This array keeps track of whether a shuffled trace passed the PC criteria
     p_counter = np.zeros(pc_traces.shape[0])
@@ -331,7 +330,8 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, acce
         shuffle = []
         bf_counts = []  # Holds bin frame counts for accepted trials
         trial_mask_accepted = []  # Holds trial mask for accepted trials
-        dummy_running_masks = []  # Hold running masks for accepted trials
+        running_masks_accepted = []  # Hold running masks for accepted trials
+        rel_trial_id = 0            # Keeps track of how many trials are accepted instead of total ID
 
         for trial_id in np.unique(trial_mask):
             if (accepted_trials is None) or ((accepted_trials is not None) and (trial_id in accepted_trials)):
@@ -353,8 +353,10 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, acce
 
                 # Add entries of bin_frame_counts and trial_mask for accepted trials
                 bf_counts.append(bin_frame_counts[trial_id])
-                trial_mask_accepted.append(np.array([trial_id] * trial.shape[1], dtype=int))
-                dummy_running_masks.append(np.ones(trial.shape[1], dtype=bool))
+                # The relative trial index has to be used, because the reference is reframed when excluding trials
+                trial_mask_accepted.append(np.array([rel_trial_id] * trial.shape[1], dtype=int))
+                running_masks_accepted.append(running_masks[trial_id])
+                rel_trial_id += 1
 
         # The binning function requires the whole session in one row, so we stack the single-trial-arrays
         shuffle = np.hstack(shuffle)
@@ -362,8 +364,8 @@ def perform_bootstrapping(pc_traces: np.ndarray, pc_trans_only: np.ndarray, acce
 
         # bin trials to VR position
         # parse shuffle twice as a spike rate and discard spike rate output
-        bin_act, _, _ = bin_activity_to_vr(shuffle, shuffle, n_bins, trial_mask_accepted, dummy_running_masks,
-                                           bin_frame_counts, key)
+        bin_act, _, _ = bin_activity_to_vr(shuffle, shuffle, n_bins, trial_mask_accepted, running_masks_accepted,
+                                           bf_counts, key)
 
         # Average binned activity across trials
         bin_avg_act = np.vstack([np.mean(x, axis=1) for x in bin_act])
