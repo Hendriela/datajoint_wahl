@@ -1,6 +1,6 @@
 #!/bin/sh
 # Shell script that creates a full backup of the DataJoint database, stores it locally, and then copies it to
-# the Neurophysiology-Storage1 Wahl server, which is mounted under /media/ (backup takes <3 min)
+# the Neurophysiology-Storage1 Wahl server, which is mounted under /media/
 # Arguments used:
 # - "--login-path=root" tells mysqldump to use the login credentials for the root account when connecting to the database,
 #   avoiding permission errors. For this to work, the root credentials have to be added with the mysql_config_editor
