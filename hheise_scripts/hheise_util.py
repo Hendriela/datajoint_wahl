@@ -222,9 +222,18 @@ def add_many_sessions(date: Union[str, Iterable[str]], mice: Union[int, Iterable
             print(f'No TIFF files found, assuming that no imaging was performed. Check this!')
         print(' ')
 
-def validate_segmentation(mice: Optional[Iterable[int]] = None, plot_all: Optional[bool] = False,
-                          thr: Optional[int] = 20):
 
+def validate_segmentation(mice: Optional[Iterable[int]] = None, thr: Optional[int] = 20,
+                          plot_all: Optional[bool] = False) -> None:
+    """
+    Plot number of accepted ROIs across sessions of specified mice. Creates one figure per mouse. By default, only plots
+    mice that have a difference between sessions of more than "thr" percent.
+
+    Args:
+        mice: List of mouse IDs that should be plotted. If None, all mice are queried.
+        thr: Percentage threshold of difference in ROI numbers between sessions above which the data will be plotted.
+        plot_all: Bool flag whether mice without a difference above "thr" should be plotted as well.
+    """
     thr_up = 1 + thr/100
     thr_low = 1 - thr / 100
 
@@ -274,8 +283,6 @@ def validate_segmentation(mice: Optional[Iterable[int]] = None, plot_all: Option
             ax[1].axhline(1, c='black', linestyle='--')
             ax[1].axhline(thr_up, c='r', linestyle='--')
             ax[1].axhline(thr_low, c='r', linestyle='--')
-
-
 
 
 # dj.table.Table should be the master class of all Datajoint tables, and as such the proper type hinting class

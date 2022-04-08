@@ -48,7 +48,6 @@ def pipeline_with_imported_params(username, mouse_ids):
         schedule = ((common_img.ScanInfo & mouse) - common_img.MotionCorrection).fetch('KEY', as_dict=True)
 
         for session in schedule:
-
             # Try to load the cnm parameters from an HDF5 or pickle file
             sess_dir = (common_exp.Session & session).get_absolute_path()
 
@@ -136,6 +135,11 @@ def pipeline_with_imported_params(username, mouse_ids):
 
             else:
                 raise NotImplementedError(f'This should not occur: Session {session}')
+
+            # If the current parameter set is not the standard ID, enter it into CaimanParameterSession which keeps
+            # track of which parameter set is for which session
+            if cnm_id != 0:
+                common_img.CaimanParameterSession(dict(**session, caiman_id=cnm_id))
 
             # Now we can fill the entries for MotionCorrection, QualityControl and Segmentation via chain-piping
             session['motion_id'] = mot_id
