@@ -139,7 +139,7 @@ def pipeline_with_imported_params(username, mouse_ids):
             # If the current parameter set is not the standard ID, enter it into CaimanParameterSession which keeps
             # track of which parameter set is for which session
             if cnm_id != 0:
-                common_img.CaimanParameterSession(dict(**session, caiman_id=cnm_id))
+                common_img.CaimanParameterSession().insert1((dict(**session, caiman_id=cnm_id)))
 
             # Now we can fill the entries for MotionCorrection, QualityControl and Segmentation via chain-piping
             session['motion_id'] = mot_id
