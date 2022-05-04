@@ -313,3 +313,39 @@ class MatchedIndex(dj.Manual):
     matched_id      : int           # Mask ID of the same neuron in the matched session
     matched_time = CURRENT_TIMESTAMP  : timestamp
     """
+
+    def helper_insert1(self, key: dict) -> None:
+        """
+        Helper function that inserts a confirmed neuron match for both sessions and warns if a cell has been tracked
+        twice with different reference cells.
+
+        Args:
+            key: Primary keys of the current matched cell entry
+        """
+
+        # Insert main entry
+        self.insert1(key)
+
+        # Insert reverse entry (if cell X in session A is the same as cell Y in session B, then Y(B) should also be
+        # the same cell as X(A))
+        reverse_key = dict(username=key['username'],
+                           mouse_id=key['mouse_id'],
+                           day=key['matched_session'].split('_')[0],
+                           session_num=key['matched_session'].split('_')[1],
+                           motion_id=key['matched_session'].split('_')[2],
+                           caiman_id=key['matched_session'].split('_')[3],
+                           match_param_id=key['match_param_id'],
+                           mask_id=key['matched_id'],
+                           matched_session=f"{key['day']}_{key['session_num']}_{key['motion_id']}_{key['caiman_id']}",
+                           matched_id=key['mask_id'])
+        # Filter out no-match sessions
+        if reverse_key['mask_id'] != -1:
+            if len(self & reverse_key) == 1:
+                if (self & reverse_key).fetch1('matched_id') != reverse_key['matched_id']:
+                    print(f"Cell {reverse_key['mask_id']} in session {reverse_key['day']} is already matched to "
+                          f"Cell {(self & reverse_key).fetch1('matched_id')} in session {reverse_key['matched_session']}."
+                          f"You matched it to Cell ID {reverse_key['matched_id']} instead. Insert skipped.")
+                else:
+                    print('Match already in database, insert skipped.')
+            else:
+                self.insert1(reverse_key)
