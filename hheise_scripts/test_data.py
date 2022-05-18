@@ -191,3 +191,39 @@ for sess in sessions:
         print('\tdFF frame window is already 2000, skipping session.')
     last_mouse = sess['mouse_id']
 
+# Add Histology experiment
+mouse_ids = [83, 85, 86, 89, 90, 91, 93, 94, 95]
+day = '2021-10-01'
+microscope = 'Zeiss Axio Scan.Z1 (ZMB)'
+
+for id in mouse_ids:
+    common_hist.Histology().insert1(dict(username='hheise', mouse_id=id, histo_date=day, thickness=300, cutting_device='cryostat',
+                                         direction='coronal', microscope=microscope))
+
+for id in mouse_ids:
+    common_hist.Staining().insert1(dict(username='hheise', mouse_id=id, histo_date=day,
+                                        fluoro_num=1, target='intrinsic', primary_host='intrinsic', fluorophore='GFP'))
+    common_hist.Staining().insert1(dict(username='hheise', mouse_id=id, histo_date=day,
+                                        fluoro_num=0, target='GFAP', primary_host='guinea pig', fluorophore='Cy3'))
+
+# Compare ontologies from Allen Atlas API (long) with ontology from paper (with volume data)
+vol_ont = pd.read_csv(r'W:\Neurophysiology-Storage1\Wahl\Datajoint\ABA_volumes.csv', header=1)
+fine_ont = pd.read_csv(r'W:\Neurophysiology-Storage1\Wahl\Datajoint\ABA_P56_ontology.csv', header=0)
+
+col_compare = [('structure ID', 'id'), ('full structure name', 'name'), ('parent_id', 'parent_structure_id'),
+               ('structure_id_path', 'structure_id_path')]
+
+for idx, row in vol_ont.iterrows():
+    fine_row = fine_ont[fine_ont['acronym'] == row['abbreviation']]
+    if len(fine_row) > 0:
+        pass
+        # for comp in col_compare:
+        #     if row[comp[0]] != list(fine_row[comp[1]])[0]:
+        #         print('Difference found!')
+        #         print(f'\t{row["abbreviation"]} ({idx}) has a {comp[0]} value of {row[comp[0]]}, but a {comp[1]} value of {list(fine_row[comp[1]])[0]}')
+    else:
+        print(f'{row["abbreviation"]} ({idx}) does not exist in the fine atlas.')
+
+test = fine_ont['name'] != fine_ont['safe_name']
+
+

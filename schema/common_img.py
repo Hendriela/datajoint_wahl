@@ -891,7 +891,7 @@ class QualityControl(dj.Computed):
             # First, check if caiman_id was provided in kwargs
             if 'caiman_id' in make_kwargs:
                 if type(make_kwargs['caiman_id']) != int:
-                    raise TypeError('caiman_id in make_kwargs has to be an integer.')
+                    raise TypeError(f'caiman_id in make_kwargs has to be an integer, not {type(make_kwargs["caiman_id"])}')
                 seg_key['caiman_id'] = make_kwargs['caiman_id']
                 del make_kwargs['caiman_id']    # remove from make_kwargs because Segmentation does not expect it
             # If not, and there is only one parameter set for this mouse, use that one
