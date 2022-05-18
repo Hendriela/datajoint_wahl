@@ -353,6 +353,10 @@ class Synchronization(dj.Computed):
                         raise ValueError('Error in {}:\nNo frame in this bin, '
                                          'could not be corrected: {}'.format(key, zero_idx))
 
+            if not np.sum(bin_frame_count) == np.sum(running_mask):
+                raise ValueError('Error in {}, trial {}:\nBinning failed, found {} running frames, but {} frames in '
+                                 'bin_frame_count'.format(key, trial_idx, np.sum(running_mask), np.sum(bin_frame_count)))
+
             # Save trial entry for later combined insertion
             trial_entries.append(dict(**key, trial_id=trial_id, running_mask=running_mask,
                                       aligned_frames=bin_frame_count))
@@ -546,7 +550,8 @@ class PlaceCell(dj.Computed):
                                                place_field_id=field_idx, bin_idx=field[0], large_enough=int(field[1]),
                                                strong_enough=int(field[2]), transients=int(field[3])))
             else:
-                p_values = [1]
+                # Make dummy entries if no place fields passed all criteria
+                p_values = np.ndarray([1])
                 pf_roi_entries = None
                 pf_entries = None
 
@@ -564,7 +569,7 @@ class PlaceCell(dj.Computed):
             1D ndarray with the mask_id of accepted place cells (p < 0.5)
         """
 
-        ids, p = self.ROI().fetch('mask_id', 'is_place_cell')
+        ids, p = (self.ROI() & self.restriction).fetch('mask_id', 'is_place_cell')
         return ids[np.array(p, dtype=bool)]
 
 
@@ -751,8 +756,8 @@ class SpatialInformation(dj.Computed):
             real = [real_skaggs, real_shuman]
 
             # Perform circular shuffling and get SI of shuffled data
-            shuffled_data = circular_shuffle(curr_decon, curr_trial_mask, curr_running_masks, curr_bin_frame_counts,
-                                             key, n_bins, n_iter)
+            shuffled_data = circular_shuffle(data=curr_decon, t_mask=curr_trial_mask, r_mask=curr_running_masks,
+                                             occupancy=curr_bin_frame_counts, sess_key=key, n_bins=n_bins, n_iter=n_iter)
 
             shuffle_skaggs = np.zeros((shuffled_data.shape[0], shuffled_data.shape[1])) * np.nan
             shuffle_shuman = np.zeros((shuffled_data.shape[0], shuffled_data.shape[1])) * np.nan
@@ -768,7 +773,7 @@ class SpatialInformation(dj.Computed):
 
             ### WITHIN-SESSION STABILITY ###
             # Compute stability of real data
-            real_stab = compute_within_session_stability(traces, sigma_gauss)
+            real_stab = compute_within_session_stability(act_map=traces, sigma=sigma_gauss)
 
             # Perform circular shuffling and get stability of shuffled data
             shuffled_data = circular_shuffle(curr_decon, curr_trial_mask, curr_running_masks, curr_bin_frame_counts,
