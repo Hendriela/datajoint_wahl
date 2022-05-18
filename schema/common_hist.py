@@ -15,15 +15,17 @@ import login
 
 login.connect()
 
+from schema import common_mice
+
 schema = dj.schema('common_hist', locals(), create_tables=True)
 
 
 @schema
 class Ontology(dj.Manual):
     definition = """ # Ontology tree of the Common Coordinate Framework of the Allen Mouse Brain Reference Atlas.
-    acronym             : varchar(16)   # Abbreviated unique structure name
-    ----
     structure_id        : int           # Unique structure ID, arbitrary order
+    ----
+    acronym             : varchar(16)   # Abbreviated unique structure name
     full_name           : varchar(128)  # Full (unique) structure name
     parent_id           : int           # Structure ID of the parent node
     depth               : tinyint       # Depth of this structure in the tree
@@ -98,4 +100,64 @@ class Ontology(dj.Manual):
         with connection.transaction:
             [self.insert1(dict(row)) for idx, row in merged.iterrows()]
 
+    def map_acronym_to_id(self, invert: bool = False) -> dict:
+        """
+        Function that creates a dict mapping each acronym to its structure ID for rapid translation, or vice versa.
 
+        Args:
+            invert: Bool flag, if True it returns the ID as keys and acronyms as values instead.
+
+        Returns:
+            Mapping dictionary with acronym as key and its structure ID as value.
+        """
+
+        data = self.fetch('structure_id', 'acronym', as_dict=True)
+        if invert:
+            return {entry['structure_id']: entry['acronym'] for entry in data}
+        else:
+            return {entry['acronym']: entry['structure_id'] for entry in data}
+
+
+@schema
+class PrimaryAntibody(dj.Lookup):
+    definition = """    # Different primary antibodies used in histology analysis
+    target          : varchar(64)       # Name of the target protein
+    primary_host    : varchar(32)       # Host species of the primary antibody.
+    ---
+    dilution        : int               # Diluting factor that has been proven to work best (written as 1:X)
+    producer        : varchar(64)       # Company that produced the primary antibody
+    description     : varchar(256)      # Information about the AB target
+    """
+    # add current licence, retrieve the licence file from the server
+    contents = [
+        ['GFAP', 'guinea pig', 750, 'Synaptic Systems',
+         'Astrocyte marker, high expression in HPC and TH, less in cortex. Can mark lesions, where intensity should be increased.'],
+        ['MAP2', 'rabbit', 250, 'Sigma-Aldrich',
+         'Neuron-specific microtubule marker. Can mark lesions, where intensity should be decreased. Colocalizes with transgenic GFP, so better used in wildtype mice.'],
+        ['intrinsic', 'intrinsic', 0, 'n.a.',
+         'Intrinsic expression of fluorophore, through transgenic strains or viral injection.']
+    ]
+
+
+@schema
+class Histology(dj.Manual):
+    definition = """ # Data about the histology experiment
+    -> common_mice.Mouse
+    histo_date      : date                                          # Imaging date
+    ----
+    thickness       : int                                           # Slice thickness in um
+    cutting_device  : enum('vibratome', 'cryostat')                 # Cutting device used
+    direction       : enum('coronal', 'sagittal', 'horizontal')     # Cutting direction
+    microscope      : varchar(256)                                  # Name of the microscope used for imaging
+    """
+
+
+@schema
+class Staining(dj.Manual):
+    definition = """    # Different primary fluorophores used during staining (or intrinsically expressed)
+    -> Histology
+    fluoro_num   : tinyint  # Number of the fluorophore in the histology experiment
+    ---
+    -> PrimaryAntibody      # Primary antibody used (NULL if fluorophore is expressed intrinsically, through strain or viral injection)
+    fluorophore     : enum('GFP', 'Alexa488', 'Cy3', 'Alexa647', 'tdTomato')   # Fluorophore used to tag the primary antibody. All secondary ABs are from Jackson ImmunoResearch and used at 1:250 dilution.
+    """
