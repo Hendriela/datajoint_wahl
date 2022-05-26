@@ -191,20 +191,6 @@ for sess in sessions:
         print('\tdFF frame window is already 2000, skipping session.')
     last_mouse = sess['mouse_id']
 
-# Add Histology experiment
-mouse_ids = [83, 85, 86, 89, 90, 91, 93, 94, 95]
-day = '2021-10-01'
-microscope = 'Zeiss Axio Scan.Z1 (ZMB)'
-
-for id in mouse_ids:
-    common_hist.Histology().insert1(dict(username='hheise', mouse_id=id, histo_date=day, thickness=300, cutting_device='cryostat',
-                                         direction='coronal', microscope=microscope))
-
-for id in mouse_ids:
-    common_hist.Staining().insert1(dict(username='hheise', mouse_id=id, histo_date=day,
-                                        fluoro_num=1, target='intrinsic', primary_host='intrinsic', fluorophore='GFP'))
-    common_hist.Staining().insert1(dict(username='hheise', mouse_id=id, histo_date=day,
-                                        fluoro_num=0, target='GFAP', primary_host='guinea pig', fluorophore='Cy3'))
 
 # Compare ontologies from Allen Atlas API (long) with ontology from paper (with volume data)
 vol_ont = pd.read_csv(r'W:\Neurophysiology-Storage1\Wahl\Datajoint\ABA_volumes.csv', header=1)

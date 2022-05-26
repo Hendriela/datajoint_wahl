@@ -9,6 +9,7 @@ Histology analysis for microsphere model.
 
 import numpy as np
 import pandas as pd
+from typing import Union, Optional
 
 import datajoint as dj
 import login
@@ -23,9 +24,7 @@ schema = dj.schema('common_hist', locals(), create_tables=True)
 @schema
 class Microsphere(dj.Manual):
     definition = """ # Quantification of microsphere histology, each entry is data from one sphere/lesion. Data imported from CSV file.
-    -> common_hist.Histology
-    glass           : tinyint       # Number of the glass slide this slice is mounted on
-    slice           : tinyint       # Number of the slice on the glass slide where the sphere/lesion is located, counted from top right
+    -> common_hist.Histology.HistoSlice
     hemisphere      : tinyint       # Bool flag if the sphere/lesion is in the left (=1, ipsilateral to window) or right (=0) hemisphere
     -> common_hist.Ontology         # Acronym of the structure/area of the sphere/lesion
     lesion          : tinyint       # Bool flag if the spheres are associated with visible damage or lesion
@@ -36,12 +35,13 @@ class Microsphere(dj.Manual):
     auto=NULL       : int           # Area of damage [um2] in the autofluorescence. 0 if no visible damage, and NULL if autofluorescence was not analyzed.
     """
 
-    def import_from_csv(self, filepath: str, hist_date: str) -> None:
+    def import_from_csv(self, username: str, filepath: str, hist_date: str) -> None:
         """
         Function to import sphere annotation data from a CSV file. The file has to have the following columns, in this
         order: mouse_id - glass - slice - hemisphere - area acronym - spheres - lesion - map2 - gfap - auto.
 
         Args:
+            username: Shortname of the investigator
             filepath: Absolute path of the CSV file
             hist_date: Date of the imaging, in format 'YYYY-MM-DD'
         """
@@ -50,12 +50,12 @@ class Microsphere(dj.Manual):
         annot = pd.read_csv(filepath)
 
         # Rename columns to make consistent with database
-        annot.columns = ['mouse_id', 'glass', 'slice', 'hemisphere', 'acronym', 'spheres', 'lesion', 'map2',
+        annot.columns = ['mouse_id', 'glass_num', 'slice_num', 'hemisphere', 'acronym', 'spheres', 'lesion', 'map2',
                          'gfap', 'auto']
         col = annot.columns
 
         # Check if any staining is missing completely (will be dropped from DataFrame and NULLed during insert)
-        bad_cols = [col[i] for i in range(7,10) if pd.isna(annot[col[i]]).all()]
+        bad_cols = [col[i] for i in range(7, 10) if pd.isna(annot[col[i]]).all()]
         annot.drop(columns=bad_cols, inplace=True)
         col = annot.columns
 
@@ -96,7 +96,7 @@ class Microsphere(dj.Manual):
         # Transform data into single-entry dicts and insert into database
         with self.connection.transaction:
             for idx, row in annot.iterrows():
-                entry = dict(username='hheise', histo_date=hist_date, **row)
+                entry = dict(username=username, histo_date=hist_date, **row)
                 try:
                     entry['structure_id'] = mapping[row['acronym']]
                     del entry['acronym']
