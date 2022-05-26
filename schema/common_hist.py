@@ -119,6 +119,52 @@ class Ontology(dj.Manual):
 
 
 @schema
+class ReferenceAtlas(dj.Manual):
+    definition = """ # Annotated coronal reference atlas of the Common Coordinate Framework v3, used by the Allen Brain Atlas.
+    image_id            : int           # ID of the image/atlas page, same as in the online interactive atlas
+    ----
+    bregma              : float         # distance from bregma of the slice in [mm], approximated from http://mouse.brain-map.org/experiment/siv/?imageId=102162070.
+    atlas               : longblob      # 2D numpy array of the slice, each pixel containing the structure_id of the associated brain structure.
+    resolution          : int           # Resolution of the atlas in [um/voxel]
+    """
+
+    def import_data(self, filepath: str, resolution: int) -> None:
+        """
+        Import a previously downloaded annotation atlas into the database.
+
+        Args:
+            filepath    : Absolute path to the atlas .npy file
+            resolution  : Resolution of the downloaded atlas version
+        """
+
+        # Bregma values are copied from an old atlas because the current ABA does not use bregma as reference anymore
+        bregma = [5.345, 5.245, 5.145, 5.045, 4.945, 4.845, 4.745, 4.645, 4.545, 4.445, 4.345, 4.245, 4.145, 4.045,
+                  3.945, 3.845, 3.745, 3.645, 3.545, 3.445, 3.345, 3.245, 3.145, 3.045, 2.945, 2.845, 2.745, 2.645,
+                  2.545, 2.445, 2.345, 2.245, 2.145, 2.045, 1.945, 1.845, 1.745, 1.645, 1.545, 1.445, 1.345, 1.245,
+                  1.145, 1.045, 0.945, 0.845, 0.745, 0.645, 0.545, 0.445, 0.345, 0.245, 0.145, 0.02, -0.08, -0.18,
+                  -0.28, -0.38, -0.48, -0.555, -0.655, -0.755, -0.855, -0.955, -1.055, -1.155, -1.255, -1.355, -1.455,
+                  -1.555, -1.655, -1.755, -1.855, -1.955, -2.055, -2.155, -2.255, -2.355, -2.48, -2.555, -2.78, -2.88,
+                  -2.98, -3.08, -3.18, -3.28, -3.38, -3.455, -3.58, -3.68, -3.78, -3.88, -3.98, -4.08, -4.18, -4.28,
+                  -4.38, -4.455, -4.555, -4.655, -4.755, -4.855, -4.955, -5.055, -5.155, -5.255, -5.355, -5.455, -5.555,
+                  -5.655, -5.755, -5.855, -5.955, -6.055, -6.18, -6.255, -6.355, -6.455, -6.555, -6.655, -6.755, -6.855,
+                  -6.955, -7.055, -7.155, -7.255, -7.355, -7.455, -7.555, -7.655, -7.755, -7.905]
+
+        # Annotated slices can be downloaded and saved with allen_api.py
+        # filepath = r'W:\Neurophysiology-Storage1\Wahl\Datajoint\AllenAtlas\annotation_slices.npy'
+        atlas = np.load(filepath)
+
+        if len(bregma) != len(atlas):
+            raise IndexError('The loaded atlas has a different number of slices than the Bregma values on record.')
+
+        # Construct entries
+        entries = [{'image_id': i, 'bregma': bregma[i], 'atlas': atlas[i],
+                    'resolution': resolution} for i in range(len(bregma))]
+
+        # Insert them into the database
+        self.insert(entries)
+
+
+@schema
 class PrimaryAntibody(dj.Lookup):
     definition = """    # Different primary antibodies used in histology analysis
     target          : varchar(64)       # Name of the target protein
