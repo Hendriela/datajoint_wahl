@@ -192,10 +192,60 @@ class Histology(dj.Manual):
     histo_date      : date                                          # Imaging date
     ----
     thickness       : int                                           # Slice thickness in um
+    n_slices        : int                                           # Number of slices imaged, for whole-brain extrapolation
     cutting_device  : enum('vibratome', 'cryostat')                 # Cutting device used
     direction       : enum('coronal', 'sagittal', 'horizontal')     # Cutting direction
     microscope      : varchar(256)                                  # Name of the microscope used for imaging
     """
+
+    class HistoSlice(dj.Part):
+        definition = """    # Different primary fluorophores used during staining (or intrinsically expressed)
+        -> Histology
+        glass_num       : int   # Number of the glass slide on which the slice is mounted (base 1)
+        slice_num       : int   # Number of the slice on the slide (usually numbered from top left, base 0)
+        ---
+        slice_area      : float   # Area of the entire slice in [mm2]
+        -> [nullable] ReferenceAtlas  # ID of the closest corresponding image in the annotation atlas (empty if not recorded)
+        """
+
+    def import_data(self, username: str, filepath, day, thickness, cutting, direction, microscope):
+
+        # Load data from slice_size CSV file
+        #
+        slice_sizes = pd.read_csv(filepath)
+        if len(slice_sizes.columns) == 4:
+            # If the Image ID has not been tracked, the file should have 4 columns, and create an empty 5th
+            slice_sizes.columns = ['mouse_id', 'glass_num', 'slice_num', 'slice_area']
+            slice_sizes['image_id'] = np.nan
+        elif len(slice_sizes.columns) == 5:
+            slice_sizes.columns = ['mouse_id', 'glass_num', 'slice_num', 'slice_area', 'image_id']
+        else:
+            raise IndexError(f'Invalid number of columns: {len(slice_sizes.columns)}. File should have 4 or 5 columns.')
+
+        # Safety check that all mice listed in the data exist in the database
+        mouse_ids = slice_sizes['mouse_id'].unique()
+        if not all([common_mice.Mouse & f'username="{username}"' & f'mouse_id={mouse_id}' for mouse_id in mouse_ids]):
+            raise ImportError(f'Not all mice listed in {filepath} exist for user {username}.')
+
+        # Convert area from um2 (QuPath) to mm2
+        slice_sizes['slice_area'] = slice_sizes['slice_area']/1000000
+
+        # Construct entries
+        entries = []
+        part_entries = []
+
+        for mouse_id in mouse_ids:
+            entries.append({'username': username, 'mouse_id': mouse_id, 'histo_date': day, 'thickness': thickness,
+                            'n_slices': len(slice_sizes[slice_sizes['mouse_id'] == mouse_id]),
+                            'cutting_device': cutting, 'direction': direction, 'microscope': microscope})
+            for idx, row in slice_sizes[slice_sizes['mouse_id'] == mouse_id].iterrows():
+                part_entries.append({'username': username, 'histo_date': day, **row})
+
+        # Insert entries into database
+        connection = self.connection
+        with connection.transaction:
+            self.insert(entries)
+            self.HistoSlice().insert(part_entries)
 
 
 @schema
