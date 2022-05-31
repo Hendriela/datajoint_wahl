@@ -10,9 +10,10 @@ import numpy as np
 from skimage.draw import polygon
 from skimage import measure
 from scipy import spatial
-from typing import Iterable, Tuple, List
+from typing import Iterable, Tuple, List, Optional
 import math
 import bisect
+import ctypes
 
 import datajoint as dj
 
@@ -314,7 +315,7 @@ class MatchedIndex(dj.Manual):
     matched_time = CURRENT_TIMESTAMP  : timestamp
     """
 
-    def helper_insert1(self, key: dict) -> None:
+    def helper_insert1(self, key: dict) -> Optional[bool]:
         """
         Helper function that inserts a confirmed neuron match for both sessions and warns if a cell has been tracked
         twice with different reference cells.
@@ -323,8 +324,35 @@ class MatchedIndex(dj.Manual):
             key: Primary keys of the current matched cell entry
         """
 
-        # Insert main entry
-        self.insert1(key)
+        popup_msg = '\nPress "OK" to overwrite entry, or "Cancel" to keep existing entry.'
+
+        dup_keys = key.copy()
+        del dup_keys['matched_id']
+        overwriting = False
+
+        if len(self & dup_keys) > 0:
+            duplicate_entry = (self & dup_keys).fetch1()
+            # If the entry already exists, but with another ID, ask the user if it should be overwritten
+            if duplicate_entry['matched_id'] != key['matched_id']:
+                msg = f'Cell {key["mask_id"]} in session {key["day"]} has a recorded match for session' \
+                      f'{duplicate_entry["matched_session"][:11]} with cell {duplicate_entry["matched_id"]}, ' \
+                      f'you selected a match with cell {key["matched_id"]}.' + popup_msg
+                # This creates a popup window. The two last parameters determine the style, OR'd together. The first
+                # gives the window an "OK" and a "Cancel" button, the second draws the window above all other windows
+                response = ctypes.windll.user32.MessageBoxW(0, msg, 'Conflicting entry!', 0x00000001 | 0x0004)
+                if response == 1:
+                    self.update1(key)
+                    # print('Would have updated first match:', key)
+                    overwriting = True
+                else:
+                    return False
+            # If the same entry already exists, we dont have to check the reverse entry as well.
+            else:
+                return False
+        else:
+            # Insert main entry
+            self.insert1(key)
+            # print('Would have inserted first match:', key)
 
         # Insert reverse entry (if cell X in session A is the same as cell Y in session B, then Y(B) should also be
         # the same cell as X(A))
@@ -338,14 +366,63 @@ class MatchedIndex(dj.Manual):
                            mask_id=key['matched_id'],
                            matched_session=f"{key['day']}_{key['session_num']}_{key['motion_id']}_{key['caiman_id']}",
                            matched_id=key['mask_id'])
+
+        # To check for possible duplicates, we have to find entries with the same matched ID, but different mask ID
+        dup_key = reverse_key.copy()
+        del dup_key['mask_id']
+
         # Filter out no-match sessions
         if reverse_key['mask_id'] != -1:
-            if len(self & reverse_key) == 1:
-                if (self & reverse_key).fetch1('matched_id') != reverse_key['matched_id']:
-                    print(f"Cell {reverse_key['mask_id']} in session {reverse_key['day']} is already matched to "
-                          f"Cell {(self & reverse_key).fetch1('matched_id')} in session {reverse_key['matched_session']}."
-                          f"You matched it to Cell ID {reverse_key['matched_id']} instead. Insert skipped.")
+            if len(self & dup_key) == 1:
+                # If the entry already exists, but with another ID, ask the user if it should be overwritten
+                if (self & dup_key).fetch1('mask_id') != reverse_key['mask_id']:
+                    # If the first entry was overwritten already, we dont have to ask again and just overwrite this one as well
+                    if overwriting:
+                        self.update1(reverse_key)
+                        # print('Would have updated reverse match:', reverse_key)
+                    else:
+                        msg = f"Cell {reverse_key['mask_id']} in session {reverse_key['day']} is already matched to " \
+                              f"Cell {(self & reverse_key).fetch1('matched_id')} in session {reverse_key['matched_session']}." \
+                              f"You matched it to Cell ID {reverse_key['matched_id']} instead." + popup_msg
+                        response = ctypes.windll.user32.MessageBoxW(0, msg, 'Conflicting entry!', 0x00000001 | 0x0004)
+                        if response == 1:
+                            self.update1(reverse_key)
+                            # print('Would have updated reverse match:', reverse_key)
+                        else:
+                            return False
                 else:
                     print('Match already in database, insert skipped.')
+                    return False
             else:
                 self.insert1(reverse_key)
+                # print('Would have inserted reverse match:', reverse_key)
+
+    def remove_match(self, key: dict) -> None:
+        """
+        Remove matches of one cell and its reverse matches in all sessions.
+
+        Args:
+            key: Primary keys, need to identify the reference cell
+        """
+
+        day = (self & key).fetch('day')
+        mask_id = (self & key).fetch('mask_id')
+
+        if len(np.unique(day)) > 1:
+            raise KeyError('Provided key has to specify a single session.')
+        elif len(np.unique(mask_id)) > 1:
+            raise KeyError('Provided key has to specify a single ROI.')
+        else:
+            sessions = self & f'day="{day[0]}"' & f'mask_id={mask_id[0]}'
+            rev_sessions = self & f'matched_id={mask_id[0]}'
+
+            print('These matches will be deleted:\n', sessions)
+            print('These reverse matches will be deleted:\n', rev_sessions)
+            response = input('Confirm? (y/n)')
+            if response == 'y':
+                sessions.delete()
+                rev_sessions.delete()
+            else:
+                print('Aborted.')
+                return
+
