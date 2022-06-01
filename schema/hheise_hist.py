@@ -116,5 +116,53 @@ class Microsphere(dj.Manual):
 
 
 
+@schema
+class MicrosphereSummary(dj.Computed):
+    definition = """ # Some summary results about the whole brain (combined data from all imaged slices of one mouse).
+    -> common_hist.Histology
+    ----
+    time_ana = CURRENT_TIMESTAMP    : timestamp     # automatic timestamp
+    """
 
+    class Metric(dj.Part):
+        definition = """ # Summary results of an individual metric (e.g. spheres, autofluorescence damage, etc.).
+        -> MicrosphereSummary
+        metric_name     : varchar(32)   # Name of the metric (spheres, map2, gfap, auto)
+        ----
+        count           : float     # Number of spheres/volume of damage [mm3] in all slices
+        count_extrap    : float     # Extrapolated number of spheres/volume based on percentage of imaged brain volume.
+        num_slices      : int       # Number of slices in which the metric has data points.
+        """
 
+    def make(self, key: dict) -> None:
+
+        # Fetch relevant data
+        # for mouse in np.unique(common_hist.Histology().fetch('mouse_id')):
+        #     key = dict(mouse_id=mouse)
+        data = pd.DataFrame((Microsphere & key).fetch())
+
+        # Calculate absolute imaged volume from slice thickness and surface
+        thickness, total_slices = (common_hist.Histology & key).fetch1('thickness', 'n_slices')
+        surface = (common_hist.Histology.HistoSlice & key).fetch('slice_area')
+        imaged_vol = np.sum(thickness / 1000 * surface)
+        # Total brain volume is volume of "whole brain" minus volume of ventricular system (data from Allen Brain Atlas)
+        brain_vol = (common_hist.Ontology & 'parent_id=-1').fetch1('volume') - \
+                    (common_hist.Ontology & 'acronym="VS"').fetch1('volume')
+        # Divide imaged volume by total brain volume for relative imaged volume
+        perc_vol = imaged_vol / brain_vol
+        # print(mouse, '-', imaged_vol)
+
+        # Compute data for spheres and lesions
+        entries = []
+        for metric in ['spheres', 'map2', 'gfap', 'auto']:
+            if not all(data[metric].isna()):
+                entry = dict(**key, metric_name=metric)
+                entry['count'] = data[metric].sum()
+                entry['count_extrap'] = entry['count'] * 1 / perc_vol
+                entry['num_slices'] = len(data[data[metric] > 0].drop_duplicates(subset=['histo_date', 'glass_num',
+                                                                                         'slice_num']))
+                entries.append(entry)
+
+        # Insert entries into database
+        self.insert1(key)
+        self.Metric().insert(entries)
