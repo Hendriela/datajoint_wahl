@@ -9,7 +9,7 @@ Histology analysis for microsphere model.
 
 import numpy as np
 import pandas as pd
-from typing import Union, Optional
+from typing import Union, Optional, Tuple
 
 import datajoint as dj
 import login
@@ -30,9 +30,9 @@ class Microsphere(dj.Manual):
     lesion          : tinyint       # Bool flag if the spheres are associated with visible damage or lesion
     ----
     spheres         : int           # Number of spheres in this area. Can be 0 if a clear lesion has no spheres around.
-    map2=NULL       : int           # Area of damage [um2] in the MAP2 staining. 0 if no visible damage, and NULL if MAP2 was not stained for.
-    gfap=NULL       : int           # Area of damage [um2] in the GFAP staining. 0 if no visible damage, and NULL if GFAP was not stained for.
-    auto=NULL       : int           # Area of damage [um2] in the autofluorescence. 0 if no visible damage, and NULL if autofluorescence was not analyzed.
+    map2=NULL       : float         # Area of damage [mm2] in the MAP2 staining. 0 if no visible damage, and NULL if MAP2 was not stained for.
+    gfap=NULL       : float         # Area of damage [mm2] in the GFAP staining. 0 if no visible damage, and NULL if GFAP was not stained for.
+    auto=NULL       : float         # Area of damage [mm2] in the autofluorescence. 0 if no visible damage, and NULL if autofluorescence was not analyzed.
     """
 
     def import_from_csv(self, username: str, filepath: str, hist_date: str) -> None:
@@ -79,7 +79,8 @@ class Microsphere(dj.Manual):
             raise ValueError
 
         # Do all structure acronyms exist in the ontology tree in the database?
-        bad_structs = [entry for idx, entry in annot.iterrows() if len(common_hist.Ontology() & f'acronym="{entry["acronym"]}"') == 0]
+        bad_structs = [entry for idx, entry in annot.iterrows() if
+                       len(common_hist.Ontology() & f'acronym="{entry["acronym"]}"') == 0]
         if len(bad_structs):
             print('The following rows are from invalid structures. Check spelling:')
             for row in bad_structs:
@@ -89,6 +90,10 @@ class Microsphere(dj.Manual):
 
         # Transform remaining NaNs to 0
         annot = annot.fillna(0)
+
+        # Convert lesion size from um2 (used by QuPath) to mm2 (used during analysis)
+        for data_col in col[7:]:
+            annot[data_col] /= 1000000
 
         # Translate acronym to structure ID, which is used in the database
         mapping = common_hist.Ontology().map_acronym_to_id()
