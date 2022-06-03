@@ -270,41 +270,46 @@ class MicrosphereSummary(dj.Computed):
         """
 
     def make(self, key: dict) -> None:
+        """
+        Calculate overview stats for the microsphere annotation. Summarize recorded spheres and lesions across slices.
 
+        Args:
+            key: Primary keys for the current common_hist.Histology() entry.
+        """
         # Fetch relevant data
-        # for mouse in np.unique(common_hist.Histology().fetch('mouse_id')):
-        #     key = dict(mouse_id=mouse)
         data = pd.DataFrame((Microsphere & key).fetch())
-
-        # Calculate absolute imaged volume from slice thickness and surface
-        thickness, total_slices = (common_hist.Histology & key).fetch1('thickness', 'n_slices')
-        surface = (common_hist.Histology.HistoSlice & key).fetch('slice_area')
-        imaged_vol = np.sum(thickness / 1000 * surface)
-        # Total brain volume is volume of "whole brain" minus volume of ventricular system (data from Allen Brain Atlas)
-        brain_vol = (common_hist.Ontology & 'parent_id=-1').fetch1('volume') - \
-                    (common_hist.Ontology & 'acronym="VS"').fetch1('volume')
-        # Divide imaged volume by total brain volume for relative imaged volume
-        perc_vol = imaged_vol / brain_vol
-        # print(mouse, '-', imaged_vol)
+        perc_vol = (common_hist.Histology & key).fetch1('rel_imaged_vol')
 
         # Compute data for spheres and lesions
         entries = []
-        for metric in ['spheres', 'lesion_spheres', 'map2', 'gfap', 'auto']:
-            if metric == 'lesion_spheres':
-                entry = dict(**key, metric_name=metric)
-                only_lesion = data[data['lesion'] > 0]
-                entry['count'] = only_lesion['spheres'].sum()
-                entry['count_extrap'] = entry['count'] * 1 / perc_vol
-                entry['num_slices'] = len(only_lesion[only_lesion['spheres'] > 0].drop_duplicates(subset=['histo_date',
-                                                                                                          'glass_num',
-                                                                                                          'slice_num']))
-                entries.append(entry)
-            elif not all(data[metric].isna()):
+        for metric in ['spheres', 'map2', 'gfap', 'auto']:
+            if not all(data[metric].isna()):
+                # Total count
                 entry = dict(**key, metric_name=metric)
                 entry['count'] = data[metric].sum()
                 entry['count_extrap'] = entry['count'] * 1 / perc_vol
                 entry['num_slices'] = len(data[data[metric] > 0].drop_duplicates(subset=['histo_date', 'glass_num',
                                                                                          'slice_num']))
+                entries.append(entry)
+
+                # Spheres associated with lesions
+                if metric == 'spheres':
+                    entry = dict(**key, metric_name='spheres_lesion')
+                    only_lesion = data[data['lesion'] > 0]
+                    entry['count'] = only_lesion[metric].sum()
+                    entry['count_extrap'] = entry['count'] * 1 / perc_vol
+                    entry['num_slices'] = len(
+                        only_lesion[only_lesion[metric] > 0].drop_duplicates(subset=['histo_date', 'glass_num',
+                                                                                        'slice_num']))
+                # Lesions associated with spheres
+                else:
+                    entry = dict(**key, metric_name=metric+'_spheres')
+                    only_spheres = data[data['spheres'] > 0]
+                    entry['count'] = only_spheres[metric].sum()
+                    entry['count_extrap'] = entry['count'] * 1 / perc_vol
+                    entry['num_slices'] = len(
+                        only_spheres[only_spheres[metric] > 0].drop_duplicates(subset=['histo_date', 'glass_num',
+                                                                                       'slice_num']))
                 entries.append(entry)
 
         # Insert entries into database
