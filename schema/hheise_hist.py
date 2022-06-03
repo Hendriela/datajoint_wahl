@@ -17,6 +17,7 @@ import login
 login.connect()
 
 from schema import common_hist
+from util import helper
 
 schema = dj.schema('common_hist', locals(), create_tables=True)
 
@@ -154,8 +155,17 @@ class MicrosphereSummary(dj.Computed):
 
         # Compute data for spheres and lesions
         entries = []
-        for metric in ['spheres', 'map2', 'gfap', 'auto']:
-            if not all(data[metric].isna()):
+        for metric in ['spheres', 'lesion_spheres', 'map2', 'gfap', 'auto']:
+            if metric == 'lesion_spheres':
+                entry = dict(**key, metric_name=metric)
+                only_lesion = data[data['lesion'] > 0]
+                entry['count'] = only_lesion['spheres'].sum()
+                entry['count_extrap'] = entry['count'] * 1 / perc_vol
+                entry['num_slices'] = len(only_lesion[only_lesion['spheres'] > 0].drop_duplicates(subset=['histo_date',
+                                                                                                          'glass_num',
+                                                                                                          'slice_num']))
+                entries.append(entry)
+            elif not all(data[metric].isna()):
                 entry = dict(**key, metric_name=metric)
                 entry['count'] = data[metric].sum()
                 entry['count_extrap'] = entry['count'] * 1 / perc_vol
