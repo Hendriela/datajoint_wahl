@@ -6,6 +6,8 @@ Created on 16/05/2022 17:09
 
 Schema for histology analysis
 """
+import datetime
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -193,8 +195,9 @@ class Histology(dj.Manual):
     ----
     thickness       : int                                           # Slice thickness in um
     n_slices        : int                                           # Number of slices imaged, for whole-brain extrapolation
+    rel_imaged_vol  : float                                         # Relative imaged volume of the whole brain
     cutting_device  : enum('vibratome', 'cryostat')                 # Cutting device used
-    direction       : enum('coronal', 'sagittal', 'horizontal')     # Cutting direction
+    direction       : enum('coronal', 'sagittal', 'horizontal')     # Anatomical Cutting direction
     microscope      : varchar(256)                                  # Name of the microscope used for imaging
     """
 
@@ -208,7 +211,20 @@ class Histology(dj.Manual):
         -> [nullable] ReferenceAtlas  # ID of the closest corresponding image in the annotation atlas (empty if not recorded)
         """
 
-    def import_data(self, username: str, filepath, day, thickness, cutting, direction, microscope):
+    def import_data(self, username: str, filepath: str, day: Union[str, datetime.date], thickness: int, cutting: str,
+                    direction: str, microscope: str) -> None:
+        """
+        Import general information about a histology experiment, manually and from a CSV file.
+
+        Args:
+            username    : Name of the investigator to which the mouse/mice of the experiment belong.
+            filepath    : Absolute file path to the CSV file holing slice surface areas of all imaged slices.
+            day         : Day if the histology experiment, as a datetime.date object or string with format 'YYYY-MM-DD'.
+            thickness   : Thickness of the slices, in um.
+            cutting     : Cutting device/method used. Has to be either 'vibratome' or 'cryostat'.
+            direction   : Anatomical cutting direction of the slices. Has to be 'coronal', 'sagittal' or 'horizontal'
+            microscope  : Name of the microscope used for imaging.
+        """
 
         # Load data from slice_size CSV file
         #
@@ -234,10 +250,17 @@ class Histology(dj.Manual):
         entries = []
         part_entries = []
 
+        # Total brain volume is volume of "whole brain" minus volume of ventricular system (data from Allen Brain Atlas)
+        brain_vol = (Ontology & 'parent_id=-1').fetch1('volume') - (Ontology & 'acronym="VS"').fetch1('volume')
+
         for mouse_id in mouse_ids:
+            # Calculate total imaged volume and normalize it by the total brain volume
+            imaged_vol = np.sum(thickness / 1000 * slice_sizes[slice_sizes['mouse_id'] == mouse_id]['slice_area'].sum())
+
             entries.append({'username': username, 'mouse_id': mouse_id, 'histo_date': day, 'thickness': thickness,
                             'n_slices': len(slice_sizes[slice_sizes['mouse_id'] == mouse_id]),
-                            'cutting_device': cutting, 'direction': direction, 'microscope': microscope})
+                            'rel_imaged_vol': imaged_vol/brain_vol, 'cutting_device': cutting, 'direction': direction,
+                            'microscope': microscope})
             for idx, row in slice_sizes[slice_sizes['mouse_id'] == mouse_id].iterrows():
                 part_entries.append({'username': username, 'histo_date': day, **row})
 
