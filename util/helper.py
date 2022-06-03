@@ -7,7 +7,7 @@ Created on 05/10/2021 11:24
 A few small helper functions.
 """
 
-from typing import List
+from typing import List, Union
 import re
 import datajoint as dj
 import os
@@ -44,6 +44,26 @@ def alphanumerical_sort(x: List[str]) -> List[str]:
 
     x_sort.sort(key=natural_keys)
     return x_sort
+
+
+def in_query(data: Union[list, tuple]) -> str:
+    """
+    Formats a list or tuple into a string that can be used for advanced querying in DataJoint to query multiple values
+    of an attribute with the 'in' keyword. Works for numerical and string attributes.
+    Usage example: common_mice.Mouse() & f'mouse_id in {helper.in_query(mouse_id_list)}'
+
+    Args:
+        data: Iterable with the possible values for the query
+
+    Returns:
+        String, formatted for DataJoint as tuple of values.
+    """
+    out = '('
+    for el in data:
+        out += f'"{el}",'
+    out = out[:-1]
+    out += ')'
+    return out
 
 
 def extract_documentation(table: dj.Table, return_only_pks=True):
