@@ -89,6 +89,15 @@ class Microsphere(dj.Manual):
             raise ValueError
         #############################
 
+        # Filter out annotated lesions in certain lateral thalamic nuclei which are not associated with spheres.
+        # Damage in these areas is most likely caused by the window, not the spheres, as it can be seen also in mice without spheres.
+        filter_structs = ['LP', 'LD', 'RT', 'LGd', 'LGv']
+        only_structs = annot['acronym'].isin(filter_structs)
+        only_no_spheres = annot['spheres'] == 0
+        only_lesions = annot['lesion'] == 1
+        combine_filter = only_structs & only_no_spheres & only_lesions
+        annot = annot[~combine_filter]
+
         # Transform remaining NaNs to 0
         annot = annot.fillna(0)
 
