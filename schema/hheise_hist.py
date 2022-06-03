@@ -110,11 +110,145 @@ class Microsphere(dj.Manual):
                     raise KeyError(f'Could not find acronym {row["acronym"]} of entry {entry}.')
                 self.insert1(entry)
 
+    def get_structure(self, structure: Union[str, int], histo_key: Optional[dict] = None) -> pd.DataFrame:
+        """
+        Get processed histology data of all mice of a specific structure. The function queries data from
+        Microspheres() and combines data of the provided structure and all of its subregions.
 
+        Args:
+            structure: Structure ID, Acronym or full name of the target structure.
+            histo_key: Optional, primary keys of a specific histology experiment. If None, the whole table will be queried.
 
+        Returns:
+            DataFrame with one entry per mouse and the following columns:
+                - spheres_total (total number of spheres in the structure)
+                - spheres_lesion (number of spheres which are associated with a lesion)
+                - lesion (Volume of damaged area in each of the three channels (auto, gfap, map2). If a channel was not
+                    imaged, the columns do not exist.
+                - lesion_spheres (Volume of damaged area that is associated with spheres)
+                - xxx_rel (to all of these columns, this column normalizes the value to the entire brain. Eg. a auto_rel
+                    value of 0.2 means that 20% of the total autofluorescence damage in this animal was found in the
+                    current structure.
+        """
 
+        def summarize_single_metric(series: pd.Series, global_val: float, h: Optional[int]) -> Tuple[float, float]:
+            """
+            Calculate absolute and relative summary of a data series (a specific metric/channel).
+            Args:
+                series: Data of the metric, column of "curr_mouse" DataFrame.
+                global_val: Value of the metric in the whole brain for normalization.
+                h: Height/thickness of the sample, in um. Set to None for non-volume metrics (sphere counts).
 
+            Returns:
 
+            """
+            if h is None:
+                summed = series.sum()
+            else:
+                summed = series.sum() * (h / 1000)
+
+            # If a metric is 0 in the entire imaged tissue, set rel_summed manually to 0 to avoid NaN
+            if global_val > 0:
+                rel_summed = summed / global_val
+            else:
+                rel_summed = 0.0
+            return summed, rel_summed
+
+        # If restriction is given, apply it to the queried histology experiment
+        if histo_key:
+            data = self & histo_key
+        else:
+            data = self
+
+        # Get ID of the structure, if not given
+        if type(structure) != int:
+            try:
+                id = (common_hist.Ontology & f'acronym="{structure}"').fetch1('structure_id')
+            except dj.errors.DataJointError:
+                try:
+                    id = (common_hist.Ontology & f'full_name="{structure}"').fetch1('structure_id')
+                except dj.errors.DataJointError as ex:
+                    raise dj.errors.DataJointError(f'\nCould not interpret structure "{structure}". Use either the '
+                                                   f'ID, acronym or full name of a structure.\nError:\n{ex}')
+        else:
+            id = structure
+
+        # Raise warning if the selected structure does not have a volume on record
+        if np.isnan((common_hist.Ontology & f'structure_id={id}').fetch1('volume')):
+            raise UserWarning(f'Selected structure {structure} (ID {id}) has no volume on record. Relative results'
+                              f'cannot be computed.')
+
+        # Select only data from regions that have the structure ID in their ID path
+        query = (data * common_hist.Ontology) & f'id_path like "%/{id}/%"'
+        if len(query) == 0:
+            raise dj.errors.QueryError(f'Query for structure ID {id} returned no data.')
+
+        # Process data to for individual mice
+        results = {}
+        for mouse in np.unique(query.fetch('mouse_id')):
+            # Restrict for current mouse and fetch data
+            curr_mouse = pd.DataFrame((query & f'mouse_id={mouse}').fetch())
+
+            if len(curr_mouse['username'].unique()) > 1:
+                raise NotImplementedError('More than 1 user queried, not implemented yet.')
+            elif len(curr_mouse['histo_date'].unique()) > 1:
+                raise NotImplementedError('More than 1 histology session queried, not implemented yet.')
+
+            entry_key = dict(username=curr_mouse['username'].unique()[0], mouse_id=mouse,
+                             histo_date=curr_mouse['histo_date'].unique()[0])
+
+            curr_results = {}
+
+            # # Get primary keys for unique slices (first 5 columns) to efficiently query slice areas
+            # slice_keys = curr_mouse.drop_duplicates(subset=['histo_date', 'glass_num', 'slice_num']).iloc[:, :5]
+            # areas = (common_hist.Histology.HistoSlice & slice_keys)
+
+            # Get metrics of the whole dataset
+            thickness = (common_hist.Histology & entry_key).fetch1('thickness')
+            metrics = np.unique((MicrosphereSummary.Metric & entry_key).fetch('metric_name'))
+            global_data = {}
+            for metric in metrics:
+                try:
+                    global_data[metric] = (MicrosphereSummary.Metric & entry_key & f'metric_name="{metric}"').fetch1(
+                        'count')
+                except dj.errors.DataJointError:
+                    pass
+
+            ### Get aggregate results of sphere counts and lesion volume ###
+            # Total number of spheres found in this structure
+            curr_results['spheres_total'], curr_results['spheres_rel'] = \
+                summarize_single_metric(curr_mouse['spheres'], global_data['spheres'], None)
+
+            # Number of these spheres that were associated with a lesion
+            curr_results['spheres_lesion'], curr_results['spheres_lesion_rel'] = \
+                summarize_single_metric(curr_mouse[curr_mouse['lesion'] == 1]['spheres'],
+                                        global_data['spheres_lesion'], None)
+
+            # Volume of MAP2/GFAP/autofluorescence damage in mm3 in this structure
+            if not all(curr_mouse['map2'].isna()):
+                curr_results['map2'], curr_results['map2_rel'] = \
+                    summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 0]['map2'],
+                                            global_data['map2'], thickness)
+                curr_results['map2_spheres'], curr_results['map2_spheres_rel'] = \
+                    summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 1]['map2'],
+                                            global_data['map2_spheres'], thickness)
+
+            if not all(curr_mouse['gfap'].isna()):
+                curr_results['gfap'], curr_results['gfap_rel'] = \
+                    summarize_single_metric(curr_mouse['gfap'], global_data['gfap'], thickness)
+                curr_results['gfap_spheres'], curr_results['gfap_spheres_rel'] = \
+                    summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 1]['gfap'],
+                                            global_data['gfap_spheres'], thickness)
+
+            if not all(curr_mouse['auto'].isna()):
+                curr_results['auto'], curr_results['auto_rel'] = \
+                    summarize_single_metric(curr_mouse['auto'], global_data['auto'], thickness)
+                curr_results['auto_spheres'], curr_results['auto_spheres_rel'] = \
+                    summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 1]['auto'],
+                                            global_data['auto_spheres'], thickness)
+            results[mouse] = curr_results
+
+        return pd.DataFrame(results).T
 
 
 @schema
