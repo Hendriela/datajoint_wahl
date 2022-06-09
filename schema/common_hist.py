@@ -7,7 +7,7 @@ Created on 16/05/2022 17:09
 Schema for histology analysis
 """
 import datetime
-from typing import Union
+from typing import Union, List
 
 import numpy as np
 import pandas as pd
@@ -119,6 +119,34 @@ class Ontology(dj.Manual):
         else:
             return {entry['acronym']: entry['structure_id'] for entry in data}
 
+    def validate_grouping(self, group: List[list]) -> None:
+        """
+        Validate a group of structures to find duplicates (every structure should be associated with a single grouping).
+        Prints out duplicates if a structure is a child of multiple provided grouping structures.
+
+        Args:
+            group: List of lists of structure IDs or acronyms.
+        """
+        # If the grouping was given with acronyms, convert them to IDs
+        if type(group[0][0]) != int:
+            group_id = [[(self & f'acronym="{el}"').fetch1('structure_id') for el in sublist] for sublist in group]
+        else:
+            group_id = group
+
+        # Flatten grouping
+        group_flat = [element for sublist in group_id for element in sublist]
+        group_flat_acr = [element for sublist in group for element in sublist]
+
+        # Check if a structure is included in more than one provided group
+        data = pd.DataFrame(self.fetch('acronym', 'structure_id', 'id_path', as_dict=True))
+
+        for path in data['id_path']:
+            parents = path.split('/')[1:-1]
+            parent_in_group = [True if str(single_id) in parents else False for single_id in group_flat]
+            if sum(parent_in_group) > 1:
+                curr_struct = data[data["structure_id"] == int(parents[-1])]['acronym'].values[0]
+                parent_structs = [group_flat_acr[i] for i in range(len(parent_in_group)) if parent_in_group[i]]
+                print(f'\nStructure {curr_struct} is a child of multiple provided superstructures:\n{parent_structs}')
 
 @schema
 class ReferenceAtlas(dj.Manual):
