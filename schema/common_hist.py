@@ -18,6 +18,7 @@ import login
 login.connect()
 
 from schema import common_mice
+from util import helper
 
 schema = dj.schema('common_hist', locals(), create_tables=True)
 
@@ -119,13 +120,16 @@ class Ontology(dj.Manual):
         else:
             return {entry['acronym']: entry['structure_id'] for entry in data}
 
-    def validate_grouping(self, group: List[list]) -> None:
+    def validate_grouping(self, group: List[list]) -> List[str]:
         """
         Validate a group of structures to find duplicates (every structure should be associated with a single grouping).
         Prints out duplicates if a structure is a child of multiple provided grouping structures.
 
         Args:
             group: List of lists of structure IDs or acronyms.
+
+        Returns:
+            List of top-most structure acronyms that are not included in any of the provided groups.
         """
         # If the grouping was given with acronyms, convert them to IDs
         if type(group[0][0]) != int:
@@ -137,16 +141,39 @@ class Ontology(dj.Manual):
         group_flat = [element for sublist in group_id for element in sublist]
         group_flat_acr = [element for sublist in group for element in sublist]
 
-        # Check if a structure is included in more than one provided group
+        # Get data from database
         data = pd.DataFrame(self.fetch('acronym', 'structure_id', 'id_path', as_dict=True))
+        group_flat_path = list((self & f'acronym in {helper.in_query(group_flat_acr)}').fetch('id_path'))
 
-        for path in data['id_path']:
+        # Order structures by increasing path length (to start of the topmost region)
+        data_ordered = data.sort_values(by="id_path", key=lambda x: x.str.len())
+
+        others = []
+        others_path = []
+
+        for path in data_ordered['id_path']:
+            # Get parent structures of the current path
             parents = path.split('/')[1:-1]
+            # Check if any grouped structure is a parent
             parent_in_group = [True if str(single_id) in parents else False for single_id in group_flat]
+
+            # If there are more than one grouped structures which are parents, print them out
             if sum(parent_in_group) > 1:
                 curr_struct = data[data["structure_id"] == int(parents[-1])]['acronym'].values[0]
                 parent_structs = [group_flat_acr[i] for i in range(len(parent_in_group)) if parent_in_group[i]]
                 print(f'\nStructure {curr_struct} is a child of multiple provided superstructures:\n{parent_structs}')
+
+            # If the current structure is not included in any group...
+            elif sum(parent_in_group) == 0:
+                # First check if it is a parent structure of a group
+                if not any(path in group_path for group_path in group_flat_path):
+                    # If not, check if a parent of the current structure is already in the list (to only keep the topmost structure)
+                    if not any(others_p in path for others_p in others_path):
+                        # If not, we can append this region as a top-level "others" structure
+                        others.append(data[data["structure_id"] == int(parents[-1])]['acronym'].values[0])
+                        others_path.append(path)
+
+        return others
 
 @schema
 class ReferenceAtlas(dj.Manual):
