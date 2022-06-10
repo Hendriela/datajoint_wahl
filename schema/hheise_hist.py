@@ -137,7 +137,8 @@ class Microsphere(dj.Manual):
                 - lesion_spheres (Volume of damaged area that is associated with spheres)
                 - xxx_rel (to all of these columns, this column normalizes the value to the entire brain. Eg. a auto_rel
                     value of 0.2 means that 20% of the total autofluorescence damage in this animal was found in the
-                    current structure.
+                    current structure. A spheres_lesion_rel value of 0.2 means that 20% of spheres which are associated
+                    with lesions are found in this structure.)
         """
 
         def summarize_single_metric(series: pd.Series, global_val: float, h: Optional[int]) -> Tuple[float, float]:
@@ -184,13 +185,14 @@ class Microsphere(dj.Manual):
 
         # Raise warning if the selected structure does not have a volume on record
         if np.isnan((common_hist.Ontology & f'structure_id={id}').fetch1('volume')):
-            raise UserWarning(f'Selected structure {structure} (ID {id}) has no volume on record. Relative results'
+            raise UserWarning(f'Selected structure {structure} (ID {id}) has no volume on record. Relative results '
                               f'cannot be computed.')
 
         # Select only data from regions that have the structure ID in their ID path
         query = (data * common_hist.Ontology) & f'id_path like "%/{id}/%"'
         if len(query) == 0:
-            raise dj.errors.QueryError(f'Query for structure ID {id} returned no data.')
+            # raise dj.errors.QueryError(f'Query for structure ID {id} returned no data.')
+            return None
 
         # Process data to for individual mice
         results = {}
