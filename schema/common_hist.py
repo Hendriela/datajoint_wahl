@@ -169,9 +169,13 @@ class Ontology(dj.Manual):
                 if not any(path in group_path for group_path in group_flat_path):
                     # If not, check if a parent of the current structure is already in the list (to only keep the topmost structure)
                     if not any(others_p in path for others_p in others_path):
-                        # If not, we can append this region as a top-level "others" structure
-                        others.append(data[data["structure_id"] == int(parents[-1])]['acronym'].values[0])
-                        others_path.append(path)
+                        curr_acr = data[data["structure_id"] == int(parents[-1])]['acronym'].values[0]
+                        # Exclude unused structures 73 (ventricular system), 1024 (grooves),
+                        # 549009199 (lateral strip of striatum) and 304325711 (retina)
+                        if all(banned_id not in path for banned_id in ['73', '1024', '304325711', '549009199']):
+                            # If not, we can append this region as a top-level "others" structure
+                            others.append(curr_acr)
+                            others_path.append(path)
 
         return others
 
