@@ -119,7 +119,7 @@ class Microsphere(dj.Manual):
                     raise KeyError(f'Could not find acronym {row["acronym"]} of entry {entry}.')
                 self.insert1(entry)
 
-    def get_structure(self, structure: Union[str, int], histo_key: Optional[dict] = None) -> pd.DataFrame:
+    def get_structure(self, structure: Union[str, int], histo_key: Optional[dict] = None) -> Optional[pd.DataFrame]:
         """
         Get processed histology data of all mice of a specific structure. The function queries data from
         Microspheres() and combines data of the provided structure and all of its subregions.
@@ -139,6 +139,7 @@ class Microsphere(dj.Manual):
                     value of 0.2 means that 20% of the total autofluorescence damage in this animal was found in the
                     current structure. A spheres_lesion_rel value of 0.2 means that 20% of spheres which are associated
                     with lesions are found in this structure.)
+            If no mouse has data for the given structure, return None.
         """
 
         def summarize_single_metric(series: pd.Series, global_val: float, h: Optional[int]) -> Tuple[float, float]:
