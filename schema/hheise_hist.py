@@ -291,6 +291,7 @@ class MicrosphereSummary(dj.Computed):
         # Fetch relevant data
         data = pd.DataFrame((Microsphere & key).fetch())
         perc_vol = (common_hist.Histology & key).fetch1('rel_imaged_vol')
+        thickness = (common_hist.Histology & key).fetch1('thickness') / 1000    # slice thickness in mm
 
         # Compute data for spheres and lesions
         entries = []
@@ -299,7 +300,10 @@ class MicrosphereSummary(dj.Computed):
                 # Total count
                 entry = dict(**key, metric_name=metric)
                 entry['count'] = data[metric].sum()
-                entry['count_extrap'] = entry['count'] * 1 / perc_vol
+                # For all metrics except the sphere count, we have to convert the imported areas in mm2 to volume in mm3
+                if metric != 'spheres':
+                    entry['count'] *= thickness
+                entry['count_extrap'] = entry['count'] / perc_vol
                 entry['num_slices'] = len(data[data[metric] > 0].drop_duplicates(subset=['histo_date', 'glass_num',
                                                                                          'slice_num']))
                 entries.append(entry)
@@ -317,7 +321,7 @@ class MicrosphereSummary(dj.Computed):
                 else:
                     entry = dict(**key, metric_name=metric+'_spheres')
                     only_spheres = data[data['spheres'] > 0]
-                    entry['count'] = only_spheres[metric].sum()
+                    entry['count'] = only_spheres[metric].sum() * thickness     # again, convert area to volume
                     entry['count_extrap'] = entry['count'] * 1 / perc_vol
                     entry['num_slices'] = len(
                         only_spheres[only_spheres[metric] > 0].drop_duplicates(subset=['histo_date', 'glass_num',
