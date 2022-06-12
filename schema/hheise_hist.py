@@ -146,7 +146,7 @@ class Microsphere(dj.Manual):
             """
             Calculate absolute and relative summary of a data series (a specific metric/channel).
             Args:
-                series: Data of the metric, column of "curr_mouse" DataFrame.
+                series: Data of the metric, column of "curr_mouse" DataFrame (sphere count or lesion area in mm2).
                 global_val: Value of the metric in the whole brain for normalization.
                 h: Height/thickness of the sample, in um. Set to None for non-volume metrics (sphere counts).
 
@@ -239,24 +239,23 @@ class Microsphere(dj.Manual):
             # Volume of MAP2/GFAP/autofluorescence damage in mm3 in this structure
             if not all(curr_mouse['map2'].isna()):
                 curr_results['map2'], curr_results['map2_rel'] = \
-                    summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 0]['map2'],
-                                            global_data['map2'], thickness)
+                    summarize_single_metric(curr_mouse['map2'], global_data['map2'], thickness)
                 curr_results['map2_spheres'], curr_results['map2_spheres_rel'] = \
-                    summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 1]['map2'],
+                    summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 0]['map2'],
                                             global_data['map2_spheres'], thickness)
 
             if not all(curr_mouse['gfap'].isna()):
                 curr_results['gfap'], curr_results['gfap_rel'] = \
                     summarize_single_metric(curr_mouse['gfap'], global_data['gfap'], thickness)
                 curr_results['gfap_spheres'], curr_results['gfap_spheres_rel'] = \
-                    summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 1]['gfap'],
+                    summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 0]['gfap'],
                                             global_data['gfap_spheres'], thickness)
 
             if not all(curr_mouse['auto'].isna()):
                 curr_results['auto'], curr_results['auto_rel'] = \
                     summarize_single_metric(curr_mouse['auto'], global_data['auto'], thickness)
                 curr_results['auto_spheres'], curr_results['auto_spheres_rel'] = \
-                    summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 1]['auto'],
+                    summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 0]['auto'],
                                             global_data['auto_spheres'], thickness)
             results[mouse] = curr_results
 
