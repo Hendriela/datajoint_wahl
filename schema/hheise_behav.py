@@ -116,7 +116,8 @@ class VRSessionInfo(dj.Imported):
         if ('weight [g]' in sess_entry.columns) and not pd.isna(sess_entry['weight [g]'].values[0]):
             try:
                 common_mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
-                                          'date_of_weight': key['day'], 'weight': sess_entry['weight [g]'].values[0]})
+                                              'date_of_weight': key['day'],
+                                              'weight': sess_entry['weight [g]'].values[0]})
             except dj.errors.DuplicateError:
                 pass
 
@@ -127,7 +128,7 @@ class VRSessionInfo(dj.Imported):
 
         # Turn manual ID (base 1) into pythonic ID (base 0)
         if new_key['condition_switch'] != [-1]:
-            new_key['condition_switch'] = [x-1 for x in new_key['condition_switch']]
+            new_key['condition_switch'] = [x - 1 for x in new_key['condition_switch']]
 
         # Check if this is an imaging session (session has to be inserted into common_img.Scan() first)
         if len((common_img.Scan & key).fetch()) == 1:
@@ -333,17 +334,17 @@ class RawBehaviorFile(dj.Imported):
                     curr_lick = curr_lick[::5]
 
                     # Rescale speed to fit on y-axis
-                    curr_enc = curr_enc/max(curr_enc)
+                    curr_enc = curr_enc / max(curr_enc)
 
                     # plot behavior
                     curr_ax.plot(curr_enc, color='tab:red')  # plot running
                     curr_ax.spines['top'].set_visible(False)
                     curr_ax.spines['right'].set_visible(False)
                     curr_ax.set_xticks([])
-                    ax2 = curr_ax.twiny()   # make new plot with independent x axis in the same subplot
+                    ax2 = curr_ax.twiny()  # make new plot with independent x axis in the same subplot
                     ax2.plot(curr_lick, color='tab:blue')  # plot licking
                     ax2.set_ylim(-0.1, 1.1)
-                    ax2.axis('off')         # Turn of axis spines for both new axes
+                    ax2.axis('off')  # Turn of axis spines for both new axes
 
                     # Make curr_ax (where axis is not turned off and you can see the background color) pickable
                     curr_ax.set_picker(True)
@@ -971,7 +972,7 @@ class VRSession(dj.Computed):
             if abs(more_frames_in_TDT) > 5:
                 print("Trial {}:\n{} more frames imported from TDT than in raw imaging file "
                       "({} frames)".format(trial_key, more_frames_in_TDT, frame_count))
-            
+
             # This means that the TDT file has less frames than the TIFF file (common)
             if more_frames_in_TDT < 0:
                 # first check if TDT stopped logging earlier than TCP
@@ -990,7 +991,8 @@ class VRSession(dj.Computed):
                     for i in range(more_frames_in_TDT):
                         trigger[trig_blocks[-i], 1] = 0
                 else:
-                    raise ImportError(f'{more_frames_in_TDT} too many frames imported from TDT, could not be corrected!')
+                    raise ImportError(
+                        f'{more_frames_in_TDT} too many frames imported from TDT, could not be corrected!')
 
             # This section deals with how to add the missing frames to the trigger array
             if frames_to_prepend > 0:
@@ -1018,7 +1020,7 @@ class VRSession(dj.Computed):
 
                 # 95 sample steps (~45 ms) is much higher than two normal frames should be apart
                 # The gap is AFTER the frames at these indices, +1 because we ignore first line during slicing
-                frame_gap_idx = frames_idx[np.where(frame_dist > 95)[0]]+1
+                frame_gap_idx = frames_idx[np.where(frame_dist > 95)[0]] + 1
 
                 if len(frame_gap_idx) > 0:
                     # Fill large gaps if any were found
@@ -1028,7 +1030,7 @@ class VRSession(dj.Computed):
                     # Get the indices of gaps, sorted by gap size
                     frame_dist_argsort = np.argsort(frame_dist)
                     # Get the index of the start of the largest gaps in "trigger" array (again +1)
-                    largest_gap_start = frames_idx[frame_dist_argsort[-frames_to_add:]]+1
+                    largest_gap_start = frames_idx[frame_dist_argsort[-frames_to_add:]] + 1
                     # Get the distance in samples of these gaps and divide them by 2 to find middle point
                     largest_gap_middle = frame_dist[frame_dist_argsort[-frames_to_add:]] // 2
 
@@ -1059,23 +1061,25 @@ class VRSession(dj.Computed):
                     elif frames_to_prepend < 30:
 
                         # int rounds down and avoids overestimation of step size
-                        max_step_size = int(first_frame/frames_to_prepend)
+                        max_step_size = int(first_frame / frames_to_prepend)
 
                         # If the time before the first frame is not enough to fit all frames in there without crossing the
                         # step limit, we interleave the new frames in the beginning half-way between the original frames
                         if max_step_size <= tdt_step_limit:
 
                             # Check where the actual frame triggers are and find half-way points
-                            actual_frame_idx = np.where(trigger[1:, 1] == 1)[0] + 1     # +1 because we ignore the first row
+                            actual_frame_idx = np.where(trigger[1:, 1] == 1)[
+                                                   0] + 1  # +1 because we ignore the first row
                             # Get the distance between the first "n_frames_to_prepend" frames where we have to interleave fake frames
-                            interframe_idx = actual_frame_idx[1:frames_to_prepend+1] - actual_frame_idx[:frames_to_prepend]
+                            interframe_idx = actual_frame_idx[1:frames_to_prepend + 1] - actual_frame_idx[
+                                                                                         :frames_to_prepend]
                             # The new indices are the first actual frame indices plus half of the interframe indices
-                            idx_list = actual_frame_idx[:frames_to_prepend] + interframe_idx//2
+                            idx_list = actual_frame_idx[:frames_to_prepend] + interframe_idx // 2
 
                         # Otherwise, put them before the beginning at the biggest possible step size
                         else:
                             # Create indices of new frame triggers with given step size, going backwards from the first real frame
-                            idx_list = np.array([i for i in range(first_frame-max_step_size, 0, -max_step_size)])
+                            idx_list = np.array([i for i in range(first_frame - max_step_size, 0, -max_step_size)])
 
                         # Exit condition: New indices are somehow not enough
                         if len(idx_list) != frames_to_prepend:
@@ -1086,7 +1090,8 @@ class VRSession(dj.Computed):
 
                     else:
                         # correction does not work if the whole log file is not large enough to include all missing frames
-                        raise ImportError(f'{int(abs(more_frames_in_TDT))} too few frames imported from TDT, could not be corrected.')
+                        raise ImportError(
+                            f'{int(abs(more_frames_in_TDT))} too few frames imported from TDT, could not be corrected.')
                 else:
                     if abs(more_frames_in_TDT) > 5:
                         print('Found enough gaps in frame trigger to add missing frames')
@@ -1167,7 +1172,8 @@ class VRSession(dj.Computed):
         # check frame count again
         merge_trig = np.sum(merge_filt['trigger'])
         if imaging and merge_trig != frame_count:
-            raise ValueError(f'Frame count matching unsuccessful: {merge_trig} frames in merge, should be {frame_count} frames.')
+            raise ValueError(
+                f'Frame count matching unsuccessful: {merge_trig} frames in merge, should be {frame_count} frames.')
 
         # transform back to numpy array for saving
         time_passed = merge_filt.index - merge_filt.index[0]  # transfer timestamps to
@@ -1357,6 +1363,6 @@ class PerformanceTrend(dj.Computed):
 
         # Insert entry into the table
         entry = dict(key, p_normality=normality, perf_corr=corr, p_perf_corr=p, perf_r2=r2, prob_lin_reg=p_r2,
-                          perf_intercept=intercept, perf_slope=slope, perf_ols_x=x_fit, perf_ols_y=perf)
+                     perf_intercept=intercept, perf_slope=slope, perf_ols_x=x_fit, perf_ols_y=perf)
 
         self.insert1(entry)
