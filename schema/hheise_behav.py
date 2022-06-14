@@ -1256,35 +1256,20 @@ class VRPerformance(dj.Computed):
         # Combine primary dict "key" with attributes "trial_data" and insert entry
         self.insert1({**key, **trial_data})
 
-    def get_mean(self, attr: str = 'binned_lick_ratio', ignore_validation: bool = True) -> List[float]:
+    def get_mean(self, attr: str, ignore_validation: bool=True) -> List[float]:
         """
         Get a list of the mean of a given performance attribute of the queried sessions.
         
         Args:
             attr: Performance metric, must be attribute of VRPerformance()
-            ignore_validation: Bool flag whether trials with changed conditions (validation trials) should be excluded
-                from the mean. For normal behavior analysis this should be true, as validation trials are to be handled
-                separately.
 
         Returns:
-            Means of the performance attribute over the queried sessions, one value per session
+            Means of a performance attribute of the queried sessions
         """
+        # Todo: Implement filtering out validation trials
         sess = self.fetch(attr)
-
-        if len(np.unique(self.fetch('mouse_id'))) > 1:
-            raise dj.errors.QueryError('More than one mouse queried! Only one mouse allowed for VRPerformance.get_mean().')
-
-        if ignore_validation:
-            mean_attr = []
-            cond_switches = (VRSessionInfo() & self.restriction).fetch('condition_switch')
-            for cond_switch, curr_sess in zip(cond_switches, sess):
-                if cond_switch == [-1]:
-                    mean_attr.append(np.mean(curr_sess))
-                else:
-                    mean_attr.append(np.mean(curr_sess[:cond_switch[0]]))
-            return mean_attr
-        else:
-            return [np.mean(x) for x in sess]
+        # return [np.mean(x) for x in sess]
+        return print("Implement filtering out validation trials")
 
     def plot_performance(self, attr: str = 'binned_lick_ratio') -> None:
         """

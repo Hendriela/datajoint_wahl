@@ -156,13 +156,13 @@ class Microsphere(dj.Manual):
             if h is None:
                 summed = series.sum()
             else:
-                summed = series.sum() * (h / 1000)  # The lesion size is in mm2, so we have to convert it to mm3 first)
+                summed = series.sum() * (h / 1000)
 
-            # If a metric is 0 in the entire imaged tissue, set rel_summed manually to NaN to avoid errors
+            # If a metric is 0 in the entire imaged tissue, set rel_summed manually to 0 to avoid NaN
             if global_val > 0:
                 rel_summed = summed / global_val
             else:
-                rel_summed = np.nan
+                rel_summed = 0.0
             return summed, rel_summed
 
         # If restriction is given, apply it to the queried histology experiment
@@ -174,24 +174,23 @@ class Microsphere(dj.Manual):
         # Get ID of the structure, if not given
         if type(structure) != int:
             try:
-                struct_id = (common_hist.Ontology & f'acronym="{structure}"').fetch1('structure_id')
+                id = (common_hist.Ontology & f'acronym="{structure}"').fetch1('structure_id')
             except dj.errors.DataJointError:
                 try:
-                    struct_id = (common_hist.Ontology & f'full_name="{structure}"').fetch1('structure_id')
+                    id = (common_hist.Ontology & f'full_name="{structure}"').fetch1('structure_id')
                 except dj.errors.DataJointError as ex:
                     raise dj.errors.DataJointError(f'\nCould not interpret structure "{structure}". Use either the '
                                                    f'ID, acronym or full name of a structure.\nError:\n{ex}')
         else:
-            struct_id = structure
+            id = structure
 
         # Raise warning if the selected structure does not have a volume on record
-        struct_volume = (common_hist.Ontology & f'structure_id={struct_id}').fetch1('volume') / 2   # Divide by 2 to get volume in one hemisphere
-        if np.isnan(struct_volume):
-            raise UserWarning(f'Selected structure {structure} (ID {struct_id}) has no volume on record. Relative results '
+        if np.isnan((common_hist.Ontology & f'structure_id={id}').fetch1('volume')):
+            raise UserWarning(f'Selected structure {structure} (ID {id}) has no volume on record. Relative results '
                               f'cannot be computed.')
 
         # Select only data from regions that have the structure ID in their ID path
-        query = (data * common_hist.Ontology) & f'id_path like "%/{struct_id}/%"'
+        query = (data * common_hist.Ontology) & f'id_path like "%/{id}/%"'
         if len(query) == 0:
             # raise dj.errors.QueryError(f'Query for structure ID {id} returned no data.')
             return None
@@ -258,13 +257,6 @@ class Microsphere(dj.Manual):
                 curr_results['auto_spheres'], curr_results['auto_spheres_rel'] = \
                     summarize_single_metric(curr_mouse[curr_mouse['spheres'] > 0]['auto'],
                                             global_data['auto_spheres'], thickness)
-
-            # Relative lesioned volume of the structure (all stainings combined: If a lesion is present in more stainings, its more damaged)
-            # curr_results['lesion_vol'] = (curr_mouse['auto'].sum() + curr_mouse['gfap'].sum() + curr_mouse['map2'].sum()) * (thickness / 1000)
-            curr_results['lesion_vol'] = curr_mouse['auto'].sum() * (thickness / 1000)
-
-            curr_results['lesion_vol_rel'] = curr_results['lesion_vol'] / struct_volume
-
             results[mouse] = curr_results
 
         return pd.DataFrame(results).T
