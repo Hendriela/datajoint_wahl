@@ -141,23 +141,27 @@ class Session(dj.Manual):
             Relative path with the machine-specific Neurophysiology-DATA-Path removed
         """
 
-        cwd = Path(login.get_neurophys_data_directory())
+        # Get main data directory on the Neurophys-Server, and possible other data directories
+        cwd = [Path(login.get_neurophys_data_directory()), *[Path(x) for x in login.get_alternative_data_directories()]]
 
         # Typecast absolute path to a Path object to easily get parents
         if type(abs_path) == str:
             abs_path = Path(abs_path)
 
-        if cwd in abs_path.parents:
-            # If the session path is inside the Neurophys data directory, transform it to a relative path
-            return os.path.relpath(abs_path, cwd)
-        elif cwd == abs_path:
-            raise NameError('\nAbsolute session path {} cannot be the same as the Neurophys data directory.\n '
-                            'Create a subdfolder inside the Neurophys data directory for the session.'.format(abs_path))
-        else:
-            raise Warning('\nAbsolute session path {} \ndoes not seem to be on your Neurophys server DATA directory. '
-                          'Make sure that the session path and the \nlocal server directory in '
-                          'login.get_neurophys_data_directory() are set correctly.\n'
-                          'Absolute path used for now.'.format(abs_path))
+        # Look through possible directories for the session folder
+        for wd in cwd:
+            if wd in abs_path.parents:
+                # If the session path is inside the Neurophys data directory, transform it to a relative path
+                return os.path.relpath(abs_path, wd)
+            elif wd == abs_path:
+                raise NameError('\nAbsolute session path {} cannot be the same as the Neurophys data directory.\nCreate'
+                                ' a subfolder inside the Neurophys data directory for the session.'.format(abs_path))
+
+        raise ImportError(
+            '\nAbsolute session path {} \ndoes not seem to be in any of the possible DATA directories:\n{}. '
+            'Make sure that the session path, the \nlocal server directory in '
+            'login.get_neurophys_data_directory() and other possible locations in\n'
+            'login.get_alternative_data_directories() are set correctly.'.format(abs_path, cwd))
 
     def helper_insert1(self, entry_dict: dict) -> str:
         """

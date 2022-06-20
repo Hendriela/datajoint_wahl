@@ -85,9 +85,21 @@ def get_autopath(info: dict) -> str:
                  & "mouse_id = {}".format(mouse)).fetch1('batch'))
     if batch == 0:
         raise Exception('Mouse {} has no batch (batch 0). Cannot create session path.\n'.format(mouse))
-    path = os.path.join(login.get_neurophys_data_directory(),
-                        "Batch" + batch, "M" + mouse, info['day'].replace('-', ''))
-    return path
+
+    # Get possible data paths
+    paths = [Path(login.get_neurophys_data_directory()), *[Path(x) for x in login.get_alternative_data_directories()]]
+
+    for poss_path in paths:
+        path = os.path.join(poss_path, "Batch" + batch, "M" + mouse, info['day'].replace('-', ''))
+        # Check if the folder exists, otherwise skip
+        if os.path.isdir(path):
+            # print(f'Path {path} exists.')
+            return path
+        # else:
+        #     print(f'Path {path} does not exist.')
+
+    # If no valid folder is found, raise an error
+    raise ImportError(f'Found no valid folders for session:\n{info}')
 
 
 def remove_session_path(key: dict, path: str) -> str:
@@ -204,6 +216,7 @@ def add_many_sessions(date: Union[str, Iterable[str]], mice: Union[int, Iterable
         # Check if the folder exists, otherwise skip
         if not os.path.isdir(abs_session_path):
             print(f'ImportError: Could not find directory {abs_session_path}, skipping insert.')
+            continue
 
         try:
             # Insert entry into Session()
