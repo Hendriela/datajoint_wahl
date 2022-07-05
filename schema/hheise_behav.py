@@ -12,6 +12,7 @@ import login
 login.connect()
 import datajoint as dj
 from schema import common_mice, common_exp, common_img
+from hheise_scripts import data_util
 
 from datetime import datetime, timedelta
 from typing import Iterable, List, Optional, Tuple, Dict
@@ -136,7 +137,7 @@ class VRSessionInfo(dj.Imported):
         else:
             new_key['imaging_session'] = 0
             print(f"Could not find session {key} in common_img.Scan, thus assuming that the session is not an imaging"
-                  f"session. If it is, enter session into Scan() before populating VRSession()!")
+                  f" session. If it is, enter session into Scan() before populating VRSession()!")
 
         # Replace NaNs with empty strings
         new_key = {k: ('' if v is np.nan else v) for k, v in new_key.items()}
@@ -627,6 +628,34 @@ class VRSession(dj.Computed):
             n_samples = len(self.fetch1('lick'))
             # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
             return np.array(range(0, n_samples * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
+
+        def get_binned_licking(self, bin_size: int) -> np.ndarray:
+            """
+            Bin individual licks to VR position. Used to draw licking histograms for raw behavior analysis.
+
+            Args:
+                bin_size: Size of VR position bins (in arbitrary VR units) in which to bin the licks.
+
+            Returns:
+                1D array with length 120/bin_size, each element containing the number of individual licks at that bin.
+            """
+
+            trial = self.get_array(('pos', 'lick'))
+            lick_only = trial[np.where(trial[:, 2] == 1)]
+
+            if lick_only.shape[0] == 0:
+                hist = np.zeros(int(120 / bin_size))
+            else:
+                # split licking track into individual licks and get VR position
+                diff = np.round(np.diff(lick_only[:, 0]) * 1000).astype(int)    # get array of time differences (in ms)
+                licks = np.split(lick_only, np.where(diff > SAMPLE * 1000)[0] + 1)  # split at points where difference > 8 ms (sample gap)
+                licks = [i for i in licks if i.shape[0] <= 5//SAMPLE]           # only keep licks shorter than 5 seconds (longer licks might indicate problems with sensor)
+                lick_pos = [x[0, 1] for x in licks]                             # get VR position when each lick begins
+
+                # bin lick positions (arbitrary VR positions from -10 to 110 are hard-coded)
+                hist, _ = np.histogram(np.digitize(lick_pos, np.arange(start=-10, stop=111, step=bin_size)),
+                                       bins=np.arange(start=1, stop=int(120 / bin_size + 2)), density=False)
+            return hist
 
         def compute_performances(self, params: dict) -> Tuple[float, float, float]:
             """
@@ -1203,6 +1232,105 @@ class VRSession(dj.Computed):
 
         return array
 
+    def get_normal_trials(self) -> np.ndarray:
+        """
+        Convenience function that returns of one queried session the trial IDs with normal corridor (training pattern,
+        with tone). Used to more easily compute performances, which generally should exclude validation trials.
+
+        Returns:
+            Array with trial IDs of normal (no validation condition) trials.
+        """
+        if len(self) > 1:
+            raise IndexError('Query only one session at a time.')
+
+        trial_ids = np.sort((self.VRTrial() & self.restriction).fetch('trial_id'))  # For some reason, trial_ids are not sorted after querying
+        switch = (VRSessionInfo & self.restriction).fetch1('condition_switch')
+
+        if switch == [-1]:
+            return trial_ids
+        else:
+            return trial_ids[:switch[0]]
+
+    def plot_lick_histogram(self, bin_size: int = 2, ignore_validation: bool = True) -> None:
+        """
+        Create a figure with multiple licking histograms of a single mouse. Each session has its own subplot. Each bin's
+        value represents the percentage of trials during which the mouse licked at least once in this position. Reward
+        zones are marked in red overlays. This plot is useful to examine the raw licking behavior instead of a single
+        number like performance.
+
+        Args:
+            bin_size: Size of VR position bins (in arbitrary VR units) in which to bin the licks.
+            ignore_validation: Bool flag whether to ignore validation trials.
+        """
+
+        def draw_single_histogram(sess_key: dict, curr_ax: plt.Axes, bin_s: int, label_ax: bool) -> None:
+            """
+            Subfunction that draws a single licking histogram (of a single session) onto a given axis. Used to construct
+            larger figures.
+
+            Args:
+                sess_key: Primary keys of the session that should be drawn.
+                curr_ax: Pyplot Axes object where the histogram will be drawn in.
+                bin_s: Size of VR position bins (in arbitrary VR units) in which to bin the licks.
+                label_ax: Bool flag whether X and Y axes should be labelled.
+            """
+            # Select appropriate trials
+            if ignore_validation:
+                trials = (self.VRTrial & sess_key).get_normal_trials()
+            else:
+                trials = (self.VRTrial & sess_key).fetch('trial_id')
+
+            # Bin licking data from these trials into one array and binarize per-trial
+            data = [(self.VRTrial & sess_key & f'trial_id={idx}').get_binned_licking(bin_size=bin_s) for idx in trials]
+            data = np.vstack(data)
+            data[data > 0] = 1  # we only care about that a bin had a lick, not how many
+
+            track_len = (VRSessionInfo & sess_key).fetch1('length')     # We need the track length for X-axis scaling
+
+            # Draw the histogram, with the weights being
+            curr_ax.hist(np.linspace(0, track_len, data.shape[1]), bins=data.shape[1],
+                    weights=(np.sum(data, axis=0) / len(data)) * 100,
+                    facecolor='black', edgecolor='black')
+
+            # Zone borders have to be adjusted for the unbinned x axis
+            zone_borders = (VRSession.VRTrial & f'trial_id={trials[0]}' & sess_key).get_zone_borders()
+            for zone in zone_borders * (track_len / 120):
+                curr_ax.axvspan(zone[0], zone[1], color='red', alpha=0.3)
+
+            curr_ax.set_ylim(0, 105)
+            curr_ax.set_xlim(0, track_len)
+            if label_ax:
+                curr_ax.set_xlabel('VR position')
+                curr_ax.set_ylabel('Licks [%]')
+            curr_ax.spines['top'].set_visible(False)
+            curr_ax.spines['right'].set_visible(False)
+
+            curr_ax.set_title("M{}, {}, {:.2f}%".format(sess_key['mouse_id'], sess_key['day'],
+                                                        (VRPerformance & sess_key).get_mean()[0]*100))
+
+        # Get primary keys of queried sessions
+        keys = self.fetch('KEY')
+        if len(np.unique(self.fetch('mouse_id'))) > 1:
+            raise IndexError('Cannot draw lick histograms of more than 1 mouse at once.')
+
+        # Go through queried sessions
+        ncols = 3
+        nrows = int(np.ceil(len(keys) / ncols))
+        count = 0
+
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 8))
+        for row in range(nrows):
+            for col in range(ncols):
+                if count < len(keys):
+                    if row == nrows - 1:
+                        label_axes = True
+                    else:
+                        label_axes = False
+                    draw_single_histogram(keys[count], curr_ax=axes[row, col], bin_s=bin_size, label_ax=label_axes)
+                    count += 1
+        fig.canvas.set_window_title(f"M{keys[0]['mouse_id']} - Binned licking per session")
+        fig.tight_layout()
+
 
 @schema
 class PerformanceParameters(dj.Lookup):
@@ -1306,27 +1434,47 @@ class VRPerformance(dj.Computed):
         else:
             return [np.mean(x) for x in sess]
 
-    def plot_performance(self, attr: str = 'binned_lick_ratio') -> None:
+    def plot_performance(self, attr: str = 'binned_lick_ratio', threshold: Optional[float] = 0.75,
+                         mark_spheres: bool = True, x_tick_label: bool = True) -> None:
         """
-        Plots performance across time for the queried sessions.
+        Plots performance across time for the queried sessions. Multiple mice included in the query are split up
+        across subplots.
         
         Args:
             attr: Performance metric, must be attribute of VRPerformance()
+            threshold: Y-intercept of a red dashed line to indicate performance threshold. Must be between 0 and 1. If None, no line is drawn.
+            mark_spheres: Bool flag whether to draw a vertical line at the date of microsphere injection.
+            x_tick_label: Bool flag whether X-ticks date labels should be drawn. Turning it off can make graphs tidier.
         """
         mouse_id, day, behav = self.fetch('mouse_id', 'day', attr)
+        mouse_ids = np.unique(mouse_id)
         df = pd.DataFrame(dict(mouse_id=mouse_id, day=day, behav=behav))
         df_new = df.explode('behav')
 
         df_new['behav'] = df_new['behav'].astype(float)
         df_new['day'] = pd.to_datetime(df_new['day'])
 
-        grid = sns.FacetGrid(df_new, col='mouse_id', col_wrap=3, height=3, aspect=2)
+        if len(mouse_ids) > 2:
+            col_wrap = 3
+        else:
+            col_wrap = len(mouse_ids)
+        grid = sns.FacetGrid(df_new, col='mouse_id', col_wrap=col_wrap, height=3, aspect=2, sharex=False)
         grid.map(sns.lineplot, 'day', 'behav')
 
-        for ax in grid.axes.ravel():
-            ax.axhline(0.75, linestyle='--', color='r', alpha=0.5)
+        for idx, ax in enumerate(grid.axes.ravel()):
+            if threshold is not None:
+                ax.axhline(threshold, linestyle='--', color='black', alpha=0.5)
             ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
             ax.set_ylabel(attr)
+            if mark_spheres:
+                try:
+                    surgery_day = (common_mice.Surgery() & 'surgery_type="Microsphere injection"' &
+                                   f'mouse_id={mouse_ids[idx]}').fetch1('surgery_date').date()
+                    ax.axvline(surgery_day, linestyle='--', color='r', alpha=1)
+                except dj.errors.DataJointError:
+                    print(f'No microsphere surgery on record for mouse {mouse_ids[idx]}')
+            if not x_tick_label:
+                ax.set_xticklabels([])
 
 
 @schema
