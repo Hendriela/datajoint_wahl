@@ -882,7 +882,7 @@ class VRSession(dj.Computed):
             # print("Starting to align behavior files of {}".format(trial_key))
             # Create array containing merged and time-aligned behavior data.
             # Returns None if there was a problem with the data, and the trial will be skipped (like incomplete trials)
-            merge = self.align_behavior_files(trial_key, data['enc'], data['tcp'], data['tdt'],
+            merge = self.align_behavior_files(trial_key, encoder=data['enc'], position=data['tcp'], trigger=data['tdt'],
                                               imaging=imaging, frame_count=frame_count)
 
             # Transform lick and valve to event-time indices instead of continuous sampling to save disk space
@@ -981,9 +981,17 @@ class VRSession(dj.Computed):
             # check if imported frame trigger matches frame count of .tif file and try to fix it
             more_frames_in_TDT = int(np.sum(trigger[1:, 1]) - frame_count)  # pos if TDT, neg if .tif had more frames
 
+            if np.sum(trigger[1:, 1]) * 2 == frame_count:
+                raise IndexError(f'Trigger file has only half the frames than the TIFF file '
+                                 f'({int(np.sum(trigger[1:, 1]))} vs. {frame_count})\nThis is most likely due to the '
+                                 f'TIFF file having two channels, where only one is expected.\nDelete the entries in '
+                                 f'RawImagingFile for this session, deinterleave the two channels in the TIFF file, and'
+                                 f' repopulate the RawImagingFile entry.')
+
             if abs(more_frames_in_TDT) > 5:
                 print("Trial {}:\n{} more frames imported from TDT than in raw imaging file "
                       "({} frames)".format(trial_key, more_frames_in_TDT, frame_count))
+
 
             # This means that the TDT file has less frames than the TIFF file (common)
             if more_frames_in_TDT < 0:
