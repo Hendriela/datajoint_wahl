@@ -7,7 +7,7 @@ from pathlib import Path
 import os
 from datetime import datetime
 from datetime import date as datetime_date
-from typing import Union
+from typing import Union, Optional
 
 schema = dj.schema('common_exp', locals(), create_tables=True)
 
@@ -197,20 +197,33 @@ class Session(dj.Manual):
         key_dict = {your_key: entry[your_key] for your_key in ['username', 'mouse_id', 'day', 'session_num']}
         return 'Inserted new session: {}'.format(key_dict)
 
-    def get_absolute_path(self) -> str:
+    def get_absolute_path(self, filename: Optional[str] = None) -> str:
         """
-        Return the folder on the current user's Neurophys data directory for this session on the current PC
+        Return the folder on the current user's Neurophys data directory or any other possible directories for this
+        session on the current PC.
         Adrian 2020-12-07
 
         Returns:
             Absolute path on the Neurophys data directory of the current 'session_path'.
         """
 
-        # In the current version we save the relative path (excluding base directory) which the user saves in the GUI,
-        # including the leading directory separator ('\\') so the absolute path can be recovered by adding both strings
-        base_directory = login.get_working_directory()
-        path = self.fetch1('session_path')
-        return os.path.join(base_directory, path)
+        # Get all possible data directories
+        roots = [login.get_neurophys_data_directory(), *login.get_alternative_data_directories()]
+        rel_path = self.fetch1('session_path')
+
+        for root in roots:
+            path = os.path.join(root, rel_path)
+            if filename is None:
+                if os.path.isdir(path):
+                    # print(f'Found session folder {rel_path} in root {root}.')
+                    return path
+            else:
+                if os.path.isfile(os.path.join(path, filename)):
+                    # print(f'Found file {filename} in session folder {rel_path} in root {root}.')
+                    return path
+
+        # If we went through all root directories without hitting a return, the given folder cannot be found anywhere
+        raise NameError(f'Cannot find directory {rel_path} in any of the possible root directories:\n{roots}')
 
     # Commented out because we are (currently) not grouping sessions this way
     # def get_group(self, group_name='?'):

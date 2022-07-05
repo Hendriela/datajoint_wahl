@@ -541,7 +541,7 @@ class MotionCorrection(dj.Computed):
         # the result of the motion correction is saved in a memory mapped file
         mmap_files = mc.mmap_file  # list of files
 
-        print('Mmap files:', mmap_files)
+        # print('Mmap files:', mmap_files)
 
         # extract and calculate information about the motion correction
         shifts = np.array(mc.shifts_rig).T  # caiman output: list with x,y shift tuples, shape (2, nr_frames)

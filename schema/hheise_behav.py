@@ -170,15 +170,26 @@ class RawBehaviorFile(dj.Imported):
         is_imaging_session = (VRSessionInfo & key).fetch1('imaging_session') == 1
 
         # Get complete path of the current session
-        root = os.path.join(login.get_neurophys_data_directory(), (common_exp.Session & key).fetch1('session_path'))
+        bases = [login.get_neurophys_data_directory(), *login.get_alternative_data_directories()]
 
-        # Find all behavioral files; for now both file systems (in trial subfolder and outside)
-        encoder_files = glob(root + '\\Encoder*.txt')
-        encoder_files.extend(glob(root + '\\**\\Encoder*.txt'))
-        position_files = glob(root + '\\TCP*.txt')
-        position_files.extend(glob(root + '\\**\\TCP*.txt'))
-        trigger_files = glob(root + '\\TDT TASK*.txt')
-        trigger_files.extend(glob(root + '\\**\\TDT TASK*.txt'))
+        for base in bases:
+            root = os.path.join(base, (common_exp.Session & key).fetch1('session_path'))
+
+            # Find all behavioral files; for now both file systems (in trial subfolder and outside)
+            encoder_files = glob(root + '\\Encoder*.txt')
+            encoder_files.extend(glob(root + '\\**\\Encoder*.txt'))
+            position_files = glob(root + '\\TCP*.txt')
+            position_files.extend(glob(root + '\\**\\TCP*.txt'))
+            trigger_files = glob(root + '\\TDT TASK*.txt')
+            trigger_files.extend(glob(root + '\\**\\TDT TASK*.txt'))
+
+            if len(encoder_files) > 0:
+                # If the list has entries, we found the directory where the files are stored and set this as the cwd
+                login.set_working_directory(base)
+                break
+
+        if len(encoder_files) == 0:
+            raise ImportError(f'Could not find behavior files for {key} \nin these directories:\n{bases}')
 
         # Sort them by time stamp (last part of filename, separated by underscore
         encoder_files.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
@@ -251,6 +262,7 @@ class RawBehaviorFile(dj.Imported):
         import itertools
 
         for idx in range(len(encoder_files)):
+
             new_entry = dict(
                 **key,
                 trial_id=idx,
