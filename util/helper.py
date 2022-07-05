@@ -13,6 +13,7 @@ import datajoint as dj
 import os
 from datetime import datetime
 import pickle
+import numpy as np
 
 
 def alphanumerical_sort(x: List[str]) -> List[str]:
@@ -46,7 +47,7 @@ def alphanumerical_sort(x: List[str]) -> List[str]:
     return x_sort
 
 
-def in_query(data: Union[list, tuple]) -> str:
+def in_query(data: Union[list, tuple, np.ndarray]) -> str:
     """
     Formats a list or tuple into a string that can be used for advanced querying in DataJoint to query multiple values
     of an attribute with the 'in' keyword. Works for numerical and string attributes.

@@ -1251,7 +1251,7 @@ class VRSession(dj.Computed):
         else:
             return trial_ids[:switch[0]]
 
-    def plot_lick_histogram(self, bin_size: int = 2, ignore_validation: bool = True) -> None:
+    def plot_lick_histogram(self, bin_size: int = 1, ignore_validation: bool = True) -> None:
         """
         Create a figure with multiple licking histograms of a single mouse. Each session has its own subplot. Each bin's
         value represents the percentage of trials during which the mouse licked at least once in this position. Reward
@@ -1276,12 +1276,13 @@ class VRSession(dj.Computed):
             """
             # Select appropriate trials
             if ignore_validation:
-                trials = (self.VRTrial & sess_key).get_normal_trials()
+                trials = (VRSession & sess_key).get_normal_trials()
             else:
-                trials = (self.VRTrial & sess_key).fetch('trial_id')
+                trials = (VRSession.VRTrial & sess_key).fetch('trial_id')
 
             # Bin licking data from these trials into one array and binarize per-trial
-            data = [(self.VRTrial & sess_key & f'trial_id={idx}').get_binned_licking(bin_size=bin_s) for idx in trials]
+            data = [(VRSession.VRTrial & sess_key & f'trial_id={idx}').get_binned_licking(bin_size=bin_s)
+                    for idx in trials]
             data = np.vstack(data)
             data[data > 0] = 1  # we only care about that a bin had a lick, not how many
 
@@ -1294,6 +1295,7 @@ class VRSession(dj.Computed):
 
             # Zone borders have to be adjusted for the unbinned x axis
             zone_borders = (VRSession.VRTrial & f'trial_id={trials[0]}' & sess_key).get_zone_borders()
+            zone_borders = zone_borders + 10
             for zone in zone_borders * (track_len / 120):
                 curr_ax.axvspan(zone[0], zone[1], color='red', alpha=0.3)
 
