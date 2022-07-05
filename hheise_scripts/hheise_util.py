@@ -7,7 +7,8 @@ Created on 23/06/2021 16:06
 Utility functions for Hendriks DataJoint section
 """
 import matplotlib
-matplotlib.use('TkAgg')
+if matplotlib.get_backend() != 'TkAgg': # If TkAgg is set before during import, Python crashes with a stack overflow
+    matplotlib.use('TkAgg')
 import os
 from pathlib import Path
 import re
@@ -21,8 +22,9 @@ import datajoint.errors
 import yaml
 
 import datajoint as dj
-from schema import common_mice, common_exp, common_img
 import login
+login.connect()
+from schema import common_mice, common_exp, common_img
 
 REL_BACKUP_PATH = "Datajoint/manual_submissions"
 
@@ -105,8 +107,7 @@ def get_autopath(info: dict) -> str:
     raise ImportError(f'Found no valid folders for session:\n{info}')
 
 
-def get_microsphere_sessions(mouse_id: int, pre_sessions: int = 5, post_sessions: int = 100) \
-        -> Tuple[np.ndarray, np.ndarray]:
+def get_microsphere_sessions(mouse_id: int, pre_sessions: int = 5, post_sessions: int = 100) -> Tuple[list, list]:
     """
     Convenience function that looks up the dates of sessions around the microsphere surgery of a single mouse for
     easier analysis querying.
@@ -117,7 +118,7 @@ def get_microsphere_sessions(mouse_id: int, pre_sessions: int = 5, post_sessions
         post_sessions   : Maximum number of post-injection sessions to consider
 
     Returns:
-        One numpy array with the dates, one with boolean flags which of these dates are pre-stroke sessions.
+        One list with the dates, one with boolean flags which of these dates are pre-stroke sessions.
     """
     # get date of microsphere injection
     surgery_day = (common_mice.Surgery() & 'surgery_type="Microsphere injection"' &
@@ -125,14 +126,13 @@ def get_microsphere_sessions(mouse_id: int, pre_sessions: int = 5, post_sessions
 
     # Get the dates of 5 imaging sessions before the surgery, and all dates from 2 days after it
     pre_dates = (common_img.Scan & f'mouse_id={mouse_id}' &
-                 f'day < "{surgery_day.date()}"').fetch('day')[-pre_sessions:]
+                 f'day <= "{surgery_day.date()}"').fetch('day')[-pre_sessions:]
     post_dates = (common_img.Scan & f'mouse_id={mouse_id}' &
                   f'day > "{surgery_day.date()+timedelta(days=1)}"').fetch('day')[:post_sessions]
     dates = [*pre_dates, *post_dates]
     is_pre = [*[True]*len(pre_dates), *[False]*len(post_dates)]
 
     return dates, is_pre
-
 
 
 def remove_session_path(key: dict, path: str) -> str:
