@@ -619,10 +619,24 @@ class MotionCorrection(dj.Computed):
         else:
             return (MotionParameter & dict(motion_id=motion_id[0])).get_parameter_obj(self.fetch1("KEY"))
 
-    def export_tif(self):
+    def export_tif(self, nr_frames: int = 100000, target_folder: Optional[str] = None, dtype: str = 'tif',
+                   prefix: str = '', remove_after: bool = False) -> None:
+        """
+        Wrapper function for MemoryMappedFile.export_tif(), which can now be called directly on the motion correction
+        without having to make the memory-mapped file before. All arguments will be passed down to the actual function.
+
+        Args:
+            nr_frames:      Number of frames to export, counting from the beginning. Default 100000 means all.
+            target_folder:  Destination folder of the exported file. If None, use session folder on Neurophys.
+            dtype:          Data type to store results in, possible values: 'tif' or 'h5'.
+            prefix:         Optional prefix to identify the exported file more easily.
+            remove_after:   Bool flag whether to delete the memory-mapped file after exporting the TIFF file.
+        """
         key = self.fetch1('KEY')
         MemoryMappedFile().flexible_make(key)
-        (MemoryMappedFile & key).export_tif()
+        (MemoryMappedFile & key).export_tif(nr_frames, target_folder, dtype, prefix)
+        if remove_after:
+            (MemoryMappedFile & key).delete_mmap_file()
 
 
 @schema
