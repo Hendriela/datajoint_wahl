@@ -62,6 +62,12 @@ class PlaceCellParameter(dj.Manual):
             print("Warning:\n\tParameter 'bin_length' = {} cm is not a divisor of common track lengths 170 and 400 cm."
                   "\n\tProblems might occur in downstream analysis.".format(entry['bin_length']))
 
+        # set default values if not given
+        if 'min_pf_size' not in entry:
+            entry['min_pf_size'] = 15
+        if 'bin_length' not in entry:
+            entry['bin_length'] = 5
+
         if 'min_bin_size' not in entry:
             entry['min_bin_size'] = int(np.ceil(entry['min_pf_size'] / entry['bin_length']))
         else:
@@ -719,7 +725,7 @@ class SpatialInformation(dj.Computed):
                 shift = np.hstack(shift)
                 trial_mask_accepted = np.hstack(trial_mask_accepted)
 
-                _, bin_shift, _ = pc_classifier.bin_activity_to_vr(shift, shift, n_bins, trial_mask_accepted,
+                _, _, bin_shift = pc_classifier.bin_activity_to_vr(shift, shift, n_bins, trial_mask_accepted,
                                                                    dummy_running_masks, bf_counts, sess_key)
                 shuffle_data[shuff] = bin_shift
 
