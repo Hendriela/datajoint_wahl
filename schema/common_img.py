@@ -1139,7 +1139,7 @@ class Segmentation(dj.Computed):
                 thr             : Weight threshold of contour function
                 background      : Background image. Has to be attribute of QualityControl(), or None for no background
                 ax              : If provided an Axes, contours will be plotted there, otherwise in a new figure
-                show_id         : Bool flag whether mask IDs should be shown in the contour centers
+                show_id         : Bool flag whether mask IDs (base 0!) should be shown in the contour centers
                 contour_color   : Color of the contour drawing
                 id_color        : Color of the mask ID text
             """
@@ -1483,6 +1483,102 @@ class Segmentation(dj.Computed):
         else:  # include mask_id as well
             mask_ids = selected_rois.fetch('mask_id', order_by='mask_id')
             return traces, mask_ids
+
+    def export_for_suite2p(self) -> None:
+        """
+        Export a single Segmentation entry into the suite2p format. Creates multiple .npy files which can be loaded and
+        inspected with the suite2p GUI to reject or merge ROIs. Use NOT_YET_IMPLEMENTED() to re-import the changes from
+        suite2p back into DataJoint.
+        """
+
+        from scipy.stats import skew
+
+        try:
+            dims = self.fetch1['target_dim']
+            template = (MotionCorrection & self.restriction).fetch1('template')
+            tot_dims = template.shape
+            crop = (tot_dims - dims)//2
+        except dj.errors.DataJointError:
+            raise dj.errors.QueryError(f'Cannot export more than 1 Segmentation() entry. {len(self)} entries given.')
+
+        F_c = self.get_traces(trace_type='traces')
+        Fneu_c = self.get_traces(trace_type='residual')
+        spks_c = F_c - Fneu_c
+        iscell_c = np.vstack((np.ones((len(F_c))), np.ones((len(F_c))))).T  # Todo: incorporate eval results into classifier confidence
+
+        # Options dict (some parameters fetched from own analysis, others can be hard-coded
+        ops_c = dict()
+        ops_c['save_path0'] = os.path.join(self.get_absolute_path(), 'suite2p_c')   # Save files in the session folder
+        ops_c['save_folder'] = ''
+        ops_c['save_path'] = ops_c['save_path0']
+        ops_c['data_path'] = ops_c['save_path0']
+        ops_c['tau'] = (CaIndicator & self.restriction).fetch1('decay')
+        ops_c['fs'] = (ScanInfo & self.restriction).fetch1('fr')
+        ops_c['input_format'] = 'tif'
+        ops_c['ops_path'] = os.path.join(ops_c['save_path0'], 'ops.npy')
+        ops_c['Ly'] = dims[0]
+        ops_c['Lx'] = dims[1]
+        ops_c['yrange'] = (0, dims[0])
+        ops_c['xrange'] = (0, dims[1])
+        ops_c['Lyc'] = dims[0]
+        ops_c['Lxc'] = dims[1]
+        ops_c['meanImg'] = (QualityControl & self.restriction).fetch1('avg_image')
+        ops_c['meanImgE'] = ops_c['meanImg']
+        ops_c['max_proj'] = (QualityControl & self.restriction).fetch1('max_image')
+        ops_c['Vcorr'] = (QualityControl & self.restriction).fetch1('cor_image').copy()
+        ops_c['refImg'] = template[crop[0]:template.shape[0]-crop[0], crop[1]:template.shape[0]-crop[1]]
+        ops_c['corrXY'] = (MotionCorrection & self.restriction).fetch1('template_correlation')
+        ops_c['yoff'] = (QualityControl & self.restriction).fetch1('shifts')[1]
+        ops_c['xoff'] = (QualityControl & self.restriction).fetch1('shifts')[0]
+        ops_c['diameter'] = 5
+        ops_c['neucoeff'] = 0.7
+
+        # Stats (one entry per ROI)
+        def get_overlap(cell_idx, roi_list):
+            target_px = roi_list[cell_idx]['pixels']
+            other_px = np.unique(np.hstack([x['pixels'] for i, x in enumerate(roi_list) if i != cell_idx]))
+            return np.isin(target_px, other_px, assume_unique=True)
+
+        stat_c = []
+        rois = (self.ROI & self.restriction).fetch(as_dict=True)
+        spatial = (self.ROI & self.restriction).get_rois()
+        mean_px = np.mean([len(r['weights']) for r in rois])
+        mean_px_crop = np.mean([np.sum(r['weights'] > 0.05) for r in rois])
+        for idx, roi in enumerate(rois):
+            stats = {}
+            px = np.where(spatial[idx] > 0)
+            stats['xpix'] = px[1]
+            stats['ypix'] = px[0]
+            stats['lam'] = spatial[idx][px]
+            stats['med'] = roi['com']
+            stats['footprint'] = 1
+            stats['mrs'] = 0.8
+            stats['mrs0'] = 1.0
+            stats['compact'] = 1
+            stats['solidity'] = 1
+            stats['npix'] = len(px[0])
+            stats['soma_crop'] = spatial[idx][px] > 0.05  # Threshold weights to keep soma, 0.05 seems to be good value
+            stats['npix_soma'] = np.sum(stats['soma_crop'])
+            stats['overlap'] = get_overlap(idx, rois)
+            stats['radius'] = 5
+            xspan = np.max(px[1]) - np.min(px[1])
+            yspan = np.max(px[0]) - np.min(px[0])
+            stats['aspect_ratio'] = xspan / yspan if xspan > yspan else yspan / xspan
+            stats['npix_norm_no_crop'] = stats['npix'] / mean_px
+            stats['npix_norm'] = stats['npix_soma'] / mean_px_crop
+            stats['skew'] = skew(Fneu_c[idx])
+            stats['std'] = np.std(Fneu_c[idx])
+            stats['neuropil_mask'] = roi['pixels']
+            stat_c.append(stats)
+
+        # Save files
+        fpath = ops_c['save_path']
+        np.save(os.path.join(fpath, 'stat.npy'), stat_c)
+        np.save(os.path.join(fpath, 'F.npy'), F_c)
+        np.save(os.path.join(fpath, 'Fneu.npy'), Fneu_c)
+        np.save(os.path.join(fpath, 'iscell.npy'), iscell_c)
+        np.save(os.path.join(ops_c['save_path'], 'spks.npy'), spks_c)
+        np.save(ops_c['ops_path'], ops_c)
 
 
 @schema
