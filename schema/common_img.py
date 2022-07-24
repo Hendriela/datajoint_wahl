@@ -1170,31 +1170,6 @@ class Segmentation(dj.Computed):
                 for mask_id, com in zip(mask_ids, coms):
                     ax.text(com[1], com[0], str(mask_id), color=id_color)
 
-        # Obsolete function, CoM is calculated during make() and stored in DB
-        # def get_roi_center(self) -> np.ndarray:
-        #     """
-        #     Returns center of mass of a single ROI as int array of length 2.
-        #     Adrian 2019-09-05
-        #
-        #     Returns:
-        #         Center of mass coordinates as np.array(x, y) or np.array(row, col)
-        #     """
-        #     if len(self) != 1:
-        #         raise Exception('Only length one allowed (not {})'.format(len(self)))
-        #
-        #     roi_mask = self.get_rois()[0]
-        #
-        #     # calculate center of mass of mask by center of two projections
-        #     proj1 = np.sum(roi_mask, axis=0)
-        #     index1 = np.arange(proj1.shape[0])
-        #     center1 = np.inner(proj1, index1) / np.sum(proj1)  # weighted average index
-        #
-        #     proj2 = np.sum(roi_mask, axis=1)
-        #     index2 = np.arange(proj2.shape[0])
-        #     center2 = np.inner(proj2, index2) / np.sum(proj2)  # weighted average index
-        #
-        #     return np.array([np.round(center1), np.round(center2)], dtype=int)
-
     # make of main table Segmentation
     def make(self, key: dict, save_results: bool = False, save_overviews: bool = False, del_mmap: bool = True) -> None:
         """
@@ -1438,7 +1413,7 @@ class Segmentation(dj.Computed):
     #     print('Accepted units: ', accepted_units)
 
     def get_traces(self, trace_type: str = 'dff', include_id: bool = False,
-                   decon_id: bool = None) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], None]:
+                   decon_id: Optional[bool] = None) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray], None]:
         """
         Main function to get fluorescent traces in format (nr_traces, timepoints)
         Adrian 2020-03-16
@@ -1455,7 +1430,7 @@ class Segmentation(dj.Computed):
         """
 
         # some checks to catch errors in the input arguments
-        if not trace_type in ['dff', 'trace', 'decon']:
+        if not trace_type in ['dff', 'trace', 'traces', 'decon', 'residual', 'residuals']:
             raise Exception('The trace_type "%s" is not allowed as input argument!' % trace_type)
 
         # check if multiple caiman_ids are selected with self
@@ -1468,9 +1443,13 @@ class Segmentation(dj.Computed):
 
         if trace_type == 'dff':
             traces_list = selected_rois.fetch(trace_type, order_by='mask_id')
-        elif trace_type == 'trace':
-            # Todo: Implement fetch of raw traces stored externally in npy files
-            raise NotImplementedError("Fetching of raw traces not implemented yet.")
+        elif trace_type in ['trace', 'traces', 'residual', 'residuals']:
+            sess_path = (common_exp.Session() & self.fetch1('KEY')).get_absolute_path(self.fetch1('traces'))
+            if trace_type in ['trace', 'traces']:
+                path = os.path.join(sess_path, self.fetch1('traces'))
+            else:
+                path = os.path.join(sess_path, self.fetch1('residuals'))
+            traces_list = list(np.load(path))
         else:  # decon
             # if no decon_id is given, check if there is a single correct one, otherwise error
             if decon_id is None:
