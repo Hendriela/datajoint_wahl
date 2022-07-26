@@ -9,7 +9,10 @@ import numpy as np
 import login
 import pathlib
 from schema import common_exp
-import cv2
+try:
+    import cv2
+except ModuleNotFoundError:
+    print('Import common_dlc with read-only access.')
 import matplotlib.pyplot as plt
 import os
 import yaml

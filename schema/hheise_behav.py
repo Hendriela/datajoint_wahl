@@ -12,6 +12,7 @@ import login
 login.connect()
 import datajoint as dj
 from schema import common_mice, common_exp, common_img
+from hheise_scripts import data_util
 
 from datetime import datetime, timedelta
 from typing import Iterable, List, Optional, Tuple, Dict
@@ -22,8 +23,13 @@ import numpy as np
 import pandas as pd
 from copy import deepcopy
 from scipy import stats
-import statsmodels.api as sm
-import seaborn as sns
+
+try:
+    import statsmodels.api as sm
+    import seaborn as sns
+except ModuleNotFoundError:
+    print("Import hheise_behav with read-only access.")
+
 import matplotlib.pyplot as plt
 
 schema = dj.schema('hheise_behav', locals(), create_tables=True)
@@ -63,7 +69,7 @@ class VRSessionInfo(dj.Imported):
     -> common_exp.Session
     ---
     imaging_session     : tinyint           # bool flag whether imaging was performed during this session
-    condition_switch    : longblob          # List of ints indicating the first trial(s) of the new condition
+    condition_switch    : longblob          # List of trial IDs of the first trial(s) of the new condition (base 0, -1 if no switch)
     valve_duration      : smallint          # Duration of valve opening during reward in ms
     length              : smallint          # Track length in cm
     running             : enum('none', 'very bad', 'bad', 'medium', 'okay', 'good', 'very good') 
@@ -108,14 +114,22 @@ class VRSessionInfo(dj.Imported):
         new_key['vr_notes'] = sess_entry['Notes'].values[0]
 
         # Enter weight if given
-        if not pd.isna(sess_entry['weight [g]'].values[0]):
-            common_mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
-                                          'date_of_weight': key['day'], 'weight': sess_entry['weight [g]'].values[0]})
+        if ('weight [g]' in sess_entry.columns) and not pd.isna(sess_entry['weight [g]'].values[0]):
+            try:
+                common_mice.Weight().insert1({'username': key['username'], 'mouse_id': key['mouse_id'],
+                                              'date_of_weight': key['day'],
+                                              'weight': sess_entry['weight [g]'].values[0]})
+            except dj.errors.DuplicateError:
+                pass
 
         # Get block and condition switch from session_notes string
         note_dict = ast.literal_eval((common_exp.Session & key).fetch1('session_notes'))
         new_key['block'] = note_dict['block']
         new_key['condition_switch'] = eval(note_dict['switch'])  # eval turns string into list
+
+        # Turn manual ID (base 1) into pythonic ID (base 0)
+        if new_key['condition_switch'] != [-1]:
+            new_key['condition_switch'] = [x - 1 for x in new_key['condition_switch']]
 
         # Check if this is an imaging session (session has to be inserted into common_img.Scan() first)
         if len((common_img.Scan & key).fetch()) == 1:
@@ -123,7 +137,10 @@ class VRSessionInfo(dj.Imported):
         else:
             new_key['imaging_session'] = 0
             print(f"Could not find session {key} in common_img.Scan, thus assuming that the session is not an imaging"
-                  f"session. If it is, enter session into Scan() before populating VRSession()!")
+                  f" session. If it is, enter session into Scan() before populating VRSession()!")
+
+        # Replace NaNs with empty strings
+        new_key = {k: ('' if v is np.nan else v) for k, v in new_key.items()}
 
         self.insert1(new_key)
 
@@ -139,31 +156,41 @@ class RawBehaviorFile(dj.Imported):
     enc_filename        : varchar(128)      # filename of the Enc file (running speed)
     """
 
-    def make(self, key: dict) -> None:
+    def make(self, key: dict, skip_curation: bool = False) -> None:
         """
         Automatically looks up file names for behavior files of a single VRSessionInfo() entry.
 
         Args:
             key: Primary keys of the queried VRSessionInfo() entry.
+            skip_curation: Optional bool flag passed down from populate(). If True, all trials are automatically
+                            accepted and not shown to the user. Useful if a session has already been curated.
         """
 
         print("Finding raw behavior files for session {}".format(key))
 
-        # Check if RawImagingFile has already been filled for this session
-        if len(common_img.RawImagingFile() & key) == 0:
-            raise ImportError("No entries for session {} in common_img.RawImagingFile. Fill table before populating "
-                              "RawBehaviorFile.")
+        is_imaging_session = (VRSessionInfo & key).fetch1('imaging_session') == 1
 
         # Get complete path of the current session
-        root = os.path.join(login.get_neurophys_data_directory(), (common_exp.Session & key).fetch1('session_path'))
+        bases = [login.get_neurophys_data_directory(), *login.get_alternative_data_directories()]
 
-        # Find all behavioral files; for now both file systems (in trial subfolder and outside)
-        encoder_files = glob(root + '\\Encoder*.txt')
-        encoder_files.extend(glob(root + '\\**\\Encoder*.txt'))
-        position_files = glob(root + '\\TCP*.txt')
-        position_files.extend(glob(root + '\\**\\TCP*.txt'))
-        trigger_files = glob(root + '\\TDT TASK*.txt')
-        trigger_files.extend(glob(root + '\\**\\TDT TASK*.txt'))
+        for base in bases:
+            root = os.path.join(base, (common_exp.Session & key).fetch1('session_path'))
+
+            # Find all behavioral files; for now both file systems (in trial subfolder and outside)
+            encoder_files = glob(root + '\\Encoder*.txt')
+            encoder_files.extend(glob(root + '\\**\\Encoder*.txt'))
+            position_files = glob(root + '\\TCP*.txt')
+            position_files.extend(glob(root + '\\**\\TCP*.txt'))
+            trigger_files = glob(root + '\\TDT TASK*.txt')
+            trigger_files.extend(glob(root + '\\**\\TDT TASK*.txt'))
+
+            if len(encoder_files) > 0:
+                # If the list has entries, we found the directory where the files are stored and set this as the cwd
+                login.set_working_directory(base)
+                break
+
+        if len(encoder_files) == 0:
+            raise ImportError(f'Could not find behavior files for {key} \nin these directories:\n{bases}')
 
         # Sort them by time stamp (last part of filename, separated by underscore
         encoder_files.sort(key=lambda x: int(x.split("_")[-1].split(".")[0]))
@@ -175,9 +202,15 @@ class RawBehaviorFile(dj.Imported):
         if not (len(encoder_files) == len(position_files)) & (len(encoder_files) == len(trigger_files)):
             raise ImportError(f'Uneven numbers of encoder, position and trigger files in folder {root}!')
 
-        # Catch different numbers of behavior files and raw imaging files
-        if len(encoder_files) != len(common_img.RawImagingFile() & key):
-            raise ImportError(f'Different numbers of behavior and imaging files in folder {root}!')
+        # Commented out because RawImagingFile should be filled AFTER trials are curated
+        # # Catch different numbers of behavior files and raw imaging files
+        # if (len(encoder_files) != len(common_img.RawImagingFile() & key)) and is_imaging_session:
+        #     raise ImportError(f'Different numbers of behavior and imaging files in folder {root}!')
+
+        # Check if RawImagingFile has already been filled for this session
+        if (len(common_img.RawImagingFile() & key) > 0) and is_imaging_session:
+            print(f"TIFF files for session {key} already in common_img.RawImagingFile.\n"
+                  f"If faulty trials are found, you have to delete these entries and potentially rerun the imaging pipeline.")
 
         # Check some common bugs of individual trials
         for i in range(len(encoder_files)):
@@ -205,11 +238,14 @@ class RawBehaviorFile(dj.Imported):
             # calculate absolute difference in seconds between the start times
             max_diff = np.max(np.abs(start_times[:, None] - start_times)).total_seconds()
             if max_diff > 2:
-                raise ValueError(
-                    f'Faulty trial (TDT file copied from previous trial), time stamps differed by {int(max(max_diff))}s!')
+                raise ValueError(f'Faulty trial (TDT file copied from previous trial), time stamps differed by '
+                                 f'{int(max(max_diff))}s!')
 
-        # Manually curate sessions to weed out trials with e.g. buggy lick sensor
-        bad_trials = self.plot_screening(trigger_files, encoder_files, key)
+        if not skip_curation:
+            # Manually curate sessions to weed out trials with e.g. buggy lick sensor
+            bad_trials = self.plot_screening(trigger_files, encoder_files, key)
+        else:
+            bad_trials = []
 
         if len(bad_trials) > 0:
             print("Session {}:\nThe following trials will be excluded from further analysis.\n"
@@ -227,6 +263,7 @@ class RawBehaviorFile(dj.Imported):
         import itertools
 
         for idx in range(len(encoder_files)):
+
             new_entry = dict(
                 **key,
                 trial_id=idx,
@@ -296,7 +333,10 @@ class RawBehaviorFile(dj.Imported):
         for row in range(nrows):
             for col in range(ncols):
                 if count < n_trials or (row == nrows and col == 0):
-                    curr_ax = ax[row, col]
+                    try:
+                        curr_ax = ax[row, col]
+                    except IndexError:
+                        curr_ax = ax[col]
 
                     # Load the data, (ignore first time stamp)
                     curr_enc = -np.loadtxt(enc_list[count])[1:, 1]
@@ -307,17 +347,17 @@ class RawBehaviorFile(dj.Imported):
                     curr_lick = curr_lick[::5]
 
                     # Rescale speed to fit on y-axis
-                    curr_enc = curr_enc/max(curr_enc)
+                    curr_enc = curr_enc / max(curr_enc)
 
                     # plot behavior
                     curr_ax.plot(curr_enc, color='tab:red')  # plot running
                     curr_ax.spines['top'].set_visible(False)
                     curr_ax.spines['right'].set_visible(False)
                     curr_ax.set_xticks([])
-                    ax2 = curr_ax.twiny()   # make new plot with independent x axis in the same subplot
+                    ax2 = curr_ax.twiny()  # make new plot with independent x axis in the same subplot
                     ax2.plot(curr_lick, color='tab:blue')  # plot licking
                     ax2.set_ylim(-0.1, 1.1)
-                    ax2.axis('off')         # Turn of axis spines for both new axes
+                    ax2.axis('off')  # Turn of axis spines for both new axes
 
                     # Make curr_ax (where axis is not turned off and you can see the background color) pickable
                     curr_ax.set_picker(True)
@@ -589,6 +629,34 @@ class VRSession(dj.Computed):
             # To avoid floating point rounding errors, first create steps in ms (*1000), then divide by 1000 for seconds
             return np.array(range(0, n_samples * int(SAMPLE * 1000), int(SAMPLE * 1000))) / 1000
 
+        def get_binned_licking(self, bin_size: int) -> np.ndarray:
+            """
+            Bin individual licks to VR position. Used to draw licking histograms for raw behavior analysis.
+
+            Args:
+                bin_size: Size of VR position bins (in arbitrary VR units) in which to bin the licks.
+
+            Returns:
+                1D array with length 120/bin_size, each element containing the number of individual licks at that bin.
+            """
+
+            trial = self.get_array(('pos', 'lick'))
+            lick_only = trial[np.where(trial[:, 2] == 1)]
+
+            if lick_only.shape[0] == 0:
+                hist = np.zeros(int(120 / bin_size))
+            else:
+                # split licking track into individual licks and get VR position
+                diff = np.round(np.diff(lick_only[:, 0]) * 1000).astype(int)    # get array of time differences (in ms)
+                licks = np.split(lick_only, np.where(diff > SAMPLE * 1000)[0] + 1)  # split at points where difference > 8 ms (sample gap)
+                licks = [i for i in licks if i.shape[0] <= 5//SAMPLE]           # only keep licks shorter than 5 seconds (longer licks might indicate problems with sensor)
+                lick_pos = [x[0, 1] for x in licks]                             # get VR position when each lick begins
+
+                # bin lick positions (arbitrary VR positions from -10 to 110 are hard-coded)
+                hist, _ = np.histogram(np.digitize(lick_pos, np.arange(start=-10, stop=111, step=bin_size)),
+                                       bins=np.arange(start=1, stop=int(120 / bin_size + 2)), density=False)
+            return hist
+
         def compute_performances(self, params: dict) -> Tuple[float, float, float]:
             """
             Computes lick, binned lick and stop performance of a single trial. Called by VRPerformance.make().
@@ -813,6 +881,11 @@ class VRSession(dj.Computed):
         cond = (common_exp.Session & key).fetch1('task')  # Task condition
         cond_switch = (VRSessionInfo & key).fetch1('condition_switch')  # First trial of new condition
 
+        # Detect if there are different numbers of behavior vs imaging trials
+        if imaging and len(trial_ids) != len(common_img.RawImagingFile & key):
+            raise ValueError(f'Found {len(trial_ids)} behavior trials, but {len(common_img.RawImagingFile & key)} '
+                             f'imaging trials in an imaging session!')
+
         trial_entries = []
 
         for trial_id in trial_ids:
@@ -838,7 +911,7 @@ class VRSession(dj.Computed):
             # print("Starting to align behavior files of {}".format(trial_key))
             # Create array containing merged and time-aligned behavior data.
             # Returns None if there was a problem with the data, and the trial will be skipped (like incomplete trials)
-            merge = self.align_behavior_files(trial_key, data['enc'], data['tcp'], data['tdt'],
+            merge = self.align_behavior_files(trial_key, encoder=data['enc'], position=data['tcp'], trigger=data['tdt'],
                                               imaging=imaging, frame_count=frame_count)
 
             # Transform lick and valve to event-time indices instead of continuous sampling to save disk space
@@ -937,12 +1010,21 @@ class VRSession(dj.Computed):
             # check if imported frame trigger matches frame count of .tif file and try to fix it
             more_frames_in_TDT = int(np.sum(trigger[1:, 1]) - frame_count)  # pos if TDT, neg if .tif had more frames
 
+            if np.sum(trigger[1:, 1]) * 2 == frame_count:
+                raise IndexError(f'Trigger file has only half the frames than the TIFF file '
+                                 f'({int(np.sum(trigger[1:, 1]))} vs. {frame_count})\nThis is most likely due to the '
+                                 f'TIFF file having two channels, where only one is expected.\nDelete the entries in '
+                                 f'RawImagingFile for this session, deinterleave the two channels in the TIFF file, and'
+                                 f' repopulate the RawImagingFile entry.')
+
             if abs(more_frames_in_TDT) > 5:
                 print("Trial {}:\n{} more frames imported from TDT than in raw imaging file "
                       "({} frames)".format(trial_key, more_frames_in_TDT, frame_count))
 
+
+            # This means that the TDT file has less frames than the TIFF file (common)
             if more_frames_in_TDT < 0:
-                # first check if TDT has been logging shorter than TCP
+                # first check if TDT stopped logging earlier than TCP
                 tdt_offset = position[-1, 0] - trigger[-1, 0]
                 # if all missing frames would fit in the offset (time where tdt was not logging), print out warning
                 if tdt_offset / 0.033 > abs(more_frames_in_TDT):
@@ -951,46 +1033,117 @@ class VRSession(dj.Computed):
                 # these frames are added after merge array has been filled
                 frames_to_prepend = abs(more_frames_in_TDT)
 
+            # This means that the TDT file has more frames than the TIFF file (rare)
             elif more_frames_in_TDT > 0:
                 # if TDT included too many frames, its assumed that the false-positive frames are from the end of recording
                 if more_frames_in_TDT < 5:
                     for i in range(more_frames_in_TDT):
                         trigger[trig_blocks[-i], 1] = 0
                 else:
-                    raise ImportError(f'{more_frames_in_TDT} too many frames imported from TDT, could not be corrected!')
+                    raise ImportError(
+                        f'{more_frames_in_TDT} too many frames imported from TDT, could not be corrected!')
 
+            # This section deals with how to add the missing frames to the trigger array
             if frames_to_prepend > 0:
+
+                # We first have to do some preprocessing to figure out which method of frame insertion is best
+
+                # Get the index of the first recorded frame
                 first_frame = np.where(trigger[1:, 1] == 1)[0][0] + 1
-                # first_frame_start = np.where(raw_trig[:, 2] == 1)[0][0]
+
+                # Get the median distance between frames, and correct if its off
                 median_frame_time = int(np.median([len(frame) for frame in trig_blocks]))
                 if median_frame_time > 70:
-                    median_frame_time = 66
-                if first_frame > frames_to_prepend * median_frame_time:
-                    # if frames would fit in the merge array before the first recorded frame, prepend them with proper steps
-                    # make a list of the new indices (in steps of median_frame_time before the first frame)
-                    idx_start = first_frame - frames_to_prepend * median_frame_time
-                    # add 1 to indices because we do not count the first index of the trigger signal
-                    idx_list = np.arange(start=idx_start + 1, stop=first_frame, step=median_frame_time)
-                    if idx_list.shape[0] != frames_to_prepend:
-                        raise ValueError(f'Frame correction failed for {trial_key}!')
-                    trigger[idx_list, 1] = 1
+                    print(f'Median distance between frames is {median_frame_time}! Maybe check file for errors.')
+                    median_frame_time = 68
 
-                # if frames dont fit, and less than 30 frames missing, put them in steps of 2 equally in the start and end
-                elif frames_to_prepend < 30:
-                    for i in range(1, frames_to_prepend + 1):
-                        if i % 2 == 0:  # for every even step, put the frame in the beginning
-                            if trigger[i * 2, 1] != 1:
-                                trigger[i * 2, 1] = 1
-                            else:
-                                trigger[i + 2 * 2, 1] = 1
-                        else:  # for every uneven step, put the frame in the end
-                            if trigger[-(i * 2), 1] != 1:
-                                trigger[-(i * 2), 1] = 1
-                            else:
-                                trigger[-((i + 1) * 2), 1] = 1
+                # Get 99th quantile of TDT sample time to conservatively estimate if 2 frames would be within the
+                # 8 ms bin window (and thus lost during resampling)
+                tdt_time_diff = data[0][2:, 0] - data[0][1:-1, 0]
+                tdt_sample_time = np.quantile(tdt_time_diff, 0.99)
+                tdt_step_limit = int(np.ceil(0.008 / tdt_sample_time))
+
+                # Find gaps in frame trigger where frames might have been missed (distance between frames > 45 ms)
+                frames_idx = np.where(trigger[1:, 1] == 1)[0]
+                frame_dist = frames_idx[1:] - frames_idx[:-1]
+
+                # 95 sample steps (~45 ms) is much higher than two normal frames should be apart
+                # The gap is AFTER the frames at these indices, +1 because we ignore first line during slicing
+                frame_gap_idx = frames_idx[np.where(frame_dist > 95)[0]] + 1
+
+                if len(frame_gap_idx) > 0:
+                    # Fill large gaps if any were found
+                    # First, fill all large gaps with new frames (or enough to offset the mismatch)
+                    frames_to_add = frames_to_prepend if len(frame_gap_idx) >= frames_to_prepend else len(frame_gap_idx)
+
+                    # Get the indices of gaps, sorted by gap size
+                    frame_dist_argsort = np.argsort(frame_dist)
+                    # Get the index of the start of the largest gaps in "trigger" array (again +1)
+                    largest_gap_start = frames_idx[frame_dist_argsort[-frames_to_add:]] + 1
+                    # Get the distance in samples of these gaps and divide them by 2 to find middle point
+                    largest_gap_middle = frame_dist[frame_dist_argsort[-frames_to_add:]] // 2
+
+                    # Safety check that the smallest gap is still larger than the step limit, then insert frames there
+                    # Only use gaps whose middle point is larger than the step limit
+                    gap_mask = largest_gap_middle > tdt_step_limit
+                    # Add gap start and half-size of gap to get indices of new frames
+                    new_idx = largest_gap_start[gap_mask] + largest_gap_middle[gap_mask]
+                    trigger[new_idx, 1] = 1
+
+                    # Re-calculate frames_to_prepend to see if any more frames have to be added
+                    frames_to_prepend = int(frame_count - np.sum(trigger[1:, 1]))
+
+                # If there are still frames missing, prepend frames to the beginning of the file
+                if frames_to_prepend > 0:
+                    if first_frame > frames_to_prepend * median_frame_time:
+                        # if frames would fit in the merge array before the first recorded frame, prepend them with proper steps
+                        # make a list of the new indices (in steps of median_frame_time before the first frame)
+                        idx_start = first_frame - frames_to_prepend * median_frame_time
+                        # add 1 to indices because we do not count the first index of the trigger signal
+                        idx_list = np.arange(start=idx_start + 1, stop=first_frame, step=median_frame_time)
+                        if idx_list.shape[0] != frames_to_prepend:
+                            raise ValueError(f'Frame correction failed for {trial_key}!')
+                        else:
+                            trigger[idx_list, 1] = 1
+
+                    # Try to prepend frames to the beginning of the file
+                    elif frames_to_prepend < 30:
+
+                        # int rounds down and avoids overestimation of step size
+                        max_step_size = int(first_frame / frames_to_prepend)
+
+                        # If the time before the first frame is not enough to fit all frames in there without crossing the
+                        # step limit, we interleave the new frames in the beginning half-way between the original frames
+                        if max_step_size <= tdt_step_limit:
+
+                            # Check where the actual frame triggers are and find half-way points
+                            actual_frame_idx = np.where(trigger[1:, 1] == 1)[
+                                                   0] + 1  # +1 because we ignore the first row
+                            # Get the distance between the first "n_frames_to_prepend" frames where we have to interleave fake frames
+                            interframe_idx = actual_frame_idx[1:frames_to_prepend + 1] - actual_frame_idx[
+                                                                                         :frames_to_prepend]
+                            # The new indices are the first actual frame indices plus half of the interframe indices
+                            idx_list = actual_frame_idx[:frames_to_prepend] + interframe_idx // 2
+
+                        # Otherwise, put them before the beginning at the biggest possible step size
+                        else:
+                            # Create indices of new frame triggers with given step size, going backwards from the first real frame
+                            idx_list = np.array([i for i in range(first_frame - max_step_size, 0, -max_step_size)])
+
+                        # Exit condition: New indices are somehow not enough
+                        if len(idx_list) != frames_to_prepend:
+                            raise ValueError(f"Could not prepend {frames_to_prepend} frames for {trial_key}, because "
+                                             f"only {len(idx_list)} new indices could be generated.")
+                        else:
+                            trigger[idx_list, 1] = 1
+
+                    else:
+                        # correction does not work if the whole log file is not large enough to include all missing frames
+                        raise ImportError(
+                            f'{int(abs(more_frames_in_TDT))} too few frames imported from TDT, could not be corrected.')
                 else:
-                    # correction does not work if the whole log file is not large enough to include all missing frames
-                    raise ImportError(f'{int(abs(more_frames_in_TDT))} too few frames imported from TDT, could not be corrected.')
+                    if abs(more_frames_in_TDT) > 5:
+                        print('Found enough gaps in frame trigger to add missing frames')
 
         ### Preprocess position signal
         pos_to_be_del = np.arange(np.argmax(position[:, 1]) + 1,
@@ -1068,7 +1221,8 @@ class VRSession(dj.Computed):
         # check frame count again
         merge_trig = np.sum(merge_filt['trigger'])
         if imaging and merge_trig != frame_count:
-            raise ValueError(f'Frame count matching unsuccessful: {merge_trig} frames in merge, should be {frame_count} frames.')
+            raise ValueError(
+                f'Frame count matching unsuccessful: {merge_trig} frames in merge, should be {frame_count} frames.')
 
         # transform back to numpy array for saving
         time_passed = merge_filt.index - merge_filt.index[0]  # transfer timestamps to
@@ -1077,6 +1231,107 @@ class VRSession(dj.Computed):
         array = np.hstack((seconds[..., np.newaxis], np.array(array_df)))  # combine both arrays
 
         return array
+
+    def get_normal_trials(self) -> np.ndarray:
+        """
+        Convenience function that returns of one queried session the trial IDs with normal corridor (training pattern,
+        with tone). Used to more easily compute performances, which generally should exclude validation trials.
+
+        Returns:
+            Array with trial IDs of normal (no validation condition) trials.
+        """
+        if len(self) > 1:
+            raise IndexError('Query only one session at a time.')
+
+        trial_ids = np.sort((self.VRTrial() & self.restriction).fetch('trial_id'))  # For some reason, trial_ids are not sorted after querying
+        switch = (VRSessionInfo & self.restriction).fetch1('condition_switch')
+
+        if switch == [-1]:
+            return trial_ids
+        else:
+            return trial_ids[:switch[0]]
+
+    def plot_lick_histogram(self, bin_size: int = 1, ignore_validation: bool = True) -> None:
+        """
+        Create a figure with multiple licking histograms of a single mouse. Each session has its own subplot. Each bin's
+        value represents the percentage of trials during which the mouse licked at least once in this position. Reward
+        zones are marked in red overlays. This plot is useful to examine the raw licking behavior instead of a single
+        number like performance.
+
+        Args:
+            bin_size: Size of VR position bins (in arbitrary VR units) in which to bin the licks.
+            ignore_validation: Bool flag whether to ignore validation trials.
+        """
+
+        def draw_single_histogram(sess_key: dict, curr_ax: plt.Axes, bin_s: int, label_ax: bool) -> None:
+            """
+            Subfunction that draws a single licking histogram (of a single session) onto a given axis. Used to construct
+            larger figures.
+
+            Args:
+                sess_key: Primary keys of the session that should be drawn.
+                curr_ax: Pyplot Axes object where the histogram will be drawn in.
+                bin_s: Size of VR position bins (in arbitrary VR units) in which to bin the licks.
+                label_ax: Bool flag whether X and Y axes should be labelled.
+            """
+            # Select appropriate trials
+            if ignore_validation:
+                trials = (VRSession & sess_key).get_normal_trials()
+            else:
+                trials = (VRSession.VRTrial & sess_key).fetch('trial_id')
+
+            # Bin licking data from these trials into one array and binarize per-trial
+            data = [(VRSession.VRTrial & sess_key & f'trial_id={idx}').get_binned_licking(bin_size=bin_s)
+                    for idx in trials]
+            data = np.vstack(data)
+            data[data > 0] = 1  # we only care about that a bin had a lick, not how many
+
+            track_len = (VRSessionInfo & sess_key).fetch1('length')     # We need the track length for X-axis scaling
+
+            # Draw the histogram, with the weights being
+            curr_ax.hist(np.linspace(0, track_len, data.shape[1]), bins=data.shape[1],
+                    weights=(np.sum(data, axis=0) / len(data)) * 100,
+                    facecolor='black', edgecolor='black')
+
+            # Zone borders have to be adjusted for the unbinned x axis
+            zone_borders = (VRSession.VRTrial & f'trial_id={trials[0]}' & sess_key).get_zone_borders()
+            zone_borders = zone_borders + 10
+            for zone in zone_borders * (track_len / 120):
+                curr_ax.axvspan(zone[0], zone[1], color='red', alpha=0.3)
+
+            curr_ax.set_ylim(0, 105)
+            curr_ax.set_xlim(0, track_len)
+            if label_ax:
+                curr_ax.set_xlabel('VR position')
+                curr_ax.set_ylabel('Licks [%]')
+            curr_ax.spines['top'].set_visible(False)
+            curr_ax.spines['right'].set_visible(False)
+
+            curr_ax.set_title("M{}, {}, {:.2f}%".format(sess_key['mouse_id'], sess_key['day'],
+                                                        (VRPerformance & sess_key).get_mean()[0]*100))
+
+        # Get primary keys of queried sessions
+        keys = self.fetch('KEY')
+        if len(np.unique(self.fetch('mouse_id'))) > 1:
+            raise IndexError('Cannot draw lick histograms of more than 1 mouse at once.')
+
+        # Go through queried sessions
+        ncols = 3
+        nrows = int(np.ceil(len(keys) / ncols))
+        count = 0
+
+        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 8))
+        for row in range(nrows):
+            for col in range(ncols):
+                if count < len(keys):
+                    if row == nrows - 1:
+                        label_axes = True
+                    else:
+                        label_axes = False
+                    draw_single_histogram(keys[count], curr_ax=axes[row, col], bin_s=bin_size, label_ax=label_axes)
+                    count += 1
+        fig.canvas.set_window_title(f"M{keys[0]['mouse_id']} - Binned licking per session")
+        fig.tight_layout()
 
 
 @schema
@@ -1151,40 +1406,77 @@ class VRPerformance(dj.Computed):
         # Combine primary dict "key" with attributes "trial_data" and insert entry
         self.insert1({**key, **trial_data})
 
-    def get_mean(self, attr: str) -> List[float]:
+    def get_mean(self, attr: str = 'binned_lick_ratio', ignore_validation: bool = True) -> List[float]:
         """
         Get a list of the mean of a given performance attribute of the queried sessions.
         
         Args:
             attr: Performance metric, must be attribute of VRPerformance()
+            ignore_validation: Bool flag whether trials with changed conditions (validation trials) should be excluded
+                from the mean. For normal behavior analysis this should be true, as validation trials are to be handled
+                separately.
 
         Returns:
-            Means of a performance attribute of the queried sessions
+            Means of the performance attribute over the queried sessions, one value per session
         """
         sess = self.fetch(attr)
-        return [np.mean(x) for x in sess]
 
-    def plot_performance(self, attr: str = 'binned_lick_ratio') -> None:
+        if len(np.unique(self.fetch('mouse_id'))) > 1:
+            raise dj.errors.QueryError('More than one mouse queried! Only one mouse allowed for VRPerformance.get_mean().')
+
+        if ignore_validation:
+            mean_attr = []
+            cond_switches = (VRSessionInfo() & self.restriction).fetch('condition_switch')
+            for cond_switch, curr_sess in zip(cond_switches, sess):
+                if cond_switch == [-1]:
+                    mean_attr.append(np.mean(curr_sess))
+                else:
+                    mean_attr.append(np.mean(curr_sess[:cond_switch[0]]))
+            return mean_attr
+        else:
+            return [np.mean(x) for x in sess]
+
+    def plot_performance(self, attr: str = 'binned_lick_ratio', threshold: Optional[float] = 0.75,
+                         mark_spheres: bool = True, x_tick_label: bool = True) -> None:
         """
-        Plots performance across time for the queried sessions.
+        Plots performance across time for the queried sessions. Multiple mice included in the query are split up
+        across subplots.
         
         Args:
             attr: Performance metric, must be attribute of VRPerformance()
+            threshold: Y-intercept of a red dashed line to indicate performance threshold. Must be between 0 and 1. If None, no line is drawn.
+            mark_spheres: Bool flag whether to draw a vertical line at the date of microsphere injection.
+            x_tick_label: Bool flag whether X-ticks date labels should be drawn. Turning it off can make graphs tidier.
         """
         mouse_id, day, behav = self.fetch('mouse_id', 'day', attr)
+        mouse_ids = np.unique(mouse_id)
         df = pd.DataFrame(dict(mouse_id=mouse_id, day=day, behav=behav))
         df_new = df.explode('behav')
 
         df_new['behav'] = df_new['behav'].astype(float)
         df_new['day'] = pd.to_datetime(df_new['day'])
 
-        grid = sns.FacetGrid(df_new, col='mouse_id', col_wrap=3, height=3, aspect=2)
+        if len(mouse_ids) > 2:
+            col_wrap = 3
+        else:
+            col_wrap = len(mouse_ids)
+        grid = sns.FacetGrid(df_new, col='mouse_id', col_wrap=col_wrap, height=3, aspect=2, sharex=False)
         grid.map(sns.lineplot, 'day', 'behav')
 
-        for ax in grid.axes.ravel():
-            ax.axhline(0.75, linestyle='--', color='r', alpha=0.5)
+        for idx, ax in enumerate(grid.axes.ravel()):
+            if threshold is not None:
+                ax.axhline(threshold, linestyle='--', color='black', alpha=0.5)
             ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
             ax.set_ylabel(attr)
+            if mark_spheres:
+                try:
+                    surgery_day = (common_mice.Surgery() & 'surgery_type="Microsphere injection"' &
+                                   f'mouse_id={mouse_ids[idx]}').fetch1('surgery_date').date()
+                    ax.axvline(surgery_day, linestyle='--', color='r', alpha=1)
+                except dj.errors.DataJointError:
+                    print(f'No microsphere surgery on record for mouse {mouse_ids[idx]}')
+            if not x_tick_label:
+                ax.set_xticklabels([])
 
 
 @schema
@@ -1249,6 +1541,13 @@ class PerformanceTrend(dj.Computed):
             normality = corr = p = r2 = p_r2 = intercept = slope = x_fit = perf = None
 
         # TODO: maybe pickle the OLS object to store it directly in the database
+
+        # Replace infinity values that cannot be stored in the database
+        if r2 == -np.inf:
+            r2 = 0
+
         # Insert entry into the table
-        self.insert1(dict(key, p_normality=normality, perf_corr=corr, p_perf_corr=p, perf_r2=r2, prob_lin_reg=p_r2,
-                          perf_intercept=intercept, perf_slope=slope, perf_ols_x=x_fit, perf_ols_y=perf))
+        entry = dict(key, p_normality=normality, perf_corr=corr, p_perf_corr=p, perf_r2=r2, prob_lin_reg=p_r2,
+                     perf_intercept=intercept, perf_slope=slope, perf_ols_x=x_fit, perf_ols_y=perf)
+
+        self.insert1(entry)

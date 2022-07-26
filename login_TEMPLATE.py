@@ -16,7 +16,7 @@ This has to be the same password you used when registering at the MySQL database
 Adapted by Hendrik 2021-05-04
 """
 import os
-
+from typing import List
 import keyring
 import datajoint as dj
 import yaml
@@ -27,7 +27,7 @@ __cwd__ = ""
 
 def get_ip() -> str:
     """Return ip address of the server"""
-    return '130.60.53.47'  # Ubuntu server in Anna-Sophias room
+    return '130.60.53.48'  # Ubuntu server in Anna-Sophias room
 
 
 def get_user() -> str:
@@ -115,6 +115,15 @@ def get_neurophys_data_directory() -> str:
 
     return  # for example for Hendrik's PC:  'W:\\Neurophysiology-Storage1\\Wahl\\Hendrik\\PhD\\Data'
 
+
+def get_alternative_data_directories() -> List[str]:
+    """Return other possible paths of the DATA folder on this system, e.g. connected external hard drives"""
+
+    # comment this line out after setting the mapped neurophys storage path
+    raise Exception('Other possible paths of the DATA folder have not been set in the file '
+                    '"login.py". Please modify this file.')
+
+    return  # for example: ['F:\\Data', 'G:\\']
 
 def get_computer_name() -> str:
     """ Return the name of the local computer to check if the file is locally cached """

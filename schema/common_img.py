@@ -12,6 +12,7 @@ Schemas for the CaImAn 2-photon image analysis pipeline
 # imports
 import datajoint as dj
 import login
+login.connect()
 
 # Only import Caiman-specific modules if code is run inside a caiman environment
 try:
@@ -194,21 +195,31 @@ class RawImagingFile(dj.Imported):
 
         print('Finding raw imaging files for entry {}'.format(key))
 
-        # Get session path
-        path = (common_exp.Session() & key).get_absolute_path()
+        # Get possible session paths
+        try:
+            data_paths = [login.get_neurophys_data_directory(), *login.get_alternative_data_directories()]
+        except AttributeError:
+            data_paths = [login.get_neurophys_data_directory()]
+        session_paths = [os.path.join(x, (common_exp.Session() & key).fetch1('session_path')) for x in data_paths]
 
         # Load default parameters
         default_params = login.get_default_parameters()
 
-        # Iterate through the session directory and subdirectories and find files with the matching naming pattern
-        file_list = []
-        for step in os.walk(path):
-            for file_pattern in default_params['imaging']['scientifica_file']:
-                file_list.extend(glob(step[0] + f'\\{file_pattern}'))
+        for poss_dir in session_paths:
+            # Iterate through the session directory and subdirectories and find files with the matching naming pattern
+            file_list = []
+            for step in os.walk(poss_dir):
+                for file_pattern in default_params['imaging']['scientifica_file']:
+                    file_list.extend(glob(step[0] + f'\\{file_pattern}'))
 
-        if len(file_list) == 0:
-            raise ImportError("No files found in {} that fit the patterns {}!".format(path, default_params['imaging'][
-                'scientifica_file']))
+            # If files are found, stop searching the other directories, otherwise raise Error
+            if len(file_list) > 0:
+                tiff_dir = poss_dir
+                break
+            elif poss_dir == session_paths[-1]:
+                raise ImportError(
+                    "No files found in {} that fit patterns {}!".format(session_paths,
+                                                                        default_params['imaging']['scientifica_file']))
 
         # Sort list by postfix number
         file_list_sort = helper.alphanumerical_sort(file_list)
@@ -221,9 +232,7 @@ class RawImagingFile(dj.Imported):
             file_size = int(np.round(os.stat(file).st_size / 1024))
 
             # get relative file path compared to session directory
-            base_directory = login.get_working_directory()
-            sess_folder = (common_exp.Session() & key).fetch1('session_path')
-            rel_filename = os.path.relpath(file, os.path.join(base_directory, sess_folder))
+            rel_filename = os.path.relpath(file, tiff_dir)
 
             self.insert1(dict(**key, part=idx, file_name=rel_filename, nr_frames=nr_frames, file_size=file_size))
 
@@ -241,12 +250,20 @@ class RawImagingFile(dj.Imported):
         if len(self) != 1:
             raise Exception('Only length one allowed (not {})'.format(len(self)))
 
-        # Return file at remote location
-        base_directory = login.get_working_directory()
+        # Return file at remote location: check all possible locations, starting with neurophys server
+        directories = [login.get_working_directory(), *login.get_alternative_data_directories()]
+
         folder = (common_exp.Session() & self).fetch1('session_path')
         file = self.fetch1('file_name')
 
-        return os.path.join(base_directory, folder, file)
+        for directory in directories:
+            filepath = os.path.join(directory, folder, file)
+
+            # If the file exists, return the absolute file path
+            if os.path.isfile(filepath):
+                return filepath
+
+        raise FileNotFoundError(f'File {file} for session {folder} not found in possible directories: {directories}')
 
     def get_paths(self) -> List[str]:
         """
@@ -283,8 +300,6 @@ class ScanInfo(dj.Computed):
     def make(self, key: dict) -> None:
         """
         Automatically populate the ScanInfo table. RawImagingFile has to be populated beforehand.
-        # TODO: Save locations of scan fields in part tables
-                Create part tables for channel information
         Adrian 2019-08-21
 
         Args:
@@ -296,7 +311,19 @@ class ScanInfo(dj.Computed):
         if (Scan & key).fetch1('microscope') == 'Scientifica':
             # Extract meta-information from imaging .tif file
             path = (RawImagingFile & key & 'part=0').get_path()  # Extract only from first file
-            info = scanimage.get_meta_info_as_dict(path)
+
+            try:
+                info = scanimage.get_meta_info_as_dict(path)
+            except NameError:
+                # Function should throw a NameError if the loaded TIFF file has no metadata (eg. because it was re-saved with ImageJ)
+                # In this case, load the previous session's metadata
+                prev_key = key.copy()
+                del prev_key['day']
+                prev_key['day'] = np.max((RawImagingFile & f'day<"{key["day"]}"').fetch('day'))
+                path = (RawImagingFile & prev_key & 'part=0').get_path()
+                info = scanimage.get_meta_info_as_dict(path)
+                print(f'TIFF file in {key} did not contain metadata. Loaded metadata from {prev_key}.')
+
             info['pockels'] = info['powers'][0]  # TODO: remove hardcoding of MaiTai laser
             info['gain'] = info['gains'][0]
 
@@ -343,12 +370,11 @@ class MotionParameter(dj.Manual):
     pw_rigid = 1        : tinyint   # flag for performing rigid  or piecewise (patch-wise) rigid mc (0: rigid, 1: pw)
     max_dev_rigid = 3   : smallint  # maximum deviation allowed for patches with respect to rigid shift
     border_nan = 0      : tinyint   # flag for allowing NaN in the boundaries. If False, value of the nearest data point
-    n_iter_rig = 2      : tinyint   # Number of iterations for rigid motion correction (not used for pw-rigid)
+    n_iter_rig = 2      : tinyint   # Number of iterations for motion correction (despite the name also used for pw-rigid). More iterations means better template, but longer processing.
     nonneg_movie = 1    : tinyint   # flag for producing a non-negative movie
     """
 
     # TODO: CRUCIAL!! CHECK HOW THE CHANGED PMT SETTING THAT AFFECTS dF/F CAN BE CORRECTED TO MAKE SESSIONS COMPARABLE
-    # Todo: check if n_iter is only important for rigid, or also for pw-rigid correction
 
     def helper_insert1(self, entry: dict) -> None:
         """
@@ -379,7 +405,7 @@ class MotionParameter(dj.Manual):
             scan_key: Primary keys of ScanInfo() entry that is being processed
 
         Returns:
-            CNMFParams-type dictionary that CaImAn uses for its pipeline
+            CNMFParams-type dictionary that CaImAn uses for its pipeline (type hinting not possible due to import conflict)
         """
         frame_rate = (ScanInfo & scan_key).fetch1('fr')
         decay_time = (CaIndicator & scan_key).fetch1('decay')
@@ -434,18 +460,20 @@ class MotionCorrection(dj.Computed):
     align_time=CURRENT_TIMESTAMP : timestamp     # Automatic timestamp of alignment
     """
 
-    def make(self, key: dict) -> None:
+    def make(self, key: dict, chain_pipeline: bool = False, **make_kwargs) -> None:
         """
         Automatically populate the MotionCorrection for all networks of this scan
-        TODO:   - include motion correction of the second channel with the same parameters as primary channel
-                - for multiple planes, remove the black stripe in the middle
         Adrian 2019-08-21
 
         Args:
             key: Primary keys of the current NetworkScan() entry.
+            chain_pipeline: kwarg, if True, the locally cached mmap file will not be deleted, but passed on to
+                QualityControl.make(), which is called instead. This enables a chained processing pipeline for a single
+                session without repeated re-computation of the mmap file.
+            make_kwargs: additional optional make_kwargs that are can be passed down to QualityControl.make().
         """
         print('Populating MotionCorrection for key: {}'.format(key))
-
+        print('Chain pipeline:', chain_pipeline)
         # start the cluster (if a cluster already exists terminate it)
         if 'dview' in locals():
             cm.stop_server(dview=dview)
@@ -513,6 +541,8 @@ class MotionCorrection(dj.Computed):
         # the result of the motion correction is saved in a memory mapped file
         mmap_files = mc.mmap_file  # list of files
 
+        # print('Mmap files:', mmap_files)
+
         # extract and calculate information about the motion correction
         shifts = np.array(mc.shifts_rig).T  # caiman output: list with x,y shift tuples, shape (2, nr_frames)
         template = mc.total_template_rig  # 2D np array, mean intensity image
@@ -523,10 +553,6 @@ class MotionCorrection(dj.Computed):
             template_correlations.append(motion_correction.calculate_correlation_with_template(
                 mmap_file, template, sigma=2))
         template_correlation = np.concatenate(template_correlations)
-
-        # delete memory mapped files
-        for file in mmap_files:
-            os.remove(file)
 
         new_part_entries.append(
             dict(**key,
@@ -562,7 +588,41 @@ class MotionCorrection(dj.Computed):
                          outlier_frames=outlier_frames)
         self.insert1(new_entry)
 
+        try:
+            # delete MemoryMappedFile to save storage
+            for file in mmap_files:
+                os.remove(file)
+        except PermissionError:
+            print("Deleting mmap file failed, file is being used: {}".format(file))
+
+        if chain_pipeline:
+            # If a chained pipeline is being processed, do not delete the mmap file, but call QualityControl.make() for
+            # the current session instead
+            QualityControl().make(key, chain_pipeline, **make_kwargs)
+
         print('Finished populating MotionCorrection for key: {}'.format(key))
+
+    def get_parameter_obj(self):
+        """
+        Wrapper function for MotionParameter.get_parameter_obj() that returns the parameters that were used for the
+        single-queried MotionCorrection() entry as a CNMFParams object.
+
+        Returns:
+            CNMFParams object of the parameters that were used in the queried entry.
+        """
+
+        motion_id = self.fetch('motion_id')
+
+        if len(motion_id) > 1:
+            raise IndexError(
+                f'More than one Motion ID found for {self.fetch("KEY")}.\nQuery only a single MotionCorrection entry.')
+        else:
+            return (MotionParameter & dict(motion_id=motion_id[0])).get_parameter_obj(self.fetch1("KEY"))
+
+    def export_tif(self):
+        key = self.fetch1('KEY')
+        MemoryMappedFile().flexible_make(key)
+        (MemoryMappedFile & key).export_tif()
 
 
 @schema
@@ -652,6 +712,38 @@ class MemoryMappedFile(dj.Imported):
         self.insert1(new_entry, allow_direct_insert=True)
         # log('Finished creating memory mapped file.')
 
+    def flexible_make(self, key) -> None:
+        """
+        Wrapper function that looks for an existing memory-mapped file for a single ScanInfo entry in the local cache and
+        in the MemoryMappedFile table, and only creates a new file if none is found. This is useful when populating
+        many tables (QualityControl and Segmentation) for the same MotionCorrection() entry and avoids computing the
+        memory-mapped file several times.
+
+        Args:
+            key: Primary keys of the current session (ScanInfo entry)
+        """
+
+        if len(MemoryMappedFile() & key) == 0:
+            # If no entry exists, look for a locally cached mmap file (one layer deep)
+            mmap_path = glob(login.get_cache_directory() + "\\*.mmap") + glob(login.get_cache_directory() + "\\*\\*.mmap")
+            mmap_frames = [int(mmap.split("_")[-2]) for mmap in mmap_path]
+            try:
+                # N_frames of the found mmap files are matched with the session's nr_frames to find correct mmap file
+                mmap = mmap_path[mmap_frames.index((ScanInfo & key).fetch1('nr_frames'))]
+                # If a mmap file with the correct nr of frames exists, force-insert it into the table for later deletion
+                self.insert1(dict(**{i: key[i] for i in key if i != 'caiman_id'}, mmap_path=mmap),
+                             allow_direct_insert=True)
+                print("\tFound existing mmap file, skipping motion correction.")
+            except ValueError:
+                # If no fitting mmap file has been found in the temp folder, re-create the mmap file.
+                # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
+                channel = Scan().select_channel_if_necessary(key, 0)
+                self.make(key, channel)
+        else:
+            # If an entry exists, we don't have to do anything, the mmap file will just be queried
+            print('MemoryMappedFile entry already exists, skipping motion correction.')
+            pass
+
     def delete_mmap_file(self) -> None:
         """
         Delete single-queried memory-mapped file from cache and remove entry.
@@ -719,6 +811,19 @@ class MemoryMappedFile(dj.Imported):
 
         print('Saved file at {}'.format(path))
 
+    def load_mmap_file(self) -> Tuple[np.ndarray, str]:
+        """
+        Load single-queried entry from disk into memory for manual processing.
+
+        Returns:
+            Queried single-session imaging file as memory-mapped numpy array with shape (n_frames, x, y), and absolute
+            directory path of the file.
+        """
+        mmap_path = self.fetch1('mmap_path')
+        Yr, dims, T = cm.load_memmap(mmap_path)  # Load flattened memory-mapped file
+        images = np.reshape(Yr.T, [T] + list(dims), order='F')  # Reshape it to shape (n_frames, x, y)
+        return images, os.path.dirname(mmap_path)
+
 
 @schema
 class QualityControl(dj.Computed):
@@ -734,47 +839,82 @@ class QualityControl(dj.Computed):
     mean_time:              longblob        # 1d array: Average intensity over time
     """
 
-    def make(self, key: dict) -> None:
+    def make(self, key: dict, chain_pipeline: bool = False, **make_kwargs) -> None:
         """
         Automatically compute quality control metrics for a motion corrected mmap file.
         Adrian 2020-07-22
 
         Args:
             key: Primary keys of the current MotionCorrection() entry.
+            chain_pipeline: kwarg, if True, the locally cached mmap file will not be deleted, but passed on to
+                Segmentation.make(), which is called instead. This enables a chained processing pipeline for a single
+                session without repeated re-computation of the mmap file.
+            make_kwargs: additional optional make_kwargs that are can be passed down to Segmentation.make().
         """
+        print('Populating QualityControl for key: {}.'.format(key))
 
-        # log('Populating QualityControl for key: {}.'.format(key))
-
-        if len(MemoryMappedFile() & key) == 0:
-            # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
-            channel = Scan().select_channel_if_necessary(key, 0)
-            MemoryMappedFile().make(key, channel=channel)
+        MemoryMappedFile().flexible_make(key)  # Create the motion-corrected mmap file only if it does not exist already
 
         mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')  # locally cached file
 
         stack = cm.load(mmap_file)
 
         new_entry = dict(**key,
-                         avg_image=np.mean(stack, axis=0, dtype=np.float16),
-                         std_image=np.std(stack, axis=0, dtype=np.float16),
-                         min_image=np.min(stack, axis=0, dtype=np.float16),
-                         max_image=np.max(stack, axis=0, dtype=np.float16),
-                         percentile_999_image=np.percentile(stack, 99.9, axis=0, dtype=np.float16),
-                         mean_time=np.mean(stack, axis=(1, 2), dtype=np.float16),
+                         avg_image=np.mean(stack, axis=0, dtype=np.float32),
+                         std_image=np.std(stack, axis=0, dtype=np.float32),
+                         min_image=np.min(stack, axis=0),
+                         max_image=np.max(stack, axis=0),
+                         percentile_999_image=np.percentile(stack, 99.9, axis=0),
+                         mean_time=np.mean(stack, axis=(1, 2), dtype=np.float32),
                          )
 
         # calculate correlation with 8 neighboring pixels in parallel
-        new_entry['cor_image'] = np.array(motion_correction.parallel_all_neighbor_correlations(stack), dtype=np.float16)
+        new_entry['cor_image'] = np.array(motion_correction.parallel_all_neighbor_correlations(stack), dtype=np.float32)
 
-        self.insert1(new_entry)
 
-        # delete MemoryMappedFile to save storage
-        try:
-            # Clean up movie variables to close mmap file for deletion
-            stack = None
-            (MemoryMappedFile & key).delete_mmap_file()
-        except PermissionError:
-            print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
+
+        # Clean up movie variables to close mmap file for deletion
+        stack = None
+
+        if chain_pipeline:
+
+            self.insert1(new_entry, allow_direct_insert=True)
+
+            # If a chained pipeline is being processed, do not delete the mmap file, but call Segmentation.make() for
+            # the current session instead
+
+            # Apply changes to primary keys to a copy
+            seg_key = key.copy()
+
+            # In the chain_pipeline mode, caiman_id is not included in the "key" dict (only PKs of QualityControl or MotionCorrection)
+            # We thus have to figure out which caiman_id to use.
+            # First, check if caiman_id was provided in kwargs
+            if 'caiman_id' in make_kwargs:
+                if type(make_kwargs['caiman_id']) != int:
+                    raise TypeError(f'caiman_id in make_kwargs has to be an integer, not {type(make_kwargs["caiman_id"])}')
+                seg_key['caiman_id'] = make_kwargs['caiman_id']
+                del make_kwargs['caiman_id']    # remove from make_kwargs because Segmentation does not expect it
+            # If not, and there is only one parameter set for this mouse, use that one
+            else:
+                try:
+                    seg_key['caiman_id'] = (CaimanParameter() & key).fetch1('caiman_id')
+                    print('Caiman_id not provided. Use only param set on record instead, with caiman_id', seg_key['caiman_id'])
+                # If there is more than one (fetch1 fails), throw an error
+                except dj.errors.DataJointError:
+                    raise IndexError(f'More than one CaimanParameter entry for keys {key}.\nDefine which to use in make_kwargs.')
+
+            # Finally, call Segmentation().make()
+            Segmentation().make(seg_key, **make_kwargs)
+
+        else:
+
+            self.insert1(new_entry)
+
+            # delete MemoryMappedFile to save storage
+            try:
+                (MemoryMappedFile & key).delete_mmap_file()
+            except PermissionError:
+                print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
 
         # log('Finished populating QualityControl for key: {}.'.format(key))
 
@@ -806,7 +946,7 @@ class CaimanParameter(dj.Manual):
     stride_cnmf = 6 :       smallint    # amount of overlap between the patches in pixels
     k = 18:                 smallint    # number of components per patch
     g_sig = 4:              smallint    # expected half size of neurons in pixels
-    method_init = 'greedy_roi' : varchar(128)   # initialization method (if analyzing dendritic data using 'sparse_nmf')
+    method_init='greedy_roi': enum('greedy_roi', 'corr_pnr', 'sparse_nmf', 'local_nmf', 'graph_nmf', 'pca_ica')   # Initialization method. Use cases-> 'greedy_roi': default for 2p, 'corr_pnr': default for endoscopic 1p, 'sparse_nmf': useful for sparse dendritic imaging data
     ssub = 2:               tinyint     # spatial subsampling during initialization
     tsub = 2:               tinyint     # temporal subsampling during initialization
     # parameters for component evaluation
@@ -817,9 +957,7 @@ class CaimanParameter(dj.Manual):
     cnn_lowest = 0.1:       float       # rejection threshold of CNN-based classifier
     cnn_thr = 0.9:          float       # upper threshold for CNN based classifier
     # Parameters for deltaF/F computation
-    flag_auto = 1:          tinyint     # flag for using provided or computed percentile as baseline fluorescence. If 
-                                        # True, Caiman estimates best percentile as the cumulative distribution function 
-                                        # of a kernel density estimation.
+    flag_auto = 1:          tinyint     # flag for using provided or computed percentile as baseline fluorescence. If 1, Caiman estimates best percentile as the cumulative distribution function of a kernel density estimation.
     quantile_min = 8:       tinyint     # Quantile to use as baseline fluorescence. Only used if flag_auto is False.
     frame_window = 2000:    int         # Sliding window size of fluorescence normalization
     # Custom parameters that are not directly part of Caimans CNMFParams object
@@ -909,13 +1047,22 @@ class CaimanParameter(dj.Manual):
 
 
 @schema
+class CaimanParameterSession(dj.Manual):
+    definition = """ # Table which specifies which CaimanParameter set is used for a session. Sessions not mentioned here are assumed to be caiman_id=0.
+        -> CaimanParameter
+        -> ScanInfo
+        ----
+        """
+
+
+@schema
 class Segmentation(dj.Computed):
     definition = """ # Table to store results of Caiman segmentation into ROIs
     -> MotionCorrection
     -> CaimanParameter
     ------
-    nr_masks                        : smallint      # Number of total detected masks in this FOV (includes rejected masks)
-    target_dim                      : longblob      # Tuple (dim_y, dim_x) to reconstruct mask from linearized index
+    nr_masks                        : smallint      # Number of accepted masks in this FOV
+    target_dim                      : longblob      # FOV dimensions as tuple (dim_y, dim_x) to reconstruct mask from linearized index
     s_background                    : longblob      # Spatial background component(s) weight mask (dim_y, dim_x, nb) 
     f_background                    : longblob      # Background fluorescence (nb, nr_frames)
     roi_map                         : longblob      # FOV with pixels labelled with their (primary) ROI occupant. -1 if no ROI occupies this pixel.
@@ -969,6 +1116,46 @@ class Segmentation(dj.Computed):
             # swap axes to keep n_rois as first axis and return
             return np.moveaxis(dense, 2, 0)
 
+        def plot_contours(self, thr: float = 0.05, background: str = 'cor_image', ax: plt.Axes = None,
+                          show_id: bool = False, contour_color='w', id_color='w') -> None:
+            """
+            Plot contours of queried ROIs.
+
+            Args:
+                thr             : Weight threshold of contour function
+                background      : Background image. Has to be attribute of QualityControl(), or None for no background
+                ax              : If provided an Axes, contours will be plotted there, otherwise in a new figure
+                show_id         : Bool flag whether mask IDs should be shown in the contour centers
+                contour_color   : Color of the contour drawing
+                id_color        : Color of the mask ID text
+            """
+
+            from skimage import measure
+
+            # Fetch footprints of the queried ROIs and compute contours
+            footprints = self.get_rois()
+            contours = [measure.find_contours(footprint, thr, fully_connected='high')[0] for footprint in footprints]
+
+            # If no axes object is provided, plot in a new figure
+            if ax is None:
+                plt.figure()
+                ax = plt.gca()
+
+            # Fetch and plot background image if provided
+            if background is not None:
+                ax.imshow((QualityControl() & self).fetch1(background))
+
+            # Plot contours
+            for c in contours:
+                c[:, [0, 1]] = c[:, [1, 0]]  # Plotting swaps X and Y axes, swap them back before
+                ax.plot(*c.T, c=contour_color)
+
+            # Write mask ID at the CoM of each ROI
+            if show_id:
+                mask_ids, coms = self.fetch('mask_id', 'com')
+                for mask_id, com in zip(mask_ids, coms):
+                    ax.text(com[1], com[0], str(mask_id), color=id_color)
+
         # Obsolete function, CoM is calculated during make() and stored in DB
         # def get_roi_center(self) -> np.ndarray:
         #     """
@@ -995,7 +1182,7 @@ class Segmentation(dj.Computed):
         #     return np.array([np.round(center1), np.round(center2)], dtype=int)
 
     # make of main table Segmentation
-    def make(self, key: dict, save_results: bool = False, save_overviews: bool = False) -> None:
+    def make(self, key: dict, save_results: bool = False, save_overviews: bool = False, del_mmap: bool = True) -> None:
         """
         Automatically populate the segmentation for the scan.
         Adrian 2019-08-21
@@ -1006,31 +1193,33 @@ class Segmentation(dj.Computed):
                             data in Segmentation() and ROI().
             save_overviews: Flag to plot overview graphs during Segmentation (pre- and post-evaluation components)
                             and save them in the session folder.
+            del_mmap:       Flag if mmap file should be deleted afterwards.
         """
+
+        ## Check if the currently queried caiman_id is the correct caiman_id for this session
+        session_key = {k: v for k, v in key.items() if k in ['username', 'mouse_id', 'day', 'session_num']}
+        if len(CaimanParameter & session_key) > 1:
+            # If more than one CaimanParameter entry for this mouse exist, get all specified caiman_ids for this session
+            correct_ids = (CaimanParameterSession & session_key).fetch('caiman_id')
+            if len(correct_ids) == 0:
+                # If no ID was specified, use 0 by default
+                correct_ids = [0]
+        else:
+            correct_ids = [0]
+
+        # If the currently queried caiman_id is NOT among the correct IDs (either specifically set in CaimanParameterSession
+        # or defaulted to 0), skip the current query by exiting the function. Otherwise, start Segmentation.
+        if key['caiman_id'] not in correct_ids:
+            # print(f'\tcaiman_id={key["caiman_id"]} not found in CaimanParameterSession, skipping...')
+            return
 
         print('Populating Segmentation for {}.'.format(key))
 
-        # Create the memory mapped file if it does not exist yet
+        # Create the memory mapped file if it does not exist already
+        MemoryMappedFile().flexible_make(key)
 
-        # Look for mmap files in the temp folder that might be leftover from a previously cancelled make() call
-        mmap_path = glob(login.get_cache_directory() + "\\*.mmap")
-        mmap_frames = [int(mmap.split("_")[-2]) for mmap in mmap_path]
-        try:
-            # N_frames of the found mmap files are matched with the session's nr_frames to find correct mmap file
-            mmap = mmap_path[mmap_frames.index((ScanInfo & key).fetch1('nr_frames'))]
-            # If a mmap file with the correct nr of frames exists, force-insert it into the table for later deletion
-            MemoryMappedFile().insert1(dict(**{i: key[i] for i in key if i != 'caiman_id'}, mmap_path=mmap),
-                                       allow_direct_insert=True)
-            print("\tFound existing mmap file, skipping motion correction.")
-        except ValueError:
-            # If no fitting mmap file has been found in the temp folder, check if an entry already exists somewhere else
-            # If no entry exists, re-create the mmap file.
-            if len(MemoryMappedFile() & key) == 0:
-                # In case of multiple channels, deinterleave and return channel 0 (GCaMP signal)
-                channel = Scan().select_channel_if_necessary(key, 0)
-                MemoryMappedFile().make(key, channel)
-
-        mmap_file = (MemoryMappedFile & key).fetch1('mmap_path')  # locally cached file
+        # load memory mapped file
+        images, mmap_file = (MemoryMappedFile & key).load_mmap_file()  # locally cached file
         folder = (common_exp.Session() & key).get_absolute_path()  # Session folder on the Neurophys server
 
         # Get Caiman parameters and include it into the parameters of the motion correction
@@ -1041,11 +1230,6 @@ class Segmentation(dj.Computed):
         # log('Using the following parameters: {}'.format(opts.to_dict()))
         p = opts.get('temporal', 'p')  # save for later
         cn = (QualityControl() & key).fetch1('cor_image')  # Local correlation image for FOV background
-
-        # load memory mapped file
-        Yr, dims, T = cm.load_memmap(mmap_file)
-        images = np.reshape(Yr.T, [T] + list(dims), order='F')
-        # load frames in python format (T x X x Y)
 
         # start new cluster
         c, dview, n_processes = cm.cluster.setup_cluster(
@@ -1073,22 +1257,17 @@ class Segmentation(dj.Computed):
         # log('Starting CaImAn on the whole recording...')
         cnm2 = cnm.refit(images, dview=dview)
 
-        if save_overviews:
-            print("Saving plots at: {}".format(folder))
-            cnm2.estimates.plot_contours(img=cn, display_numbers=False)
-            plt.tight_layout()
-            fig = plt.gcf()
-            fig.set_size_inches((10, 10))
-            plt.savefig(os.path.join(folder, 'pre_sel_components.png'))
-            plt.close()
-
         # evaluate components
         cnm2.estimates.evaluate_components(images, cnm2.params, dview=dview)
 
-        cnm2.estimates.plot_contours(img=cn, idx=cnm2.estimates.idx_components, display_numbers=False)
-        plt.tight_layout()
-        fig = plt.gcf()
-        fig.set_size_inches((10, 10))
+        if save_overviews:
+            print("Saving plots at: {}".format(folder))
+            cnm2.estimates.plot_contours(img=cn, idx=cnm2.estimates.idx_components, display_numbers=False)
+            plt.tight_layout()
+            fig = plt.gcf()
+            fig.set_size_inches((10, 10))
+            plt.savefig(os.path.join(folder, 'eval_components.png'))
+            plt.close()
 
         # discard rejected components
         cnm2.estimates.select_components(use_object=True)
@@ -1145,7 +1324,6 @@ class Segmentation(dj.Computed):
         nr_masks = masks.shape[1]
 
         from scipy.ndimage.measurements import center_of_mass
-
         # Transform sparse mask into a dense array for CoM and neuron_map calculation
         dense_masks = np.reshape(masks.toarray(), (cnm2.dims[0], cnm2.dims[1], len(cnm2.estimates.C)), order='F')
         # Move axis of ROIs to position 0
@@ -1162,6 +1340,7 @@ class Segmentation(dj.Computed):
         pixel_owners = np.argmax(dense_masks, axis=0)
         pixel_owners = np.where(max_vals > (CaimanParameter & key).fetch1('weight_thresh'), pixel_owners, -1)
 
+        # Extract fluorescent traces
         traces = cnm2.estimates.C + cnm2.estimates.YrA
         residual = cnm2.estimates.YrA
         dff = np.array(cnm2.estimates.F_dff, dtype=np.float32)  # save traces as float32 to save disk space
@@ -1177,16 +1356,35 @@ class Segmentation(dj.Computed):
         np.save(os.path.join(folder, traces_filename), np.array(traces, dtype=np.float32))
         np.save(os.path.join(folder, residuals_filename), np.array(residual, dtype=np.float32))
 
+        # Print warning if the number of accepted ROIs diverges >20% from the previous session
+        # Find date of previous session for this mouse
+        prev_sess_keys = key.copy()
+        del prev_sess_keys['day']
+        prev_days = (self & prev_sess_keys & f'day<"{key["day"]}"').fetch('day')
+
+        if len(prev_days) > 0:
+            prev_sess_keys['day'] = np.max(prev_days)
+            nr_masks_diff = (self & prev_sess_keys).fetch1('nr_masks') / nr_masks
+
+            # Construct and print message
+            msg = [f'Warning!\nSegmentation of trial {key}\naccepted more than 20%',
+                   f'ROIs than in the previous trial {prev_sess_keys}\n({nr_masks} vs {(self & prev_sess_keys).fetch1("nr_masks")}).\n'
+                   f'Check sessions manually for irregularities!']
+            if nr_masks_diff > 1.2:
+                print(msg[0], 'fewer', msg[1])
+            elif nr_masks_diff < 0.8:
+                print(msg[0], 'more', msg[1])
+
         #### insert results in master table first
         new_master_entry = dict(**key,
                                 nr_masks=nr_masks,
-                                target_dim=np.array(dims),
+                                target_dim=np.array(cnm2.dims),
                                 s_background=np.array(s_background, dtype=np.float32),
                                 f_background=np.array(f_background, dtype=np.float32),
                                 roi_map=pixel_owners,
                                 traces=traces_filename,
                                 residuals=residuals_filename)
-        self.insert1(new_master_entry)
+        self.insert1(new_master_entry, allow_direct_insert=True)
 
         #### insert the masks and traces in the part table
         for i in range(nr_masks):
@@ -1200,16 +1398,17 @@ class Segmentation(dj.Computed):
                             snr=snr[i],
                             r=r[i],
                             cnn=cnn[i])
-            self.ROI().insert1(new_part)
+            self.ROI().insert1(new_part, allow_direct_insert=True)
 
         # delete MemoryMappedFile to save storage
-        try:
-            # Clean up movie variables to close mmap file for deletion
-            Yr = None
-            images = None
-            (MemoryMappedFile & key).delete_mmap_file()
-        except PermissionError:
-            print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
+        if del_mmap:
+            try:
+                # Clean up movie variables to close mmap file for deletion
+                Yr = None
+                images = None
+                (MemoryMappedFile & key).delete_mmap_file()
+            except PermissionError:
+                print("Deleting mmap file failed, file is being used: {}".format(mmap_file))
 
         print('Finished populating Segmentation for {}.'.format(key))
 
@@ -1264,6 +1463,8 @@ class Segmentation(dj.Computed):
                 decon_ids = (Deconvolution & self).fetch('decon_id')
                 if len(decon_ids) == 1:
                     decon_id = decon_ids[0]
+                elif len(decon_ids) == 0:
+                    raise Exception('No deconvolution found. Populate common_img.Deconvolution().')
                 else:
                     raise Exception(
                         'The following decon_ids were found: {}. Please specify using parameter decon_id.'.format(
@@ -1293,21 +1494,21 @@ class Segmentation(dj.Computed):
 
 @schema
 class DeconvolutionModel(dj.Lookup):
-    definition = """ # Table for different deconvolution models
+    definition = """ # Table for different deconvolution models. Except for stimulus-triggered experiments, model 1 is most appropriate.
     decon_id      : int            # index for methods, base 0
     ----
     model_name    : varchar(128)   # Name of the model
     sampling_rate : int            # Sampling rate [Hz]
-    smoothing     : float          # Std of gaussian to smooth ground truth spike rate [in sec]
-    causal        : int            # 0: symmetric smoothing, 1: causal kernel
+    smoothing     : float          # Std of Gaussian to smooth ground truth spike rate [in sec]. For lower frame rates use more smoothing.
+    causal        : int            # 0: symmetric smoothing, 1: causal kernel. Symmetric is default, but causal yields better temporal precision for stimulus-triggered activity patterns in high-quality, high frame rate datasets.
     nr_datasets   : int            # Number of datasets used for training the model
     threshold     : int            # 0: threshold at zero, 1: threshold at height of one spike
     """
     contents = [
         [0, 'Global_EXC_30Hz_smoothing50ms_causalkernel', 30, 0.05, 1, 18, 0],
         [1, 'Global_EXC_30Hz_smoothing50ms', 30, 0.05, 0, 18, 0],
-        [2, 'Global_EXC_30Hz_smoothing100ms_causalkernel', 30, 0.2, 1, 18, 0],
-        [3, 'Global_EXC_30Hz_smoothing100ms', 30, 0.2, 0, 18, 0]
+        [2, 'Global_EXC_30Hz_smoothing100ms_causalkernel', 30, 0.1, 1, 18, 0],
+        [3, 'Global_EXC_30Hz_smoothing100ms', 30, 0.1, 0, 18, 0]
     ]
 
 

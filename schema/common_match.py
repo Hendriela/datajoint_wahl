@@ -10,9 +10,10 @@ import numpy as np
 from skimage.draw import polygon
 from skimage import measure
 from scipy import spatial
-from typing import Iterable, Tuple, List
+from typing import Iterable, Tuple, List, Optional
 import math
 import bisect
+import ctypes
 
 import datajoint as dj
 
@@ -24,31 +25,111 @@ schema = dj.schema('common_match', locals(), create_tables=True)
 @schema
 class CellMatchingParameter(dj.Manual):
     definition = """ # Parameters used in the cross-session cell matching pipeline. Defaults are params of Annas model.
-    matching_param_id           : int       # Index of parameter set
+    match_param_id              : int       # Index of parameter set
     ------
     contour_thresh = 0.05       : float     # Intensity threshold of ROI contour finding
-    true_binary = 0             : tinyint   # Bool flag whether the footprint should truly be binarized or areas outside 
-                                            # the contour but with weight > 0 should retain their non-zero weights.
-    neighbourhood_radius = 80   : int       # Radius in um of the area around the ROI where matches are considered. 
-                                            # Default of 80 translates to 50 pixels at 1x zoom
+    true_binary = 0             : tinyint   # Bool flag whether the footprint should truly be binarized or areas outside the contour but with weight > 0 should retain their non-zero weights.
+    neighbourhood_radius = 80   : int       # Radius in um of the area around the ROI where matches are considered. Default of 80 translates to 50 pixels at 1x zoom
     nearby_neuron_cap = 15      : int       # Maximum nearest neurons found by KDTree nearest-neighbor-analysis
+    fov_shift_patches = 8       : tinyint   # Number of patches squared into which the FOV will be split for shift estimation. E.g. with 8, the FOV will be split into 8x8=64 patches.
+    -> CellMatchingClassifier
+    match_param_description  : varchar(512) # Short description of the background and effect of the parameter set
     """
 
 
 @schema
-class CellMatchingClassifier(dj.Manual):
-    definition = """ # Table to store decision tree classifier models for cell matching GUI
+class CellMatchingClassifier(dj.Lookup):
+    definition = """ # Table to store decision tree classifier models for cell matching GUI.
     classifier_id   : int           # Index of classifier version
     ------
+    model_path                      : varchar(256)  # Path to classifier model, relative to Wahl folder server
     description                     : varchar(256)  # Description of the model
-    model_path                      : varchar(256)  # Path to classifier model, relative to Wahl folder server 
-    train_time = CURRENT_TIMESTAMP  : timestamp     # Timestamp of the training of the model
+    n_cells                         : smallint      # Number of inputs for the classifier
+    n_features                      : tinyint       # Number of features per cell
     """
+    contents = [
+        [0, 'CellMatching\\models\\model0.pkl', 'Original model trained by Anna Schmidt-Rohr', 3, 12]
+    ]
+
+
+@schema
+class FieldOfViewShift(dj.Manual):
+    definition = """ # Piecewise FOV shift between two sessions. Used to correct CoM coordinates. Manual table instead 
+    # of Computed, because not every Session needs a shift, it is only computed once it is queried via the GUI. 
+    -> common_img.QualityControl
+    -> CellMatchingParameter
+    matched_session : varchar(64)   # Identifier for the matched session: YYYY-MM-DD_sessionnum_motionid_caimanid
+    ------
+    shifts         : longblob       # 3D array with shape (n_dims, x, y), holding pixel-wise shifts for x (shifts[0]) and y (shifts[1]) coordinates.
+    """
+
+    def make(self, key: dict) -> None:
+        """
+        Compute FOV-shift map between the queried reference and a target image.
+        Mean intensity images (avg_image) are used instead of local correlation images because they are a better
+        representation of the FOV anatomy, more stable over time, and are less influenced by  activity patterns. Images
+        are split into patches, and the shift is calculated for each patch separately with phase correlation. The
+        resulting shift map is scaled up and missing values interpolated to the original FOV size to get an estimated
+        shift value for each pixel.
+
+        Args:
+            key: Primary keys of the reference session in common_img.QualityControl(),
+                    ID of the CellMatchingParameter() entry,
+                    and identifier string of the matched session: YYYY-MM-DD_sessionnum_motionid_caimanid.
+                    It is assumed that the reference and matched sessions come from the same individual mouse.
+        """
+
+        from skimage import registration
+        from scipy import ndimage
+
+        # Fetch reference FOV, parameter set, and extract the primary keys of the matched session from the ID string
+        match_keys = key['matched_session'].split('_')
+        match_key = dict(username=key['username'], mouse_id=key['mouse_id'], day=match_keys[0],
+                         session_num=int(match_keys[1]), motion_id=int(match_keys[2]))
+
+        print_dict = dict(username=key['username'], mouse_id=key['mouse_id'], day=key['day'],
+                          session_num=key['session_num'], motion_id=key['motion_id'])
+        print(f"Computing FOV shift between sessions\n\t{print_dict} and \n\t{match_key}")
+
+        fov_ref = (common_img.QualityControl & key).fetch1('avg_image')
+        fov_match = (common_img.QualityControl & match_key).fetch1('avg_image')
+        params = (CellMatchingParameter & key).fetch1()
+
+        # Calculate pixel size of each patch
+        img_dim = fov_ref.shape
+        patch_size = int(img_dim[0] / params['fov_shift_patches'])
+
+        # Shift maps are a 2D matrix of shape (n_patch, n_patch), with the phase correlation of each patch
+        shift_map = np.zeros((2, params['fov_shift_patches'], params['fov_shift_patches']))
+        for row in range(params['fov_shift_patches']):
+            for col in range(params['fov_shift_patches']):
+                # Get a view of the current patch by slicing rows and columns of the FOVs
+                curr_ref_patch = fov_ref[row * patch_size:row * patch_size + patch_size,
+                                         col * patch_size:col * patch_size + patch_size]
+                curr_tar_patch = fov_match[row * patch_size:row * patch_size + patch_size,
+                                           col * patch_size:col * patch_size + patch_size]
+                # Perform phase cross correlation to estimate image translation shift for each patch
+                patch_shift = registration.phase_cross_correlation(curr_ref_patch, curr_tar_patch, upsample_factor=100,
+                                                                   return_error=False)
+                shift_map[:, row, col] = patch_shift
+
+        # Use scipy's zoom to upscale single-patch shifts to FOV size and get pixel-wise shifts via spline interpolation
+        x_shift_map_big = ndimage.zoom(shift_map[0], patch_size, order=3)   # Zoom X and Y shifts separately
+        y_shift_map_big = ndimage.zoom(shift_map[1], patch_size, order=3)
+        # Further smoothing (e.g. Gaussian) is not necessary, the interpolation during zooming smoothes harsh borders
+        shift_map_big = np.stack((x_shift_map_big, y_shift_map_big))
+
+        # If caiman_id is in the primary keys, remove it, because it is not in QualityControl, this table's parent
+        if 'caiman_id' in key:
+            del key['caiman_id']
+
+        # Insert shift map into the table
+        self.insert1(dict(**key, shifts=shift_map_big))
 
 
 @schema
 class MatchingFeatures(dj.Computed):
-    definition = """ # Features of ROIs that are used as input for the cell matching classifier
+    definition = """ # Features of the ROIs that are used for the cell matching algorithm
     -> common_img.Segmentation
     -> CellMatchingParameter
     ------
@@ -56,12 +137,12 @@ class MatchingFeatures(dj.Computed):
     """
 
     class ROI(dj.Part):
-        definition = """ # Features of neurons that are used as input for the cell matching classifier
+        definition = """ # Features of neurons that are used for the cell matching algorithm
         -> master
         mask_id                     : int           # ID of the ROI (same as common_img.Segmentation)
         ------
-        contour                     : longblob      # (Semi)-binarized spatial contour of the ROI
-        neighbourhood               : longblob      # Local area crop of the local correlation template around the neuron
+        contour                     : longblob      # (Semi)-binarized spatial contour of the ROI, maximally cropped
+        neighbourhood               : longblob      # Local area of the mean intensity template around the neuron
         rois_nearby                 : int           # Number of neurons in the neighbourhood. Capped by parameter.
         closest_roi                 : int           # Index of the nearest ROI (smallest physical distance)
         closest_roi_angle           : float         # Radial angular distance of the closest ROI
@@ -76,18 +157,20 @@ class MatchingFeatures(dj.Computed):
             key: Primary keys of the current MatchingFeatures() entry.
         """
 
+        print(f"Computing matching features for ROIs in entry {key}.")
+
         # Fetch relevant data
         footprints = (common_img.Segmentation.ROI & key).get_rois()
         coms = np.vstack((common_img.Segmentation.ROI & key).fetch('com'))
-        template = (common_img.QualityControl & key).fetch1("cor_image")
+        template = (common_img.QualityControl & key).fetch1("avg_image")
         params = (CellMatchingParameter & key).fetch1()
 
         # Convert neighbourhood radius (in microns) to zoom-dependent radius in pixels
         mean_res = np.mean((common_img.CaimanParameter & key).get_parameter_obj(key)['dxy'])
-        margin_px = int(np.round(params['neighbourhood_radius']/mean_res))
+        margin_px = int(np.round(params['neighbourhood_radius'] / mean_res))
 
-        coms_list = [list(com) for com in coms]     # KDTree expects a list of lists as input
-        neighbor_tree = spatial.KDTree(coms_list)   # Build kd-tree to query nearest neighbours of any ROI
+        coms_list = [list(com) for com in coms]  # KDTree expects a list of lists as input
+        neighbor_tree = spatial.KDTree(coms_list)  # Build kd-tree to query nearest neighbours of any ROI
 
         new_entries = []
         for roi_idx in range(coms.shape[0]):
@@ -108,8 +191,8 @@ class MatchingFeatures(dj.Computed):
             closest_roi_angle = math.atan2(com[1] - coms[closest_idx][1], com[0] - coms[closest_idx][0])
 
             # get the number of nearest neighbours in the neighbourhood and their indices
-            num_neurons_in_radius = bisect.bisect(distance, 50) - 1          # -1 to not count the ROI itself
-            index_in_radius = index[1: max(0, num_neurons_in_radius) + 1]    # start at 1 to not count the ROI itself
+            num_neurons_in_radius = bisect.bisect(distance, 50) - 1  # -1 to not count the ROI itself
+            index_in_radius = index[1: max(0, num_neurons_in_radius) + 1]  # start at 1 to not count the ROI itself
 
             # Get the number of neighbours in each neighbourhood quadrant (top left to bottom right)
             neighbours_quadrants = self.neighbours_in_quadrants(coms, roi_idx, index_in_radius)
@@ -212,13 +295,13 @@ class MatchingFeatures(dj.Computed):
             x = coms[idx][0]
             y = coms[idx][1]
             if x_ref <= x and y_ref <= y:
-                quadrant_split[0] += 1      # top-left quadrant
+                quadrant_split[0] += 1  # top-left quadrant
             elif x_ref <= x and y_ref >= y:
-                quadrant_split[1] += 1      # top-right quadrant
+                quadrant_split[1] += 1  # top-right quadrant
             elif x_ref >= x and y_ref >= y:
-                quadrant_split[2] += 1      # bottom-left quadrant
+                quadrant_split[2] += 1  # bottom-left quadrant
             else:
-                quadrant_split[3] += 1      # bottom-right quadrant
+                quadrant_split[3] += 1  # bottom-right quadrant
         return quadrant_split
 
 
@@ -229,4 +312,117 @@ class MatchedIndex(dj.Manual):
     matched_session : varchar(64)   # Identifier for the matched session: YYYY-MM-DD_sessionnum_motionid_caimanid
     ------
     matched_id      : int           # Mask ID of the same neuron in the matched session
+    matched_time = CURRENT_TIMESTAMP  : timestamp
     """
+
+    def helper_insert1(self, key: dict) -> Optional[bool]:
+        """
+        Helper function that inserts a confirmed neuron match for both sessions and warns if a cell has been tracked
+        twice with different reference cells.
+
+        Args:
+            key: Primary keys of the current matched cell entry
+        """
+
+        popup_msg = '\nPress "OK" to overwrite entry, or "Cancel" to keep existing entry.'
+
+        dup_keys = key.copy()
+        del dup_keys['matched_id']
+        overwriting = False
+
+        if len(self & dup_keys) > 0:
+            duplicate_entry = (self & dup_keys).fetch1()
+            # If the entry already exists, but with another ID, ask the user if it should be overwritten
+            if duplicate_entry['matched_id'] != key['matched_id']:
+                msg = f'Cell {key["mask_id"]} in session {key["day"]} has a recorded match for session' \
+                      f'{duplicate_entry["matched_session"][:11]} with cell {duplicate_entry["matched_id"]}, ' \
+                      f'you selected a match with cell {key["matched_id"]}.' + popup_msg
+                # This creates a popup window. The two last parameters determine the style, OR'd together. The first
+                # gives the window an "OK" and a "Cancel" button, the second draws the window above all other windows
+                response = ctypes.windll.user32.MessageBoxW(0, msg, 'Conflicting entry!', 0x00000001 | 0x0004)
+                if response == 1:
+                    self.update1(key)
+                    # print('Would have updated first match:', key)
+                    overwriting = True
+                else:
+                    return False
+            # If the same entry already exists, we dont have to check the reverse entry as well.
+            else:
+                return False
+        else:
+            # Insert main entry
+            self.insert1(key)
+            # print('Would have inserted first match:', key)
+
+        # Insert reverse entry (if cell X in session A is the same as cell Y in session B, then Y(B) should also be
+        # the same cell as X(A))
+        reverse_key = dict(username=key['username'],
+                           mouse_id=key['mouse_id'],
+                           day=key['matched_session'].split('_')[0],
+                           session_num=key['matched_session'].split('_')[1],
+                           motion_id=key['matched_session'].split('_')[2],
+                           caiman_id=key['matched_session'].split('_')[3],
+                           match_param_id=key['match_param_id'],
+                           mask_id=key['matched_id'],
+                           matched_session=f"{key['day']}_{key['session_num']}_{key['motion_id']}_{key['caiman_id']}",
+                           matched_id=key['mask_id'])
+
+        # To check for possible duplicates, we have to find entries with the same matched ID, but different mask ID
+        dup_key = reverse_key.copy()
+        del dup_key['mask_id']
+
+        # Filter out no-match sessions
+        if reverse_key['mask_id'] != -1:
+            if len(self & dup_key) == 1:
+                # If the entry already exists, but with another ID, ask the user if it should be overwritten
+                if (self & dup_key).fetch1('mask_id') != reverse_key['mask_id']:
+                    # If the first entry was overwritten already, we dont have to ask again and just overwrite this one as well
+                    if overwriting:
+                        self.update1(reverse_key)
+                        # print('Would have updated reverse match:', reverse_key)
+                    else:
+                        msg = f"Cell {reverse_key['mask_id']} in session {reverse_key['day']} is already matched to " \
+                              f"Cell {(self & reverse_key).fetch1('matched_id')} in session {reverse_key['matched_session']}." \
+                              f"You matched it to Cell ID {reverse_key['matched_id']} instead." + popup_msg
+                        response = ctypes.windll.user32.MessageBoxW(0, msg, 'Conflicting entry!', 0x00000001 | 0x0004)
+                        if response == 1:
+                            self.update1(reverse_key)
+                            # print('Would have updated reverse match:', reverse_key)
+                        else:
+                            return False
+                else:
+                    print('Match already in database, insert skipped.')
+                    return False
+            else:
+                self.insert1(reverse_key)
+                # print('Would have inserted reverse match:', reverse_key)
+
+    def remove_match(self, key: dict) -> None:
+        """
+        Remove matches of one cell and its reverse matches in all sessions.
+
+        Args:
+            key: Primary keys, need to identify the reference cell
+        """
+
+        day = (self & key).fetch('day')
+        mask_id = (self & key).fetch('mask_id')
+
+        if len(np.unique(day)) > 1:
+            raise KeyError('Provided key has to specify a single session.')
+        elif len(np.unique(mask_id)) > 1:
+            raise KeyError('Provided key has to specify a single ROI.')
+        else:
+            sessions = self & f'day="{day[0]}"' & f'mask_id={mask_id[0]}'
+            rev_sessions = self & f'matched_id={mask_id[0]}'
+
+            print('These matches will be deleted:\n', sessions)
+            print('These reverse matches will be deleted:\n', rev_sessions)
+            response = input('Confirm? (y/n)')
+            if response == 'y':
+                sessions.delete()
+                rev_sessions.delete()
+            else:
+                print('Aborted.')
+                return
+

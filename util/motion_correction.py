@@ -9,6 +9,8 @@ Adapted from Adrian: https://github.com/HelmchenLabSoftware/adrian_pipeline/blob
 import os
 import numpy as np
 from typing import Union, List, Optional
+from datetime import datetime
+from glob import glob
 
 import caiman as cm  # run in CaImAn environment
 import scipy.ndimage.filters as filters
@@ -357,14 +359,21 @@ def cache_files(paths: Union[List[str], str], cache_directory: str) -> List[str]
         paths = [paths]
 
     # Check if the files fit in the local cache
-    tot_size = np.sum([os.stat(x).st_size for x in paths]) * 4  # x4 as a conservative estimate because corrected and motion-corrected files have to fit as well
-    free_mem = shutil.disk_usage(cache_directory)[2]
+    tot_size = np.sum([os.stat(x).st_size / 1024 ** 3 for x in paths]) * 4  # x4 as a conservative estimate because corrected and motion-corrected files have to fit as well
+    free_mem = shutil.disk_usage(cache_directory)[2] / 1024 ** 3
 
     diff = free_mem - tot_size
 
     if diff < 0:
         raise MemoryError('Not enough disk space on local cache: "{}". {:.2f} GB more needed.'.format(cache_directory,
-                                                                                                      -diff/1024**3))
+                                                                                                      -diff))
+
+    # If the temp directory already contains TIFF files (another motion-correction is ongoing), save files into a
+    # subfolder to avoid confusion/overwriting
+    if len(glob(os.path.join(cache_directory, '*.tif'))) > 0:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        cache_directory = os.path.join(cache_directory, timestamp)
+        os.mkdir(cache_directory)
 
     # Copy files and store new file paths
     local_paths = [shutil.copy(source_path, cache_directory) for source_path in paths]

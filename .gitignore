@@ -7,3 +7,4 @@ schema/__pycache__/
 /docs/
 mpanze_scripts/widefield/__pycache__/
 /.vscode/
+/.idea/

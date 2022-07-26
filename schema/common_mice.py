@@ -345,6 +345,7 @@ class Surgery(dj.Manual):
     surgery_notes               : varchar(2048)  # Additional notes
     illumination_time=NULL      : tinyint        # Illumination time in minutes for photothrombotic strokes
     """
+
     # TODO: rename stroke_params to illumination time, turn it into an integer
     def insert(self, rows: dict, **kwargs) -> None:
         """

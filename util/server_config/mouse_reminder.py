@@ -11,7 +11,7 @@ import platform
 if platform.system() == 'Linux':
     # This is necessary for the script running properly on the Ubuntu server in the crontab
     import sys
-    sys.path.append('/home/hheise/datajoint_wahl/datajoint_wahl/')
+    sys.path.append('/home/hheise/datajoint_wahl/')
 else:
     # keyring is not installed on the server, where the password getter will be replaced with plain text
     import keyring

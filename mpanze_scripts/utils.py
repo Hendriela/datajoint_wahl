@@ -1,5 +1,8 @@
 import tifffile as tif
-import dcimg
+try:
+    import dcimg
+except ModuleNotFoundError:
+    print('Import mpanze_scripts.utils with read-only access.')
 import numpy as np
 from tqdm import tqdm, trange
 import pathlib

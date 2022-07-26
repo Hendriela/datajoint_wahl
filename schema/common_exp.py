@@ -7,7 +7,7 @@ from pathlib import Path
 import os
 from datetime import datetime
 from datetime import date as datetime_date
-from typing import Union
+from typing import Union, Optional
 
 schema = dj.schema('common_exp', locals(), create_tables=True)
 
@@ -60,6 +60,7 @@ class Task(dj.Lookup):
         ['No tone', 'hheise', 2, 'Like active, but tone cue is removed after X trials.'],
         ['No pattern', 'hheise', 2, 'Like "active", but tone cue is removed after X trials.'],
         ['No pattern and tone', 'hheise', 2, 'Like "No pattern", but tone cue is removed after Y trials.'],
+        ['No pattern, tone and shifted', 'hheise', 2, 'Like "No pattern and tone", but reward zones shifted additionally.'],
         ['No reward at RZ3', 'hheise', 2, 'Like active, but water reward is disabled at RZ3.'],
         ['Changed distances', 'hheise', 2, 'Like active, but the distances between reward zones are changed.'],
         # Todo: enter Jithins wheel tasks
@@ -140,36 +141,43 @@ class Session(dj.Manual):
             Relative path with the machine-specific Neurophysiology-DATA-Path removed
         """
 
-        cwd = Path(login.get_neurophys_data_directory())
+        # Get main data directory on the Neurophys-Server, and possible other data directories
+        cwd = [Path(login.get_neurophys_data_directory()), *[Path(x) for x in login.get_alternative_data_directories()]]
 
         # Typecast absolute path to a Path object to easily get parents
         if type(abs_path) == str:
             abs_path = Path(abs_path)
 
-        if cwd in abs_path.parents:
-            # If the session path is inside the Neurophys data directory, transform it to a relative path
-            return os.path.relpath(abs_path, cwd)
-        elif cwd == abs_path:
-            raise NameError('\nAbsolute session path {} cannot be the same as the Neurophys data directory.\n '
-                            'Create a subdfolder inside the Neurophys data directory for the session.'.format(abs_path))
-        else:
-            raise Warning('\nAbsolute session path {} \ndoes not seem to be on your Neurophys server DATA directory. '
-                          'Make sure that the session path and the \nlocal server directory in '
-                          'login.get_neurophys_data_directory() are set correctly.\n'
-                          'Absolute path used for now.'.format(abs_path))
+        # Look through possible directories for the session folder
+        for wd in cwd:
+            if wd in abs_path.parents:
+                # If the session path is inside the Neurophys data directory, transform it to a relative path
+                return os.path.relpath(abs_path, wd)
+            elif wd == abs_path:
+                raise NameError('\nAbsolute session path {} cannot be the same as the Neurophys data directory.\nCreate'
+                                ' a subfolder inside the Neurophys data directory for the session.'.format(abs_path))
 
-    def helper_insert1(self, new_entry_dict: dict) -> str:
+        raise ImportError(
+            '\nAbsolute session path {} \ndoes not seem to be in any of the possible DATA directories:\n{}. '
+            'Make sure that the session path, the \nlocal server directory in '
+            'login.get_neurophys_data_directory() and other possible locations in\n'
+            'login.get_alternative_data_directories() are set correctly.'.format(abs_path, cwd))
+
+    def helper_insert1(self, entry_dict: dict) -> str:
         """
         Simplified insert function that takes care of id and counter values.
         Adrian 2019-08-19
 
         Args:
-            new_entry_dict: Dictionary containing all key, value pairs for the session except for
+            entry_dict: Dictionary containing all key, value pairs for the session except for
                                 the id and counter
 
         Returns:
             Status update string confirming successful insertion.
         """
+
+        # Make copy so that changes do not affect original dict
+        new_entry_dict = entry_dict.copy()
 
         sess_id = self.create_id(new_entry_dict['username'], new_entry_dict['mouse_id'], new_entry_dict['day'],
                                  new_entry_dict['session_num'])
@@ -189,20 +197,33 @@ class Session(dj.Manual):
         key_dict = {your_key: entry[your_key] for your_key in ['username', 'mouse_id', 'day', 'session_num']}
         return 'Inserted new session: {}'.format(key_dict)
 
-    def get_absolute_path(self) -> str:
+    def get_absolute_path(self, filename: Optional[str] = None) -> str:
         """
-        Return the folder on the current user's Neurophys data directory for this session on the current PC
+        Return the folder on the current user's Neurophys data directory or any other possible directories for this
+        session on the current PC.
         Adrian 2020-12-07
 
         Returns:
             Absolute path on the Neurophys data directory of the current 'session_path'.
         """
 
-        # In the current version we save the relative path (excluding base directory) which the user saves in the GUI,
-        # including the leading directory separator ('\\') so the absolute path can be recovered by adding both strings
-        base_directory = login.get_working_directory()
-        path = self.fetch1('session_path')
-        return os.path.join(base_directory, path)
+        # Get all possible data directories
+        roots = [login.get_neurophys_data_directory(), *login.get_alternative_data_directories()]
+        rel_path = self.fetch1('session_path')
+
+        for root in roots:
+            path = os.path.join(root, rel_path)
+            if filename is None:
+                if os.path.isdir(path):
+                    # print(f'Found session folder {rel_path} in root {root}.')
+                    return path
+            else:
+                if os.path.isfile(os.path.join(path, filename)):
+                    # print(f'Found file {filename} in session folder {rel_path} in root {root}.')
+                    return path
+
+        # If we went through all root directories without hitting a return, the given folder cannot be found anywhere
+        raise NameError(f'Cannot find directory {rel_path} in any of the possible root directories:\n{roots}')
 
     # Commented out because we are (currently) not grouping sessions this way
     # def get_group(self, group_name='?'):
