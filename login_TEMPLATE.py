@@ -57,15 +57,15 @@ def connect() -> None:
             protocol = 'file',
             location = 'W:/Neurophysiology-Storage1/Wahl/Datajoint/datastore/')
     }
-    dj.config["cache"] = "C:/temp/djcache/"
+
+    print('Warning! Cache directory not set yet. Go to login.py and define local cache directory.')
+    # dj.config["cache"] = "C:\\YOUR\\CACHE\\DIRECTORY"
     
     dj.conn()
 
     # set working directory to neurophys by default
     global __cwd__
     __cwd__ = str(get_neurophys_data_directory())
-
-    # TODO: Define cache and external storage here as well
 
 
 def get_default_parameters() -> dict:
