@@ -15,7 +15,7 @@ from schema import common_mice, common_exp, common_img
 from hheise_scripts import data_util
 
 from datetime import datetime, timedelta
-from typing import Iterable, List, Optional, Tuple, Dict
+from typing import Iterable, List, Optional, Tuple, Dict, Union
 import os
 import ast
 from glob import glob
@@ -494,14 +494,13 @@ class VRLog(dj.Imported):
         log_events = self.get_dataframe()['log_event']
 
         # Get the rounded position of the first reward zone
-        rz_pos = int(
-            np.round(float(log_events[log_events.str.contains('VR enter Reward Zone:')].iloc[0].split(':')[1])))
+        rz_pos = int(np.round(float(log_events[log_events.str.contains('VR enter Reward Zone:')].iloc[0].split(':')[1])))
         if rz_pos == -6:
             return False
         elif rz_pos == 9:
             return True
         else:
-            print(f'Could not determine context in session {self.fetch1("KEY")}!\n')
+            raise ValueError(f'Could not determine context in session {self.fetch1("KEY")}!\n')
 
 
 @schema
@@ -657,7 +656,7 @@ class VRSession(dj.Computed):
                                        bins=np.arange(start=1, stop=int(120 / bin_size + 2)), density=False)
             return hist
 
-        def compute_performances(self, params: dict) -> Tuple[float, float, float]:
+        def compute_performances(self, params: dict) -> Tuple[float, float, float, float]:
             """
             Computes lick, binned lick and stop performance of a single trial. Called by VRPerformance.make().
 
@@ -665,26 +664,175 @@ class VRSession(dj.Computed):
                 params: Current entry of PerformanceParameters()
 
             Returns:
-                Three 1D arrays with different performance metrics: Binned lick ratio, lick count ratio, stop ratio
+                Four different performance metrics: Distance to next RZ, Binned lick ratio, lick count ratio, stop ratio
             """
             # TODO: Alternative approaches to calculate performances
-            #  - only count the ONSET of licks per bin, not if a lick went over a bin border (especially impactful if a mouse is running fast while licking)
             #  - if one bin of a RZ is licked, count it for all bins of that RZ
-            #  - check for mean distance of licked bins to the next RZ
+
+            def get_lick_count_ratio(lick_data: np.ndarray, borders: np.ndarray, passed_zones: Optional[float] = None) \
+                    -> Union[float, Tuple[float, float]]:
+                """
+                Compute performance value of one trial based on ratio of individual licks.
+
+                Args:
+                    lick_data: 2D Numpy array with shape (n_samples, n_metrics) of behavioral data. From get_array().
+                        Columns have to be time - lick - pos - enc.
+                    borders: 2D Numpy array with shape (n_zones, 2), containing buffed RZ borders in VR coordinates.
+                        From get_zone_borders()
+                    passed_zones: Fraction of reward zones successfully passed in this trial. If given, use that value
+                        (computed from valve openings). If not given, compute here based on licks.
+
+                Returns:
+                    lick_count_ratio: float, ratio of in-RZ-licks vs total licks, corrected by passed reward zones
+                    If passed_zones was not provided, also return lick-based passed_rzs
+                """
+                # select only time point where the mouse licked
+                lick_only = lick_data[np.where(lick_data[:, 1] == 1)]
+
+                if lick_only.shape[0] == 0:
+                    lick_count_ratio = np.nan  # set nan, if there was no licking during the trial
+                    passed_rzs = 0
+                else:
+                    # remove continuous licks that were longer than 5 seconds
+                    lick_diff = np.round(np.diff(lick_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
+                    licks = np.split(lick_only, np.where(lick_diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample rate
+                    licks = [i[0] for i in licks if i.shape[0] <= int(5 / SAMPLE)]  # only keep licks shorter than 5 seconds, and only take lick onset (to get one row per lick)
+                    if len(licks) > 0:
+                        licks = np.vstack(licks)  # put list of arrays together to one array
+                        # out of these, select only time points where the mouse was in a reward zone
+                        lick_zone_only = []
+                        for z in borders:
+                            lick_zone_only.append(licks[(z[0] <= licks[:, 2]) & (licks[:, 2] <= z[1])])
+                        zone_licks = np.vstack(lick_zone_only)
+                        # the length of the zone-only licks divided by the all-licks is the zone-lick ratio
+                        lick_count_ratio = zone_licks.shape[0] / licks.shape[0]
+
+                        # correct by fraction of reward zones where the mouse actually licked
+                        passed_rzs = len([x for x in lick_zone_only if len(x) > 0]) / len(borders)
+
+                        # If passed_zones was not provided, use lick-based correction
+                        if passed_zones is None:
+                            lick_count_ratio = lick_count_ratio * passed_rzs
+                        # Otherwise, use the valve-based correction
+                        else:
+                            lick_count_ratio = lick_count_ratio * passed_zones
+
+                    else:
+                        lick_count_ratio = np.nan
+                        passed_rzs = 0
+
+                # If passed zones was not provided, return the lick-based correction
+                if passed_zones is None:
+                    return lick_count_ratio, passed_rzs
+                else:
+                    return lick_count_ratio
+
+            def get_binned_ratio(lick_data: np.ndarray, orig_borders: np.ndarray, borders: np.ndarray,
+                                 passed_zones: float, bin_size: float) -> Tuple[float, float]:
+                """
+                Compute performance value of one trial based on ratio of binned licks, and get mean distance of licking
+                bins to the next reward zone.
+
+                Args:
+                    lick_data: 2D Numpy array with shape (n_samples, n_metrics) of behavioral data. From get_array().
+                        Columns have to be time - lick - pos - enc.
+                    orig_borders: 2D Numpy array with shape (n_zones, 2), containing RZ borders in VR coordinates.
+                        From get_zone_borders().
+                    borders: Same as orig_borders, but zones are extended by the buffer set in PerformanceParameter().
+                    passed_zones: Fraction of reward zones successfully passed in this trial.
+                    bin_size: Size of position bins in VR coordinates. From PerformanceParameter().
+
+                Returns:
+                    Ratio of licked bins inside RZs vs total licked bins, corrected by passed reward zones
+                    Mean distance of licking bins to next RZ (in VR units), corrected by passed reward zones
+                """
+                licked_rz_bins = 0
+                licked_nonrz_bins = 0
+
+                bins = np.arange(start=-10, stop=110, step=bin_size)  # create bin borders for position bins
+
+                # Get first bins of each reward zone
+                start_bins = np.array([x[0]+11 for x in orig_borders])  # +10 to offset -10 start, +1 because bins start counting at 1
+                # Extrapolate next RZ after last one (1st in next trial) for licks that are after the last RZ
+                start_bins = np.array((*start_bins, start_bins[-1]+(120-start_bins[-1]+start_bins[0])))
+
+                zone_bins = []
+                for z in borders:
+                    zone_bins.extend(np.arange(start=z[0], stop=z[1], step=bin_size))
+                bin_idx = np.digitize(lick_data[:, 2], bins)
+
+                # Go through all position bins
+                min_dist = []
+                for curr_bin in np.unique(bin_idx):
+                    # Check if any lick started at the current bin
+                    if np.any(np.diff(lick_data[np.where(bin_idx == curr_bin)[0], 1]) == 1):
+                        # If yes, check if the bin is part of a reward zone
+                        if bins[curr_bin - 1] in zone_bins:
+                            licked_rz_bins += 1     # if yes, the current bin was RZ and thus correctly licked in
+                            dist_to_next = 0        # the distance to the next RZ is 0
+                        else:
+                            licked_nonrz_bins += 1  # if no, the current bin was not RZ and thus incorrectly licked in
+                            dist = start_bins - curr_bin
+                            dist_to_next = np.min(dist[dist > 0])    # Get distance to next RZ (only positive distances)
+                        min_dist.append(dist_to_next)
+                try:
+                    # Ratio of RZ bins that were licked vs total number of licked bins, normalized by factor of passed RZs
+                    binned_lick_ratio = (licked_rz_bins / (licked_rz_bins + licked_nonrz_bins)) * passed_zones
+                except ZeroDivisionError:
+                    binned_lick_ratio = 0
+
+                # Calculate mean distance. Correct by number of passed reward zones
+                distance_to_next = np.mean(min_dist) / passed_zones
+
+                return binned_lick_ratio, distance_to_next
+
+            def get_stop_ratio(lick_data: np.ndarray, borders: np.ndarray, vel_thresh: int, stop_time: int) -> float:
+                """
+                Compute performance value of one trial based on ratio of stops in and outside of RZs.
+
+                Args:
+                    lick_data: 2D Numpy array with shape (n_samples, n_metrics) of behavioral data. From get_array().
+                        Columns have to be time - lick - pos - enc.
+                    borders: 2D Numpy array with shape (n_zones, 2), containing buffed RZ borders in VR coordinates.
+                        From get_zone_borders()
+                    vel_thresh: Velocity threshold under which it counts as "stop". From PerformanceParameter().
+                    stop_time: Duration threshold of low speed above which it counts as "stop".
+                        From PerformanceParameter().
+
+                Returns:
+                    float, ratio of stops inside RZs vs total stops, corrected by passed reward zones
+                """
+                # select only time points where the mouse was not running (from params (in cm/s) divided by encoder factor)
+                stop_only = lick_data[(-vel_thresh / 2.87 <= lick_data[:, 3]) & (lick_data[:, 3] <= vel_thresh / 2.87)]
+                # split into discrete stops
+                diff = np.round(np.diff(stop_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
+                stops = np.split(stop_only,np.where(diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample gap
+                # select only stops that were longer than the specified stop time
+                stops = [i for i in stops if i.shape[0] >= stop_time / (SAMPLE * 1000)]
+                # select only stops that were inside a reward zone (min or max position was inside a zone border)
+                zone_stop_only = []
+                for z in borders:
+                    zone_stop_only.append([i for i in stops if z[0] <= np.max(i[:, 1]) <= z[1] or
+                                           z[0] <= np.min(i[:, 1]) <= z[1]])
+                # the number of the zone-only stops divided by the number of the total stops is the zone-stop ratio
+                zone_stops = np.sum([len(i) for i in zone_stop_only])
+                stopping_ratio = zone_stops / len(stops)
+
+                return stopping_ratio
 
             # Fetch required behavior data as array (columns: time - lick - pos - enc)
             data = self.get_array(attr=('lick', 'pos', 'enc'))
 
             # Get reward zone borders for the current trial and add the buffer
             zone_borders = self.get_zone_borders()
-            zone_borders[:, 0] -= params['vrzone_buffer']
-            zone_borders[:, 1] += params['vrzone_buffer']
+            buf_zone_borders = zone_borders.copy()
+            buf_zone_borders[:, 0] -= params['vrzone_buffer']
+            buf_zone_borders[:, 1] += params['vrzone_buffer']
 
             # Find out which reward zones were passed (reward given) if parameter is set (default no)
-            reward_from_merged = False
             if params['valve_for_passed']:
-                rz_passed = np.zeros(len(zone_borders))
-                for idx, zone in enumerate(zone_borders):
+                rz_passed = np.zeros(len(buf_zone_borders))
+                for idx, zone in enumerate(buf_zone_borders):
                     # Get the reward entries at indices where the mouse is in the current RZ
                     valve = self.fetch1('valve')
                     rz_data = valve[np.where(np.logical_and(data[:, 2] >= zone[0], data[:, 2] <= zone[1]))]
@@ -694,92 +842,22 @@ class VRSession(dj.Computed):
                     else:
                         rz_passed[idx] = 0
 
-                passed_rz = rz_passed.sum() / len(zone_borders)
-                reward_from_merged = True
+                passed_rz = rz_passed.sum() / len(buf_zone_borders)
 
-            ### GET LICKING DATA ###
-            # select only time point where the mouse licked
-            lick_only = data[np.where(data[:, 1] == 1)]
-
-            if lick_only.shape[0] == 0:
-                lick_count_ratio = np.nan  # set nan, if there was no licking during the trial
-                if not reward_from_merged:
-                    passed_rz = 0
+                ### GET LICKING DATA ###
+                count_ratio = get_lick_count_ratio(data, buf_zone_borders, passed_rz)
             else:
-                # remove continuous licks that were longer than 5 seconds
-                diff = np.round(np.diff(lick_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
-                licks = np.split(lick_only,
-                                 np.where(diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample rate
-                licks = [i for i in licks if i.shape[0] <= int(5 / SAMPLE)]  # only keep licks shorter than 5 seconds
-                if len(licks) > 0:
-                    licks = np.vstack(licks)  # put list of arrays together to one array
-                    # out of these, select only time points where the mouse was in a reward zone
-                    lick_zone_only = []
-                    for zone in zone_borders:
-                        lick_zone_only.append(licks[(zone[0] <= licks[:, 2]) & (licks[:, 2] <= zone[1])])
-                    zone_licks = np.vstack(lick_zone_only)
-                    # the length of the zone-only licks divided by the all-licks is the zone-lick ratio
-                    lick_count_ratio = zone_licks.shape[0] / lick_only.shape[0]
-
-                    # correct by fraction of reward zones where the mouse actually licked
-                    if not reward_from_merged:
-                        passed_rz = len([x for x in lick_zone_only if len(x) > 0]) / len(zone_borders)
-                    lick_count_ratio = lick_count_ratio * passed_rz
-
-                    # # correct by the fraction of time the mouse spent in reward zones vs outside
-                    # rz_idx = 0
-                    # for zone in zone_borders:
-                    #     rz_idx += len(np.where((zone[0] <= data[:, 1]) & (data[:, 1] <= zone[1]))[0])
-                    # rz_occupancy = rz_idx/len(data)
-                    # lick_ratio = lick_ratio/rz_occupancy
-
-                else:
-                    lick_count_ratio = np.nan
-                    if not reward_from_merged:
-                        passed_rz = 0
+                count_ratio, passed_rz = get_lick_count_ratio(data, buf_zone_borders)
 
             ### GET BINNED LICKING PERFORMANCE
-            licked_rz_bins = 0
-            licked_nonrz_bins = 0
-            bins = np.arange(start=-10, stop=111, step=1)  # create bin borders for position bins (2 steps/6cm per bin)
-            zone_bins = []
-            for zone in zone_borders:
-                zone_bins.extend(np.arange(start=zone[0], stop=zone[1] + 1, step=params['bin_size']))
-            bin_idx = np.digitize(data[:, 2], bins)
-            # Go through all position bins
-            for curr_bin in np.unique(bin_idx):
-                # Check if there was any licking at the current bin
-                if sum(data[np.where(bin_idx == curr_bin)[0], 1]) >= 1:
-                    # If yes, check if the bin is part of a reward zone
-                    if bins[curr_bin - 1] in zone_bins:
-                        licked_rz_bins += 1  # if yes, the current bin was RZ and thus correctly licked in
-                    else:
-                        licked_nonrz_bins += 1  # if no, the current bin was not RZ and thus incorrectly licked in
-            try:
-                # Ratio of RZ bins that were licked vs total number of licked bins, normalized by factor of passed RZs
-                binned_lick_ratio = (licked_rz_bins / (licked_rz_bins + licked_nonrz_bins)) * passed_rz
-            except ZeroDivisionError:
-                binned_lick_ratio = 0
+            bin_ratio, distance = get_binned_ratio(lick_data=data, orig_borders=zone_borders, borders=buf_zone_borders,
+                                                   passed_zones=passed_rz, bin_size=params['bin_size'])
 
             ### GET STOPPING DATA ###
-            # select only time points where the mouse was not running (from params (in cm/s) divided by encoder factor)
-            stop_only = data[(-params['velocity_thresh'] / 2.87 <= data[:, 3]) &
-                             (data[:, 3] <= params['velocity_thresh'] / 2.87)]
-            # split into discrete stops
-            diff = np.round(np.diff(stop_only[:, 0]) * 1000).astype(int)  # get an array of time differences in ms
-            stops = np.split(stop_only, np.where(diff > SAMPLE * 1000)[0] + 1)  # split where difference > sample gap
-            # select only stops that were longer than the specified stop time
-            stops = [i for i in stops if i.shape[0] >= params['stop_time'] / (SAMPLE * 1000)]
-            # select only stops that were inside a reward zone (min or max position was inside a zone border)
-            zone_stop_only = []
-            for zone in zone_borders:
-                zone_stop_only.append([i for i in stops if zone[0] <= np.max(i[:, 1]) <= zone[1] or
-                                       zone[0] <= np.min(i[:, 1]) <= zone[1]])
-            # the number of the zone-only stops divided by the number of the total stops is the zone-stop ratio
-            zone_stops = np.sum([len(i) for i in zone_stop_only])
-            stop_ratio = zone_stops / len(stops)
+            stop_ratio = get_stop_ratio(lick_data=data, borders=zone_borders, vel_thresh=params['velocity_thresh'],
+                                        stop_time=params['stop_time'])
 
-            return binned_lick_ratio, lick_count_ratio, stop_ratio
+            return distance, bin_ratio, count_ratio, stop_ratio
 
         def compute_time_metrics(self, params: dict) -> Tuple[float, float, float]:
             """
@@ -1281,8 +1359,7 @@ class VRSession(dj.Computed):
                 trials = (VRSession.VRTrial & sess_key).fetch('trial_id')
 
             # Bin licking data from these trials into one array and binarize per-trial
-            data = [(VRSession.VRTrial & sess_key & f'trial_id={idx}').get_binned_licking(bin_size=bin_s)
-                    for idx in trials]
+            data = [(VRSession.VRTrial & sess_key & f'trial_id={idx}').get_binned_licking(bin_size=bin_s) for idx in trials]
             data = np.vstack(data)
             data[data > 0] = 1  # we only care about that a bin had a lick, not how many
 
@@ -1290,8 +1367,7 @@ class VRSession(dj.Computed):
 
             # Draw the histogram, with the weights being
             curr_ax.hist(np.linspace(0, track_len, data.shape[1]), bins=data.shape[1],
-                    weights=(np.sum(data, axis=0) / len(data)) * 100,
-                    facecolor='black', edgecolor='black')
+                         weights=(np.sum(data, axis=0) / len(data)) * 100, facecolor='black', edgecolor='black')
 
             # Zone borders have to be adjusted for the unbinned x axis
             zone_borders = (VRSession.VRTrial & f'trial_id={trials[0]}' & sess_key).get_zone_borders()
@@ -1312,26 +1388,29 @@ class VRSession(dj.Computed):
 
         # Get primary keys of queried sessions
         keys = self.fetch('KEY')
-        if len(np.unique(self.fetch('mouse_id'))) > 1:
-            raise IndexError('Cannot draw lick histograms of more than 1 mouse at once.')
+        mouse_ids = np.unique([x['mouse_id'] for x in keys])
 
-        # Go through queried sessions
-        ncols = 3
-        nrows = int(np.ceil(len(keys) / ncols))
-        count = 0
+        # Make a separate figure for each mouse
+        for mouse in mouse_ids:
+            curr_keys = [x for x in keys if x['mouse_id'] == mouse]
 
-        fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 8))
-        for row in range(nrows):
-            for col in range(ncols):
-                if count < len(keys):
-                    if row == nrows - 1:
-                        label_axes = True
-                    else:
-                        label_axes = False
-                    draw_single_histogram(keys[count], curr_ax=axes[row, col], bin_s=bin_size, label_ax=label_axes)
-                    count += 1
-        fig.canvas.set_window_title(f"M{keys[0]['mouse_id']} - Binned licking per session")
-        fig.tight_layout()
+            # Go through queried sessions
+            ncols = 3
+            nrows = int(np.ceil(len(curr_keys) / ncols))
+            count = 0
+
+            fig, axes = plt.subplots(nrows=nrows, ncols=ncols, figsize=(15, 8))
+            for row in range(nrows):
+                for col in range(ncols):
+                    if count < len(curr_keys):
+                        if row == nrows - 1:
+                            label_axes = True
+                        else:
+                            label_axes = False
+                        draw_single_histogram(curr_keys[count], curr_ax=axes[row, col], bin_s=bin_size, label_ax=label_axes)
+                        count += 1
+            fig.canvas.set_window_title(f"M{mouse} - Binned licking per session")
+            fig.tight_layout()
 
 
 @schema
@@ -1359,6 +1438,7 @@ class VRPerformance(dj.Computed):
     -> VRSession
     -> PerformanceParameters
     ---
+    distance                    : longblob          # np.array of avg distance of licked bins to next reward zone 
     binned_lick_ratio           : longblob          # np.array of binned lick performance (how many positions bins, 
                                                     # where the mouse licked, were in a RZ, preferred metric)
     lick_count_ratio            : longblob          # np.array of lick count performance (how many individual licks were
@@ -1390,12 +1470,13 @@ class VRPerformance(dj.Computed):
             trial = (VRSession.VRTrial & key & 'trial_id={}'.format(trial_id))
 
             # Compute lick and stop performances
-            binned_lick_ratio, lick_count_ratio, stop_ratio = trial.compute_performances(params)
+            distance, binned_lick_ratio, lick_count_ratio, stop_ratio = trial.compute_performances(params)
 
             # Compute time metrics
             mean_speed, mean_running_speed, trial_duration = trial.compute_time_metrics(params)
 
             # Add trial metrics to data dict, convert to float32 before to save disk space
+            trial_data['distance'].append(np.float32(distance))
             trial_data['binned_lick_ratio'].append(np.float32(binned_lick_ratio))
             trial_data['lick_count_ratio'].append(np.float32(lick_count_ratio))
             trial_data['stop_ratio'].append(np.float32(stop_ratio))
