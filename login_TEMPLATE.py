@@ -50,6 +50,15 @@ def connect() -> None:
     dj.config['database.host'] = get_ip()
     dj.config['database.user'] = get_user()
     dj.config['database.password'] = get_password()
+    
+    # set up connection to localstore and create local cache
+    dj.config['stores'] = {
+        'datastore': dict(
+            protocol = 'file',
+            location = 'W:/Neurophysiology-Storage1/Wahl/Datajoint/datastore/')
+    }
+    dj.config["cache"] = "C:/temp/djcache/"
+    
     dj.conn()
 
     # set working directory to neurophys by default

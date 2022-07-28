@@ -188,18 +188,6 @@ class JoystickSession(dj.Computed):
         touch_resample = touch_resample[1:-1]
         t_resample = t_resample[1:-1].astype(np.float32)
 
-        # import matplotlib.pyplot as plt
-        # plt.figure()
-        # plt.plot(t, touch)
-        # plt.plot(t_resample, touch_resample)
-        # plt.figure()
-        # plt.plot(t, x)
-        # plt.plot(t_resample, x_resample)
-        # plt.figure()
-        # plt.plot(t, y)
-        # plt.plot(t_resample, y_resample)
-        # print(x_resample.dtype, y_resample.dtype, t_resample.dtype, touch_resample.dtype)
-
         trial_keys = []
         # load trials
         for i in range(n_trials):
