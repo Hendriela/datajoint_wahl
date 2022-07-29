@@ -1090,14 +1090,15 @@ class Segmentation(dj.Computed):
         -> Segmentation
         mask_id  : smallint     #  Mask index (base 0)
         -----
-        pixels   : longblob     # Linearized indices of non-zero values
-        weights  : longblob     # Corresponding values at the index position
-        com      : longblob     # Center of Mass (x/row, y/column)
-        dff      : longblob     # Normalized deltaF/F fluorescence change
-        perc     : float        # Percentile used for deltaF/F computation 
-        snr      : float        # Signal-to-noise ratio of this ROI (evaluation criterion)
-        r        : float        # Spatial correlation of fluorescence and mask (evaluation criterion)
-        cnn      : float        # CNN estimation of neuron-like shape (evaluation criterion)
+        pixels      : longblob     # Linearized indices of non-zero values
+        weights     : longblob     # Corresponding values at the index position
+        com         : longblob     # Center of Mass (x/row, y/column)
+        dff         : longblob     # Normalized deltaF/F fluorescence change
+        perc        : float        # Percentile used for deltaF/F computation 
+        snr         : float        # Signal-to-noise ratio of this ROI (evaluation criterion)
+        r           : float        # Spatial correlation of fluorescence and mask (evaluation criterion)
+        cnn         : float        # CNN estimation of neuron-like shape (evaluation criterion)
+        accepted='1': tinyint      # Bool flag whether the ROI is accepted as a neuron.
         """
 
         def get_rois(self) -> np.ndarray:
@@ -1258,16 +1259,17 @@ class Segmentation(dj.Computed):
             plt.savefig(os.path.join(folder, 'eval_components.png'))
             plt.close()
 
-        # discard rejected components
-        cnm2.estimates.select_components(use_object=True)
-
-        if save_overviews:
-            cnm2.estimates.plot_contours(img=cn, display_numbers=False)
-            plt.tight_layout()
-            fig = plt.gcf()
-            fig.set_size_inches((10, 10))
-            plt.savefig(os.path.join(folder, 'components.png'))
-            plt.close()
+        # DONT DISCARD REJECTED COMPONENTS TO ALLOW FOR MANUAL CURATION
+        # # discard rejected components
+        # cnm2.estimates.select_components(use_object=True)
+        #
+        # if save_overviews:
+        #     cnm2.estimates.plot_contours(img=cn, display_numbers=False)
+        #     plt.tight_layout()
+        #     fig = plt.gcf()
+        #     fig.set_size_inches((10, 10))
+        #     plt.savefig(os.path.join(folder, 'components.png'))
+        #     plt.close()
 
         # Extract DF/F values
         # Caiman's source code has to be edited to return the computed percentiles (which are always used instead of
@@ -1312,9 +1314,13 @@ class Segmentation(dj.Computed):
         masks = cnm2.estimates.A  # (flattened_index, nr_masks)
         nr_masks = masks.shape[1]
 
+        # Create boolean mask for accepted components
+        accepted = np.zeros(nr_masks)
+        accepted[cnm2.estimates.idx_components] = 1
+
         from scipy.ndimage.measurements import center_of_mass
         # Transform sparse mask into a dense array for CoM and neuron_map calculation
-        dense_masks = np.reshape(masks.toarray(), (cnm2.dims[0], cnm2.dims[1], len(cnm2.estimates.C)), order='F')
+        dense_masks = np.reshape(masks.toarray(), (cnm2.dims[0], cnm2.dims[1], nr_masks), order='F')
         # Move axis of ROIs to position 0
         dense_masks = np.moveaxis(dense_masks, 2, 0)
 
@@ -1386,7 +1392,8 @@ class Segmentation(dj.Computed):
                             perc=perc[i],
                             snr=snr[i],
                             r=r[i],
-                            cnn=cnn[i])
+                            cnn=cnn[i],
+                            accepted=accepted[i])
             self.ROI().insert1(new_part, allow_direct_insert=True)
 
         # delete MemoryMappedFile to save storage
