@@ -1511,7 +1511,8 @@ class Segmentation(dj.Computed):
         F_c = self.get_traces(trace_type='traces')
         Fneu_c = self.get_traces(trace_type='residual')
         spks_c = F_c - Fneu_c
-        iscell_c = np.vstack((np.ones((len(F_c))), np.ones((len(F_c))))).T  # Todo: incorporate eval results into classifier confidence
+        # Todo: incorporate eval results into classifier confidence
+        iscell_c = np.vstack(((self.ROI & self.restriction).fetch('accepted'), np.ones((len(F_c))))).T
 
         # Options dict (some parameters fetched from own analysis, others can be hard-coded
         ops_c = dict()
@@ -1587,6 +1588,23 @@ class Segmentation(dj.Computed):
         np.save(os.path.join(ops_c['save_path'], 'spks.npy'), spks_c)
         np.save(ops_c['ops_path'], ops_c)
 
+    def import_from_suite2p(self) -> None:
+        """ Import cell classification from Suite2p back into Datajoint and update changes in accepted ROIs. """
+        # Fetch data
+        path = os.path.join((common_exp.Session & self).get_absolute_path(), 'suite2p_c')
+        is_cell = np.load(os.path.join(path, 'iscell.npy'))
+        roi_keys, accepted = (self.ROI & self).fetch('KEY', 'accepted')
+
+        diff = np.where(accepted != is_cell[:, 0])[0]
+
+        if len(diff) > 0:
+            # Perform updates in one transaction to avoid incomplete updates
+            with self.ROI.connection.transaction:
+                for idx in diff:
+                    self.ROI().update1(dict(**roi_keys[idx], accepted=is_cell[idx, 0]))
+            print(f'Updated ROIs {diff} in session:\n{self.fetch1("KEY")}')
+        else:
+            print(f'No difference between database and iscell.npy found for session\n{self.fetch1("KEY")}')
 
 @schema
 class DeconvolutionModel(dj.Lookup):
