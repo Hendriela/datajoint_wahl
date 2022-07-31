@@ -33,8 +33,8 @@ class PlaceCellParameter(dj.Manual):
     ----
     description             : varchar(1024)         # Short description of the effect of this parameter set
     exclude_rest = 1        : tinyint   # bool flag whether immobile periods of the mouse should be excluded from analysis
-    encoder_unit = 'raw'    : enum('raw', 'speed')  # Which value to use to determine resting frames (encoder data or cm/s)
-    running_thresh = 3.0    : float     # Running speed threshold under which a frame counts as "resting", calculated from time points between the previous to the current frame. If encoder_unit = 'raw', value is summed encoder data. If encoder_unit = 'speed', value is average speed [cm/s].
+    encoder_unit = 'speed'    : enum('raw', 'speed')  # Which value to use to determine resting frames (encoder data or cm/s)
+    running_thresh = 5.0    : float     # Running speed threshold under which a frame counts as "resting", calculated from time points between the previous to the current frame. If encoder_unit = 'raw', value is summed encoder data. If encoder_unit = 'speed', value is average speed [cm/s].
     trans_length = 0.5      : float     # minimum length in seconds of a significant transient
     trans_thresh = 4        : tinyint   # factor of sigma above which a dF/F transient is considered significant
     bin_length = 5          : tinyint   # Spatial bin length for dF/F traces [cm]. Has to be divisor of track length. 
