@@ -20,6 +20,7 @@ from typing import List
 import keyring
 import datajoint as dj
 import yaml
+from pathlib import Path
 
 # define variable to keep track of working directory
 __cwd__ = ""
@@ -51,15 +52,7 @@ def connect() -> None:
     dj.config['database.user'] = get_user()
     dj.config['database.password'] = get_password()
     
-    # set up connection to localstore and create local cache
-    dj.config['stores'] = {
-        'datastore': dict(
-            protocol = 'file',
-            location = 'W:/Neurophysiology-Storage1/Wahl/Datajoint/datastore/')
-    }
-
-    print('Warning! Cache directory not set yet. Go to login.py and define local cache directory.')
-    # dj.config["cache"] = "C:\\YOUR\\CACHE\\DIRECTORY"
+    set_store()
     
     dj.conn()
 
@@ -67,6 +60,21 @@ def connect() -> None:
     global __cwd__
     __cwd__ = str(get_neurophys_data_directory())
 
+def set_store() -> None:
+    """ 
+    Configures location of external storage, for schemas that make use of it.
+    One can also set up a local cache directory. This is recommended if frequent fetch() calls are made
+    """
+    datastore_path = Path(get_neurophys_wahl_directory(), "Datajoint/datastore/").as_posix()
+    # set up connection to localstore and create local cache
+    dj.config['stores'] = {
+        'datastore': dict(
+            protocol = 'file',
+            location = datastore_path)
+    }
+    
+    print('Warning! Cache directory not set yet. Go to login.py and define local cache directory.')
+    # dj.config["cache"] = "C:\\YOUR\\CACHE\\DIRECTORY"
 
 def get_default_parameters() -> dict:
     """
