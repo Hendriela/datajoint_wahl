@@ -1,0 +1,16 @@
+name: datajoint_wahl
+channels:
+ - conda-forge
+dependencies:
+ - python=3.9
+ - numpy
+ - scipy
+ - pandas
+ - matplotlib
+ - sympy
+ - cython
+ - tifffile
+ - notebook
+ - pip
+ - pip:
+   - datajoint
