@@ -9,31 +9,19 @@ import datajoint as dj
 import login
 login.connect()
 
-import numpy as np
-
 schema = dj.schema('mpanze_localstore', locals(), create_tables=True)
+
 
 @schema
 class TestTable(dj.Manual):
-    definition = """ # Testing local store
+    definition = """ # Example table for storing data in 'datastore' external storage
     row_id              : int  # primary_key
     ---
-    data                : blob@external         # save data in test storage
+    data                : blob@datastore         # blobs and longblobs inserted here will be stored externally
     """
 
-@schema
-class TestTableExt(dj.Manual):
-    definition = """ # Testing local store
-    row_id              : int  # primary_key
-    ---
-    data                : blob@data         # save data in test storage
-    """
-
-
-@schema
-class TestTableRaw(dj.Manual):
-    definition = """ # Testing local store
-    row_id              : int  # primary_key
-    ---
-    data                : blob@teststore         # save data in test storage
-    """
+# # example code
+# import numpy as np
+# data = np.random.randint(42, size=(4,3,100))
+# TestTable().insert1([0, data])
+# print((TestTable()&"row_id=0").fetch1())
